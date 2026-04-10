@@ -214,15 +214,19 @@ func (a *App) processRecords(
 }
 
 func (a *App) generateWithRetry(ctx context.Context, gen Generator, systemPrompt, userPrompt string) (string, error) {
+	maxRetries := a.cfg.Processing.MaxRetries
+	if maxRetries <= 0 {
+		maxRetries = 3
+	}
 	var lastErr error
-	for attempt := 1; attempt <= 3; attempt++ {
+	for attempt := 1; attempt <= maxRetries; attempt++ {
 		text, err := gen.Generate(ctx, systemPrompt, userPrompt)
 		if err == nil {
 			return text, nil
 		}
 		lastErr = err
 		a.logger.Warn("llm request failed", "attempt", attempt, "error", err)
-		if attempt == 3 {
+		if attempt == maxRetries {
 			break
 		}
 		select {

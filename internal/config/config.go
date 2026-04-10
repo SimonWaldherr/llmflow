@@ -78,6 +78,7 @@ type ProcessingConfig struct {
 	ResponseField        string `json:"response_field" yaml:"response_field"`
 	ContinueOnError      bool   `json:"continue_on_error" yaml:"continue_on_error"`
 	Workers              int    `json:"workers" yaml:"workers"`
+	MaxRetries           int    `json:"max_retries" yaml:"max_retries"`
 	DryRun               bool   `json:"dry_run" yaml:"dry_run"`
 }
 
@@ -173,6 +174,9 @@ func (c *Config) ApplyDefaults() {
 	}
 	if c.Processing.ResponseField == "" {
 		c.Processing.ResponseField = "response"
+	}
+	if c.Processing.MaxRetries <= 0 {
+		c.Processing.MaxRetries = 3
 	}
 	if c.Input.CSV.Delimiter == "" {
 		c.Input.CSV.Delimiter = ","
