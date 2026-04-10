@@ -1,28 +1,51 @@
 # llmflow
 
-`llmflow` ist ein konfigurierbares CLI-Tool in Go, um strukturierte Inputs einzulesen,
-Prompts deterministisch zusammenzubauen, Requests gegen mehrere AI-APIs zu senden
-und Ergebnisse in verschiedene Ziele zu schreiben.
+`llmflow` is a configurable CLI tool written in Go for reading structured input data,
+assembling prompts deterministically, sending requests to multiple AI APIs, and writing
+results to various output destinations.
 
 ## Features
 
-- Konfiguration per YAML oder JSON
-- Multi-Provider-Support: `openai`, `gemini`, `ollama`, `lmstudio`, `anthropic`, `generic`
-- Prompt-Bausteine: `system`, `pre_prompt`, `post_prompt`, optional Templates
-- Inputs: `csv`, `json`, `jsonl`, `xml`, `sqlite`, `mssql`
-- Outputs: `csv`, `jsonl`, `sqlite`, `mssql`
-- Secrets per Environment-Variablen-Referenz
-- Strukturierte Logs via `log/slog`
-- Saubere Interfaces für Reader/Writer und Erweiterbarkeit
+- Configuration via YAML or JSON
+- Multi-provider support: `openai`, `gemini`, `ollama`, `lmstudio`, `anthropic`, `generic`
+- Prompt building blocks: `system`, `pre_prompt`, `post_prompt`, optional Go templates
+- Input formats: `csv`, `json`, `jsonl`, `xml`, `sqlite`, `mssql`
+- Output formats: `csv`, `jsonl`, `sqlite`, `mssql`
+- Secrets resolved from environment variables
+- Structured JSON logs via `log/slog`
+- Configurable concurrency, rate limiting, and retry count
+- Web UI with optional Bearer-token authentication and graceful shutdown
+- Health endpoint (`GET /health`) for container orchestrators
 
-## Beispiel
+## Quick start
 
 ```bash
 llmflow validate --config examples/config.yaml
-llmflow run --config examples/config.yaml
+llmflow run     --config examples/config.yaml
 ```
 
-Weitere Beispiele:
+### Web UI
+
+```bash
+# Optional: protect the API with a Bearer token
+export LLMFLOW_WEB_TOKEN=mysecret
+
+llmflow web --addr :8080
+```
+
+The web UI exposes:
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET`  | `/health` | Liveness / readiness probe |
+| `POST` | `/api/validate` | Validate a YAML config |
+| `POST` | `/api/run` | Submit a job |
+| `GET`  | `/api/jobs` | List recent jobs |
+| `GET`  | `/api/jobs/{id}` | Get job status and logs |
+| `POST` | `/api/upload` | Upload an input file |
+| `GET`  | `/api/detect` | Detect local Ollama / LM Studio |
+
+## Provider examples
 
 ```bash
 llmflow run --config examples/config-openai.yaml
@@ -35,25 +58,80 @@ llmflow run --config examples/config-json-input.yaml
 llmflow run --config examples/config-xml-input.yaml
 ```
 
-Beispieldateien im Ordner `examples/`:
+## Configuration reference
 
-- `config.yaml`: allgemeines Standardbeispiel fuer OpenAI
-- `config-openai.yaml`: OpenAI Responses ueber Chat-Completions-kompatibles Interface
-- `config-gemini.yaml`: Google Gemini REST API
-- `config-ollama.yaml`: lokales Ollama ueber `/api/generate`
-- `config-lmstudio.yaml`: lokales LM Studio ueber OpenAI-kompatibles `/v1`
-- `config-anthropic.yaml`: Anthropic Messages API
-- `config-generic.yaml`: beliebiger OpenAI-kompatibler Endpoint
-- `config-json-input.yaml`: JSON-Input-Beispiel
-- `config-xml-input.yaml`: XML-Input-Beispiel
-- `input.csv`, `input.json`, `input.xml`: passende Eingabedaten fuer die Beispiele
+```yaml
+api:
+  provider: openai          # openai | gemini | ollama | lmstudio | anthropic | generic
+  base_url: https://api.openai.com/v1
+  api_key_env: OPENAI_API_KEY   # name of the env var holding the API key
+  model: gpt-4o-mini
+  timeout: 60s
+  max_output_tokens: 1000
+  rate_limit_rpm: 60        # requests per minute (0 = unlimited)
 
-## Architektur
+prompt:
+  system: "You are a precise data-transformation assistant."
+  pre_prompt: "Analyse the following record."
+  input_template: |
+    Source: {{ .source }}
+    Data: {{ toPrettyJSON .record }}
+  post_prompt: "Return only a compact JSON object."
 
-- `internal/config`: Laden und Validieren der Konfiguration
-- `internal/input`: Reader für CSV/JSON/XML/SQLite/MSSQL
-- `internal/output`: Writer für CSV/JSONL/SQLite/MSSQL
-- `internal/prompt`: Prompt-Aufbau und Templating
-- `internal/llm`: Provider-spezifische LLM-Clients und Routing
-- `internal/openai`: bestehender OpenAI-Responses-Client
-- `internal/app`: Orchestrierung
+input:
+  type: csv                 # csv | json | jsonl | xml | sqlite | mssql
+  path: ./examples/input.csv
+  csv:
+    delimiter: ","
+    has_header: true
+
+output:
+  type: jsonl               # csv | jsonl | sqlite | mssql
+  path: ./examples/output.jsonl
+
+processing:
+  mode: per_record
+  include_input_in_output: true
+  response_field: llm_response
+  continue_on_error: true
+  workers: 2                # parallel workers
+  max_retries: 3            # LLM call retries per record
+  dry_run: false
+```
+
+### Example files in `examples/`
+
+| File | Description |
+|------|-------------|
+| `config.yaml` | Default OpenAI example |
+| `config-openai.yaml` | OpenAI via Chat Completions interface |
+| `config-gemini.yaml` | Google Gemini REST API |
+| `config-ollama.yaml` | Local Ollama via `/api/generate` |
+| `config-lmstudio.yaml` | Local LM Studio via OpenAI-compatible `/v1` |
+| `config-anthropic.yaml` | Anthropic Messages API |
+| `config-generic.yaml` | Any OpenAI-compatible endpoint |
+| `config-json-input.yaml` | JSON input example |
+| `config-xml-input.yaml` | XML input example |
+| `input.csv`, `input.json`, `input.xml` | Matching sample input files |
+
+## Build
+
+```bash
+make build        # produces bin/llmflow
+make test         # run tests
+make test-cover   # run tests with coverage report
+make lint         # run golangci-lint
+```
+
+## Architecture
+
+| Package | Responsibility |
+|---------|---------------|
+| `internal/config` | Load and validate configuration |
+| `internal/input` | Readers for CSV / JSON / XML / SQLite / MSSQL |
+| `internal/output` | Writers for CSV / JSONL / SQLite / MSSQL |
+| `internal/prompt` | Prompt assembly and Go templating |
+| `internal/llm` | Provider-specific LLM clients and routing |
+| `internal/openai` | OpenAI Responses API client |
+| `internal/app` | Orchestration (workers, retries, rate limiting) |
+| `internal/web` | Embedded web UI with REST API |

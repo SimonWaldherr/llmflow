@@ -1,6 +1,6 @@
 BINARY     := llmflow
 BUILD_DIR  := bin
-MODULE     := github.com/example/llmflow
+MODULE     := github.com/SimonWaldherr/llmflow
 VERSION    := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 LDFLAGS    := -ldflags "-X main.version=$(VERSION)"
 

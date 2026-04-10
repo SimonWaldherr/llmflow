@@ -3,6 +3,7 @@ package web
 
 import (
 	"context"
+	"crypto/subtle"
 	"embed"
 	"encoding/json"
 	"fmt"
@@ -26,11 +27,13 @@ var staticFS embed.FS
 
 // Server holds the web UI HTTP server state.
 type Server struct {
-	logger   *slog.Logger
-	addr     string
-	mu       sync.Mutex
-	jobs     []*JobStatus
-	jobIDSeq int
+	logger    *slog.Logger
+	addr      string
+	mu        sync.Mutex
+	jobs      []*JobStatus
+	jobIDSeq  int
+	wg        sync.WaitGroup // tracks running job goroutines
+	serverCtx context.Context // cancelled on graceful shutdown; used for job lifecycles
 }
 
 // JobStatus tracks a running or completed job.
@@ -47,15 +50,43 @@ type JobStatus struct {
 // NewServer creates a new web UI server.
 func NewServer(addr string, logger *slog.Logger) *Server {
 	return &Server{
-		addr:   addr,
-		logger: logger,
+		addr:      addr,
+		logger:    logger,
+		serverCtx: context.Background(), // replaced by Run(); guards against nil if handleRun is called early
 	}
 }
 
-// ListenAndServe starts the HTTP server.
-func (s *Server) ListenAndServe() error {
+// authMiddleware enforces Bearer token authentication when LLMFLOW_WEB_TOKEN is set.
+// Unauthenticated requests to /api/* paths are rejected with 401.
+func (s *Server) authMiddleware(next http.Handler) http.Handler {
+	token := strings.TrimSpace(os.Getenv("LLMFLOW_WEB_TOKEN"))
+	if token == "" {
+		return next // auth disabled
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/api/") {
+			auth := r.Header.Get("Authorization")
+			bearer, found := strings.CutPrefix(auth, "Bearer ")
+			if !found || subtle.ConstantTimeCompare([]byte(bearer), []byte(token)) != 1 {
+				writeJSON(w, http.StatusUnauthorized, apiResponse{Error: "unauthorized"})
+				return
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// Run starts the HTTP server and blocks until ctx is cancelled, then shuts down
+// gracefully (waiting for in-flight jobs to finish).
+func (s *Server) Run(ctx context.Context) error {
+	// Store the server context so job goroutines can be cancelled during shutdown.
+	s.mu.Lock()
+	s.serverCtx = ctx
+	s.mu.Unlock()
+
 	mux := http.NewServeMux()
 
+	mux.HandleFunc("GET /health", s.handleHealth)
 	mux.HandleFunc("POST /api/validate", s.handleValidate)
 	mux.HandleFunc("POST /api/run", s.handleRun)
 	mux.HandleFunc("GET /api/jobs", s.handleListJobs)
@@ -69,15 +100,52 @@ func (s *Server) ListenAndServe() error {
 	}
 	mux.Handle("GET /", http.FileServer(http.FS(sub)))
 
-	s.logger.Info("web UI listening", "addr", s.addr)
 	srv := &http.Server{
-		Addr:         s.addr,
-		Handler:      mux,
-		ReadTimeout:  30 * time.Second,
-		WriteTimeout: 5 * time.Minute,
-		IdleTimeout:  2 * time.Minute,
+		Addr:           s.addr,
+		Handler:        s.authMiddleware(mux),
+		ReadTimeout:    30 * time.Second,
+		WriteTimeout:   5 * time.Minute,
+		IdleTimeout:    2 * time.Minute,
+		MaxHeaderBytes: 1 << 20, // 1 MiB
 	}
-	return srv.ListenAndServe()
+
+	errCh := make(chan error, 1)
+	go func() {
+		s.logger.Info("web UI listening", "addr", s.addr)
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			errCh <- err
+		}
+		close(errCh)
+	}()
+
+	select {
+	case err := <-errCh:
+		return err
+	case <-ctx.Done():
+	}
+
+	// Graceful shutdown: stop accepting new requests.
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		s.logger.Warn("web server shutdown error", "error", err)
+	}
+
+	// Wait for all running jobs to finish.
+	s.logger.Info("waiting for running jobs to complete")
+	s.wg.Wait()
+	return nil
+}
+
+// ListenAndServe starts the HTTP server without graceful shutdown (kept for
+// backwards compatibility; prefer Run with a context).
+func (s *Server) ListenAndServe() error {
+	return s.Run(context.Background())
+}
+
+// handleHealth returns a simple liveness response.
+func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, apiResponse{OK: true})
 }
 
 type validateRequest struct {
@@ -139,11 +207,19 @@ func (s *Server) handleRun(w http.ResponseWriter, r *http.Request) {
 	s.jobs = append(s.jobs, job)
 	s.mu.Unlock()
 
+	// Use the server context so jobs are cancelled during graceful shutdown,
+	// not when the HTTP response is sent.
+	s.mu.Lock()
+	jobCtx := s.serverCtx
+	s.mu.Unlock()
+
+	s.wg.Add(1)
 	go func() {
+		defer s.wg.Done()
 		lc := &logCollector{job: job, mu: &s.mu}
 		logger := slog.New(slog.NewJSONHandler(lc, &slog.HandlerOptions{Level: slog.LevelDebug}))
 		a := app.New(cfg, logger).WithDryRun(req.DryRun)
-		runErr := a.Run(context.Background())
+		runErr := a.Run(jobCtx)
 
 		s.mu.Lock()
 		defer s.mu.Unlock()
@@ -212,8 +288,10 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
+	// Strip any directory components from the user-supplied filename to prevent
+	// path traversal attacks (e.g. "../../etc/passwd" → "passwd").
 	name := filepath.Base(header.Filename)
-	if name == "." || name == "/" || strings.Contains(name, "..") {
+	if name == "." || name == string(filepath.Separator) {
 		writeJSON(w, http.StatusBadRequest, apiResponse{Error: "invalid filename"})
 		return
 	}
@@ -224,8 +302,10 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	dst := filepath.Join(uploadDir, name)
-	out, err := os.Create(dst)
+	// Prefix with a nanosecond timestamp so uploads never overwrite each other.
+	uniqueName := fmt.Sprintf("%d-%s", time.Now().UnixNano(), name)
+	dst := filepath.Join(uploadDir, uniqueName)
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0o640)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, apiResponse{Error: "create file"})
 		return

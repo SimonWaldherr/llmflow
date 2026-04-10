@@ -48,8 +48,10 @@ func main() {
 
 	switch cmd {
 	case "web":
+		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+		defer stop()
 		srv := web.NewServer(webAddr, logger)
-		if err := srv.ListenAndServe(); err != nil {
+		if err := srv.Run(ctx); err != nil {
 			logger.Error("web server failed", "error", err)
 			os.Exit(1)
 		}
