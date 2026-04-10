@@ -25,6 +25,7 @@ type App struct {
 }
 
 func New(cfg config.Config, logger *slog.Logger) *App {
+	cfg.ApplyDefaults()
 	return &App{cfg: cfg, logger: logger, dryRun: cfg.Processing.DryRun}
 }
 
@@ -215,9 +216,6 @@ func (a *App) processRecords(
 
 func (a *App) generateWithRetry(ctx context.Context, gen Generator, systemPrompt, userPrompt string) (string, error) {
 	maxRetries := a.cfg.Processing.MaxRetries
-	if maxRetries <= 0 {
-		maxRetries = 3
-	}
 	var lastErr error
 	for attempt := 1; attempt <= maxRetries; attempt++ {
 		text, err := gen.Generate(ctx, systemPrompt, userPrompt)

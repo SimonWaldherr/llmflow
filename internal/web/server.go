@@ -3,6 +3,7 @@ package web
 
 import (
 	"context"
+	"crypto/subtle"
 	"embed"
 	"encoding/json"
 	"fmt"
@@ -26,12 +27,13 @@ var staticFS embed.FS
 
 // Server holds the web UI HTTP server state.
 type Server struct {
-	logger   *slog.Logger
-	addr     string
-	mu       sync.Mutex
-	jobs     []*JobStatus
-	jobIDSeq int
-	wg       sync.WaitGroup // tracks running job goroutines
+	logger    *slog.Logger
+	addr      string
+	mu        sync.Mutex
+	jobs      []*JobStatus
+	jobIDSeq  int
+	wg        sync.WaitGroup // tracks running job goroutines
+	serverCtx context.Context // cancelled on graceful shutdown; used for job lifecycles
 }
 
 // JobStatus tracks a running or completed job.
@@ -48,8 +50,9 @@ type JobStatus struct {
 // NewServer creates a new web UI server.
 func NewServer(addr string, logger *slog.Logger) *Server {
 	return &Server{
-		addr:   addr,
-		logger: logger,
+		addr:      addr,
+		logger:    logger,
+		serverCtx: context.Background(), // replaced by Run(); guards against nil if handleRun is called early
 	}
 }
 
@@ -64,7 +67,7 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 		if strings.HasPrefix(r.URL.Path, "/api/") {
 			auth := r.Header.Get("Authorization")
 			bearer, found := strings.CutPrefix(auth, "Bearer ")
-			if !found || bearer != token {
+			if !found || subtle.ConstantTimeCompare([]byte(bearer), []byte(token)) != 1 {
 				writeJSON(w, http.StatusUnauthorized, apiResponse{Error: "unauthorized"})
 				return
 			}
@@ -76,6 +79,11 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 // Run starts the HTTP server and blocks until ctx is cancelled, then shuts down
 // gracefully (waiting for in-flight jobs to finish).
 func (s *Server) Run(ctx context.Context) error {
+	// Store the server context so job goroutines can be cancelled during shutdown.
+	s.mu.Lock()
+	s.serverCtx = ctx
+	s.mu.Unlock()
+
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /health", s.handleHealth)
@@ -126,7 +134,7 @@ func (s *Server) Run(ctx context.Context) error {
 	// Wait for all running jobs to finish.
 	s.logger.Info("waiting for running jobs to complete")
 	s.wg.Wait()
-	return <-errCh
+	return nil
 }
 
 // ListenAndServe starts the HTTP server without graceful shutdown (kept for
@@ -137,7 +145,7 @@ func (s *Server) ListenAndServe() error {
 
 // handleHealth returns a simple liveness response.
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, apiResponse{OK: true, Data: map[string]string{"status": "healthy"}})
+	writeJSON(w, http.StatusOK, apiResponse{OK: true})
 }
 
 type validateRequest struct {
@@ -199,8 +207,11 @@ func (s *Server) handleRun(w http.ResponseWriter, r *http.Request) {
 	s.jobs = append(s.jobs, job)
 	s.mu.Unlock()
 
-	// Use the server context so jobs are cancelled on graceful shutdown.
-	jobCtx := r.Context()
+	// Use the server context so jobs are cancelled during graceful shutdown,
+	// not when the HTTP response is sent.
+	s.mu.Lock()
+	jobCtx := s.serverCtx
+	s.mu.Unlock()
 
 	s.wg.Add(1)
 	go func() {
@@ -277,8 +288,10 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
+	// Strip any directory components from the user-supplied filename to prevent
+	// path traversal attacks (e.g. "../../etc/passwd" → "passwd").
 	name := filepath.Base(header.Filename)
-	if name == "." || name == "/" || strings.Contains(name, "..") {
+	if name == "." || name == string(filepath.Separator) {
 		writeJSON(w, http.StatusBadRequest, apiResponse{Error: "invalid filename"})
 		return
 	}
