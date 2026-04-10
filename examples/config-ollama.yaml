@@ -1,0 +1,31 @@
+api:
+  provider: ollama
+  base_url: http://localhost:11434
+  model: llama3.2
+  timeout: 120s
+  max_output_tokens: 800
+
+prompt:
+  system: |
+    Du bist ein lokaler Assistent, der Datensätze knapp zusammenfasst.
+  input_template: |
+    Fasse den folgenden Datensatz in 2-3 Sätzen zusammen:
+
+    {{ toPrettyJSON .record }}
+
+input:
+  type: csv
+  path: ./examples/input.csv
+  csv:
+    delimiter: ","
+    has_header: true
+
+output:
+  type: jsonl
+  path: ./examples/output-ollama.jsonl
+
+processing:
+  include_input_in_output: true
+  response_field: ollama_response
+  continue_on_error: true
+  workers: 1

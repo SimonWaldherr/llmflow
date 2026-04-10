@@ -1,0 +1,12 @@
+[
+  {
+    "source": "crm",
+    "name": "Alice",
+    "description": "Interessiert sich fuer Produkt A"
+  },
+  {
+    "source": "shop",
+    "name": "Bob",
+    "description": "Hat letzte Woche zweimal bestellt"
+  }
+]

@@ -1,0 +1,35 @@
+api:
+  provider: gemini
+  api_key_env: GEMINI_API_KEY
+  model: gemini-2.0-flash
+  timeout: 60s
+  max_output_tokens: 800
+  rate_limit_rpm: 60
+
+prompt:
+  system: |
+    Du strukturierst Kundendaten in präzise JSON-Antworten.
+  input_template: |
+    Bitte analysiere diesen Datensatz und normalisiere ihn.
+
+    {{ toPrettyJSON .record }}
+
+  post_prompt: |
+    Antworte nur mit JSON.
+
+input:
+  type: csv
+  path: ./examples/input.csv
+  csv:
+    delimiter: ","
+    has_header: true
+
+output:
+  type: jsonl
+  path: ./examples/output-gemini.jsonl
+
+processing:
+  include_input_in_output: true
+  response_field: gemini_response
+  continue_on_error: true
+  workers: 2

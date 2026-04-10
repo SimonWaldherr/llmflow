@@ -1,0 +1,34 @@
+api:
+  provider: lmstudio
+  base_url: http://localhost:1234/v1
+  model: local-model
+  timeout: 120s
+  max_output_tokens: 800
+
+prompt:
+  system: |
+    Du extrahierst strukturierte Informationen aus kurzen Texten.
+  input_template: |
+    Extrahiere Schlüsselattribute aus diesem Datensatz:
+
+    {{ toPrettyJSON .record }}
+
+  post_prompt: |
+    Gib ein JSON-Objekt mit den wichtigsten Feldern zurück.
+
+input:
+  type: csv
+  path: ./examples/input.csv
+  csv:
+    delimiter: ","
+    has_header: true
+
+output:
+  type: jsonl
+  path: ./examples/output-lmstudio.jsonl
+
+processing:
+  include_input_in_output: true
+  response_field: lmstudio_response
+  continue_on_error: true
+  workers: 1

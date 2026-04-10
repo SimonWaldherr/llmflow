@@ -1,0 +1,627 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>llmflow – Web UI</title>
+<style>
+:root {
+  --bg: #0d1117;
+  --surface: #161b22;
+  --border: #30363d;
+  --text: #e6edf3;
+  --text-muted: #8b949e;
+  --accent: #58a6ff;
+  --accent-hover: #79c0ff;
+  --green: #3fb950;
+  --red: #f85149;
+  --yellow: #d29922;
+  --font-mono: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+  background: var(--bg); color: var(--text);
+  line-height: 1.5;
+}
+a { color: var(--accent); text-decoration: none; }
+a:hover { color: var(--accent-hover); }
+
+header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 24px; border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+header h1 { font-size: 18px; font-weight: 600; }
+header h1 span { color: var(--accent); }
+
+.container {
+  max-width: 1200px; margin: 0 auto; padding: 24px;
+}
+
+.tabs {
+  display: flex; gap: 0; border-bottom: 1px solid var(--border); margin-bottom: 24px;
+}
+.tab {
+  padding: 8px 20px; cursor: pointer; border: none; background: none;
+  color: var(--text-muted); font-size: 14px; border-bottom: 2px solid transparent;
+  transition: color 0.15s, border-color 0.15s;
+}
+.tab:hover { color: var(--text); }
+.tab.active { color: var(--text); border-bottom-color: var(--accent); }
+
+.panel { display: none; }
+.panel.active { display: block; }
+
+/* Config Editor */
+.config-area {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 24px;
+}
+@media (max-width: 800px) { .config-area { grid-template-columns: 1fr; } }
+
+.form-group { margin-bottom: 16px; }
+.form-group label {
+  display: block; font-size: 13px; color: var(--text-muted);
+  margin-bottom: 4px; font-weight: 500;
+}
+input, select, textarea {
+  width: 100%; padding: 8px 12px; background: var(--bg); color: var(--text);
+  border: 1px solid var(--border); border-radius: 6px; font-size: 14px;
+  font-family: inherit;
+}
+input:focus, select:focus, textarea:focus {
+  outline: none; border-color: var(--accent);
+}
+textarea { font-family: var(--font-mono); resize: vertical; }
+
+.editor-full {
+  width: 100%; min-height: 400px; font-family: var(--font-mono); font-size: 13px;
+  padding: 16px; background: var(--bg); color: var(--text);
+  border: 1px solid var(--border); border-radius: 6px;
+  tab-size: 2; line-height: 1.6;
+}
+
+.btn-row { display: flex; gap: 8px; margin-top: 16px; flex-wrap: wrap; }
+
+.btn {
+  padding: 8px 20px; border-radius: 6px; border: 1px solid var(--border);
+  font-size: 14px; cursor: pointer; font-weight: 500; transition: all 0.15s;
+}
+.btn-primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+.btn-primary:hover { background: var(--accent-hover); }
+.btn-secondary { background: var(--surface); color: var(--text); }
+.btn-secondary:hover { background: var(--border); }
+.btn-danger { background: var(--red); color: #fff; border-color: var(--red); }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.status-bar {
+  margin-top: 12px; padding: 10px 14px; border-radius: 6px; font-size: 13px;
+  font-family: var(--font-mono); display: none;
+}
+.status-bar.show { display: block; }
+.status-bar.ok { background: rgba(63,185,80,0.15); border: 1px solid var(--green); color: var(--green); }
+.status-bar.error { background: rgba(248,81,73,0.15); border: 1px solid var(--red); color: var(--red); }
+.status-bar.info { background: rgba(88,166,255,0.15); border: 1px solid var(--accent); color: var(--accent); }
+
+/* Jobs list */
+.job-list { display: flex; flex-direction: column; gap: 8px; }
+.job-card {
+  padding: 14px 18px; background: var(--surface); border: 1px solid var(--border);
+  border-radius: 8px; display: flex; align-items: center; gap: 16px;
+  cursor: pointer; transition: border-color 0.15s;
+}
+.job-card:hover { border-color: var(--accent); }
+.job-badge {
+  padding: 2px 10px; border-radius: 12px; font-size: 12px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.5px;
+}
+.job-badge.running { background: rgba(210,153,34,0.2); color: var(--yellow); }
+.job-badge.completed { background: rgba(63,185,80,0.2); color: var(--green); }
+.job-badge.failed { background: rgba(248,81,73,0.2); color: var(--red); }
+.job-meta { flex: 1; font-size: 13px; color: var(--text-muted); }
+.job-id { font-weight: 600; color: var(--text); margin-right: 8px; }
+
+/* Job detail */
+.log-box {
+  background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+  padding: 16px; font-family: var(--font-mono); font-size: 12px;
+  max-height: 500px; overflow-y: auto; white-space: pre-wrap; word-break: break-all;
+  line-height: 1.7; color: var(--text-muted);
+}
+
+.section-title {
+  font-size: 15px; font-weight: 600; margin-bottom: 12px; color: var(--text);
+}
+
+.upload-zone {
+  border: 2px dashed var(--border); border-radius: 8px; padding: 32px;
+  text-align: center; color: var(--text-muted); cursor: pointer;
+  transition: border-color 0.15s;
+}
+.upload-zone:hover { border-color: var(--accent); }
+.upload-zone.dragover { border-color: var(--accent); background: rgba(88,166,255,0.05); }
+.upload-path { margin-top: 8px; font-family: var(--font-mono); font-size: 13px; color: var(--green); }
+
+/* Quick form */
+.quick-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 16px;
+}
+@media (max-width: 800px) { .quick-grid { grid-template-columns: 1fr; } }
+.quick-full { grid-column: 1 / -1; }
+
+.empty-state {
+  text-align: center; padding: 48px; color: var(--text-muted); font-size: 14px;
+}
+</style>
+</head>
+<body>
+
+<header>
+  <h1><span>llm</span>flow</h1>
+  <span style="font-size:13px;color:var(--text-muted)">Web UI</span>
+</header>
+
+<div class="container">
+
+<div class="tabs">
+  <button class="tab active" data-panel="quick">Quick Start</button>
+  <button class="tab" data-panel="editor">YAML Editor</button>
+  <button class="tab" data-panel="jobs">Jobs</button>
+</div>
+
+<!-- Detection banner (hidden by default) -->
+<div id="detect-banner" style="display:none; margin-bottom:16px; padding:12px 16px; border-radius:8px; background:rgba(63,185,80,0.1); border:1px solid var(--green); font-size:13px;">
+  <strong style="color:var(--green)">Local LLM detected</strong>
+  <span id="detect-summary" style="color:var(--text-muted)"></span>
+  <span id="detect-pills" style="margin-left:8px;"></span>
+</div>
+
+<!-- Quick Start Panel -->
+<div id="panel-quick" class="panel active">
+  <div class="quick-grid">
+    <div class="form-group">
+      <label>Provider</label>
+      <select id="q-provider">
+        <option value="openai">OpenAI</option>
+        <option value="gemini">Gemini</option>
+        <option value="anthropic">Anthropic</option>
+        <option value="ollama">Ollama</option>
+        <option value="lmstudio">LM Studio</option>
+        <option value="generic">Generic (OpenAI-compatible)</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label>Model</label>
+      <input id="q-model" type="text" placeholder="gpt-4o-mini">
+    </div>
+    <div class="form-group">
+      <label>API Key Env Variable</label>
+      <input id="q-apikey" type="text" placeholder="OPENAI_API_KEY">
+    </div>
+    <div class="form-group">
+      <label>Base URL (optional)</label>
+      <input id="q-baseurl" type="text" placeholder="Leave empty for default">
+    </div>
+    <div class="form-group quick-full">
+      <label>System Prompt</label>
+      <textarea id="q-system" rows="3" placeholder="You are a helpful assistant."></textarea>
+    </div>
+    <div class="form-group quick-full">
+      <label>Input Template (Go template syntax)</label>
+      <textarea id="q-template" rows="3" placeholder='{{ toPrettyJSON .record }}'></textarea>
+    </div>
+    <div class="form-group">
+      <label>Input Type</label>
+      <select id="q-input-type">
+        <option value="csv">CSV</option>
+        <option value="json">JSON</option>
+        <option value="jsonl">JSONL</option>
+        <option value="xml">XML</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label>Output Type</label>
+      <select id="q-output-type">
+        <option value="jsonl">JSONL</option>
+        <option value="csv">CSV</option>
+      </select>
+    </div>
+    <div class="form-group quick-full">
+      <label>Input File</label>
+      <div id="upload-zone" class="upload-zone">
+        Drop a file here or click to upload
+        <input type="file" id="file-input" style="display:none" accept=".csv,.json,.jsonl,.xml">
+        <div id="upload-path" class="upload-path" style="display:none"></div>
+      </div>
+    </div>
+    <div class="form-group">
+      <label>Workers</label>
+      <input id="q-workers" type="number" value="2" min="1" max="32">
+    </div>
+    <div class="form-group">
+      <label>Rate Limit (RPM)</label>
+      <input id="q-rpm" type="number" value="60" min="0">
+    </div>
+  </div>
+
+  <div class="btn-row">
+    <button class="btn btn-secondary" onclick="generateYAML()">Generate YAML</button>
+    <button class="btn btn-secondary" onclick="validateQuick()">Validate</button>
+    <button class="btn btn-primary" onclick="runQuick(false)">Run</button>
+    <button class="btn btn-secondary" onclick="runQuick(true)">Dry Run</button>
+  </div>
+  <div id="quick-status" class="status-bar"></div>
+</div>
+
+<!-- YAML Editor Panel -->
+<div id="panel-editor" class="panel">
+  <textarea id="yaml-editor" class="editor-full" spellcheck="false">api:
+  provider: openai
+  api_key_env: OPENAI_API_KEY
+  model: gpt-4o-mini
+  timeout: 60s
+  rate_limit_rpm: 60
+
+prompt:
+  system: |
+    You are a helpful assistant.
+  input_template: |
+    {{ toPrettyJSON .record }}
+
+input:
+  type: csv
+  path: ./input.csv
+  csv:
+    delimiter: ","
+    has_header: true
+
+output:
+  type: jsonl
+  path: ./output.jsonl
+
+processing:
+  mode: per_record
+  include_input_in_output: true
+  response_field: llm_response
+  continue_on_error: true
+  workers: 2
+  dry_run: false</textarea>
+
+  <div class="btn-row">
+    <button class="btn btn-secondary" onclick="validateYAML()">Validate</button>
+    <button class="btn btn-primary" onclick="runYAML(false)">Run</button>
+    <button class="btn btn-secondary" onclick="runYAML(true)">Dry Run</button>
+  </div>
+  <div id="editor-status" class="status-bar"></div>
+</div>
+
+<!-- Jobs Panel -->
+<div id="panel-jobs" class="panel">
+  <div class="btn-row" style="margin-bottom:16px;margin-top:0">
+    <button class="btn btn-secondary" onclick="refreshJobs()">Refresh</button>
+  </div>
+  <div id="job-list" class="job-list">
+    <div class="empty-state">No jobs yet. Run a job from the Quick Start or YAML Editor tab.</div>
+  </div>
+  <div id="job-detail" style="display:none; margin-top:24px;">
+    <h3 class="section-title">Job <span id="detail-id"></span> — <span id="detail-status"></span></h3>
+    <div id="detail-error" class="status-bar error" style="display:none; margin-bottom:12px;"></div>
+    <div class="log-box" id="detail-logs"></div>
+  </div>
+</div>
+
+</div>
+
+<script>
+// Tab switching
+document.querySelectorAll('.tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+    tab.classList.add('active');
+    document.getElementById('panel-' + tab.dataset.panel).classList.add('active');
+    if (tab.dataset.panel === 'jobs') refreshJobs();
+  });
+});
+
+// File upload
+const uploadZone = document.getElementById('upload-zone');
+const fileInput = document.getElementById('file-input');
+let uploadedPath = '';
+
+uploadZone.addEventListener('click', () => fileInput.click());
+uploadZone.addEventListener('dragover', e => { e.preventDefault(); uploadZone.classList.add('dragover'); });
+uploadZone.addEventListener('dragleave', () => uploadZone.classList.remove('dragover'));
+uploadZone.addEventListener('drop', e => {
+  e.preventDefault(); uploadZone.classList.remove('dragover');
+  if (e.dataTransfer.files.length) uploadFile(e.dataTransfer.files[0]);
+});
+fileInput.addEventListener('change', () => { if (fileInput.files.length) uploadFile(fileInput.files[0]); });
+
+async function uploadFile(file) {
+  const form = new FormData();
+  form.append('file', file);
+  try {
+    const r = await fetch('/api/upload', { method: 'POST', body: form });
+    const d = await r.json();
+    if (d.ok) {
+      uploadedPath = d.data.path;
+      const el = document.getElementById('upload-path');
+      el.textContent = '✓ ' + uploadedPath;
+      el.style.display = 'block';
+    } else {
+      showStatus('quick-status', 'error', 'Upload failed: ' + d.error);
+    }
+  } catch(e) {
+    showStatus('quick-status', 'error', 'Upload error: ' + e.message);
+  }
+}
+
+function showStatus(id, type, msg) {
+  const el = document.getElementById(id);
+  el.className = 'status-bar show ' + type;
+  el.textContent = msg;
+}
+
+function buildYAMLFromForm() {
+  const provider = document.getElementById('q-provider').value;
+  const model = document.getElementById('q-model').value || 'gpt-4o-mini';
+  const apikey = document.getElementById('q-apikey').value || 'OPENAI_API_KEY';
+  const baseurl = document.getElementById('q-baseurl').value;
+  const system = document.getElementById('q-system').value || 'You are a helpful assistant.';
+  const template = document.getElementById('q-template').value || '{{ toPrettyJSON .record }}';
+  const inputType = document.getElementById('q-input-type').value;
+  const outputType = document.getElementById('q-output-type').value;
+  const workers = document.getElementById('q-workers').value || '2';
+  const rpm = document.getElementById('q-rpm').value || '60';
+  const inputPath = uploadedPath || './input.' + inputType;
+  const outputPath = './output.' + (outputType === 'jsonl' ? 'jsonl' : outputType);
+
+  let yaml = `api:
+  provider: ${provider}
+  api_key_env: ${apikey}
+  model: ${model}
+  timeout: 60s
+  rate_limit_rpm: ${rpm}`;
+  if (baseurl) yaml += `\n  base_url: ${baseurl}`;
+
+  yaml += `
+
+prompt:
+  system: |
+    ${system.split('\n').join('\n    ')}
+  input_template: |
+    ${template.split('\n').join('\n    ')}
+
+input:
+  type: ${inputType}
+  path: ${inputPath}`;
+
+  if (inputType === 'csv') {
+    yaml += `
+  csv:
+    delimiter: ","
+    has_header: true`;
+  }
+
+  yaml += `
+
+output:
+  type: ${outputType}
+  path: ${outputPath}`;
+
+  if (outputType === 'csv') {
+    yaml += `
+  csv:
+    delimiter: ","
+    has_header: true`;
+  }
+
+  yaml += `
+
+processing:
+  mode: per_record
+  include_input_in_output: true
+  response_field: llm_response
+  continue_on_error: true
+  workers: ${workers}
+  dry_run: false`;
+
+  return yaml;
+}
+
+function generateYAML() {
+  const yaml = buildYAMLFromForm();
+  document.getElementById('yaml-editor').value = yaml;
+  // Switch to editor tab
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  document.querySelector('[data-panel="editor"]').classList.add('active');
+  document.getElementById('panel-editor').classList.add('active');
+  showStatus('editor-status', 'info', 'YAML generated from Quick Start form');
+}
+
+async function apiCall(endpoint, body) {
+  const r = await fetch(endpoint, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  return r.json();
+}
+
+async function validateQuick() {
+  const yaml = buildYAMLFromForm();
+  const d = await apiCall('/api/validate', { config: yaml });
+  if (d.ok) showStatus('quick-status', 'ok', 'Configuration is valid');
+  else showStatus('quick-status', 'error', 'Validation failed: ' + d.error);
+}
+
+async function validateYAML() {
+  const yaml = document.getElementById('yaml-editor').value;
+  const d = await apiCall('/api/validate', { config: yaml });
+  if (d.ok) showStatus('editor-status', 'ok', 'Configuration is valid');
+  else showStatus('editor-status', 'error', 'Validation failed: ' + d.error);
+}
+
+async function runQuick(dryRun) {
+  const yaml = buildYAMLFromForm();
+  const d = await apiCall('/api/run', { config: yaml, dry_run: dryRun });
+  if (d.ok) {
+    showStatus('quick-status', 'ok', 'Job #' + d.data.id + ' started' + (dryRun ? ' (dry run)' : ''));
+  } else {
+    showStatus('quick-status', 'error', 'Failed: ' + d.error);
+  }
+}
+
+async function runYAML(dryRun) {
+  const yaml = document.getElementById('yaml-editor').value;
+  const d = await apiCall('/api/run', { config: yaml, dry_run: dryRun });
+  if (d.ok) {
+    showStatus('editor-status', 'ok', 'Job #' + d.data.id + ' started' + (dryRun ? ' (dry run)' : ''));
+  } else {
+    showStatus('editor-status', 'error', 'Failed: ' + d.error);
+  }
+}
+
+async function refreshJobs() {
+  try {
+    const r = await fetch('/api/jobs');
+    const d = await r.json();
+    const list = document.getElementById('job-list');
+    if (!d.ok || !d.data || d.data.length === 0) {
+      list.innerHTML = '<div class="empty-state">No jobs yet.</div>';
+      return;
+    }
+    list.innerHTML = d.data.map(j => `
+      <div class="job-card" onclick="showJob(${j.id})">
+        <span class="job-badge ${j.status}">${j.status}</span>
+        <span class="job-meta">
+          <span class="job-id">#${j.id}</span>
+          Started ${new Date(j.started_at).toLocaleString()}
+          ${j.ended_at && j.ended_at !== '0001-01-01T00:00:00Z' ? ' · Ended ' + new Date(j.ended_at).toLocaleString() : ''}
+        </span>
+      </div>
+    `).join('');
+  } catch(e) {
+    console.error('refresh jobs:', e);
+  }
+}
+
+let pollInterval = null;
+
+async function showJob(id) {
+  if (pollInterval) clearInterval(pollInterval);
+
+  const detail = document.getElementById('job-detail');
+  detail.style.display = 'block';
+
+  async function load() {
+    const r = await fetch('/api/jobs/' + id);
+    const d = await r.json();
+    if (!d.ok) return;
+    const j = d.data;
+    document.getElementById('detail-id').textContent = '#' + j.id;
+    const statusEl = document.getElementById('detail-status');
+    statusEl.textContent = j.status;
+    statusEl.style.color = j.status === 'completed' ? 'var(--green)' : j.status === 'failed' ? 'var(--red)' : 'var(--yellow)';
+
+    const errEl = document.getElementById('detail-error');
+    if (j.error) { errEl.textContent = j.error; errEl.style.display = 'block'; }
+    else { errEl.style.display = 'none'; }
+
+    const logsEl = document.getElementById('detail-logs');
+    logsEl.textContent = (j.logs || []).join('\n') || '(no logs yet)';
+    logsEl.scrollTop = logsEl.scrollHeight;
+
+    if (j.status !== 'running' && pollInterval) {
+      clearInterval(pollInterval);
+      pollInterval = null;
+    }
+  }
+
+  await load();
+  pollInterval = setInterval(load, 1500);
+}
+
+// Auto-detect local providers on page load
+async function detectLocalProviders() {
+  try {
+    const r = await fetch('/api/detect');
+    const d = await r.json();
+    if (!d.ok || !d.data || d.data.length === 0) return;
+
+    const banner = document.getElementById('detect-banner');
+    const summary = document.getElementById('detect-summary');
+    const pills = document.getElementById('detect-pills');
+
+    const names = d.data.map(p => p.provider === 'ollama' ? 'Ollama' : 'LM Studio');
+    summary.textContent = ' — ' + names.join(' & ') + ' running locally';
+
+    // Render one pill/button per detected provider
+    pills.innerHTML = d.data.map(p => {
+      const label = p.provider === 'ollama' ? 'Ollama' : 'LM Studio';
+      const firstModel = p.models && p.models.length ? p.models[0] : '';
+      return `<button class="btn btn-secondary" style="padding:2px 10px;font-size:12px;" `
+        + `onclick="applyDetected('${p.provider}','${p.base_url}','${firstModel}',${JSON.stringify(p.models)})"`
+        + `>Use ${label}${firstModel ? ' · ' + firstModel : ''}</button>`;
+    }).join(' ');
+
+    banner.style.display = 'block';
+
+    // Auto-apply the first detected provider if nothing has been changed yet
+    const current = document.getElementById('q-provider').value;
+    if (current === 'openai') {
+      const first = d.data[0];
+      const firstModel = first.models && first.models.length ? first.models[0] : '';
+      applyDetected(first.provider, first.base_url, firstModel, first.models);
+    }
+  } catch(e) {
+    // Detection is best-effort; silently ignore errors.
+  }
+}
+
+function applyDetected(provider, baseURL, model, models) {
+  document.getElementById('q-provider').value = provider;
+  document.getElementById('q-baseurl').value = baseURL;
+  document.getElementById('q-apikey').value = '';
+  if (model) document.getElementById('q-model').value = model;
+
+  // Populate model picker if we have a list
+  if (models && models.length > 1) {
+    const modelInput = document.getElementById('q-model');
+    // Replace with a <select> if not already one
+    if (modelInput.tagName === 'INPUT') {
+      const sel = document.createElement('select');
+      sel.id = 'q-model';
+      models.forEach(m => {
+        const opt = document.createElement('option');
+        opt.value = m; opt.textContent = m;
+        if (m === model) opt.selected = true;
+        sel.appendChild(opt);
+      });
+      modelInput.replaceWith(sel);
+    }
+  }
+}
+
+detectLocalProviders();
+
+// Provider change updates defaults
+document.getElementById('q-provider').addEventListener('change', e => {
+  const defaults = {
+    openai:    { model: 'gpt-4o-mini', key: 'OPENAI_API_KEY', url: '' },
+    gemini:    { model: 'gemini-2.0-flash', key: 'GEMINI_API_KEY', url: '' },
+    anthropic: { model: 'claude-sonnet-4-20250514', key: 'ANTHROPIC_API_KEY', url: '' },
+    ollama:    { model: 'llama3', key: '', url: 'http://localhost:11434' },
+    lmstudio:  { model: 'local-model', key: '', url: 'http://localhost:1234/v1' },
+    generic:   { model: 'my-model', key: 'API_KEY', url: '' },
+  };
+  const d = defaults[e.target.value] || defaults.openai;
+  document.getElementById('q-model').value = d.model;
+  document.getElementById('q-apikey').value = d.key;
+  document.getElementById('q-baseurl').value = d.url;
+});
+</script>
+</body>
+</html>

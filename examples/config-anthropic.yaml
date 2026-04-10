@@ -1,0 +1,35 @@
+api:
+  provider: anthropic
+  api_key_env: ANTHROPIC_API_KEY
+  model: claude-3-7-sonnet-latest
+  timeout: 60s
+  max_output_tokens: 800
+  rate_limit_rpm: 50
+
+prompt:
+  system: |
+    Du bist ein präziser Assistent für Datenklassifikation.
+  input_template: |
+    Klassifiziere den Datensatz und erkläre die Entscheidung knapp.
+
+    {{ toPrettyJSON .record }}
+
+  post_prompt: |
+    Antworte nur mit kompaktem JSON.
+
+input:
+  type: csv
+  path: ./examples/input.csv
+  csv:
+    delimiter: ","
+    has_header: true
+
+output:
+  type: jsonl
+  path: ./examples/output-anthropic.jsonl
+
+processing:
+  include_input_in_output: true
+  response_field: anthropic_response
+  continue_on_error: true
+  workers: 2

@@ -1,0 +1,38 @@
+api:
+  provider: openai
+  base_url: https://api.openai.com/v1
+  api_key_env: OPENAI_API_KEY
+  model: gpt-5.4-mini
+  timeout: 60s
+  max_output_tokens: 800
+  rate_limit_rpm: 60
+
+prompt:
+  system: |
+    Du bist ein präziser Daten-Transformationsassistent.
+  pre_prompt: |
+    Analysiere den folgenden Datensatz.
+  input_template: |
+    Quelle: {{ .source }}
+    Datensatz:
+    {{ toPrettyJSON .record }}
+  post_prompt: |
+    Gib ausschließlich ein kompaktes JSON-Objekt zurück.
+
+input:
+  type: csv
+  path: ./examples/input.csv
+  csv:
+    delimiter: ","
+    has_header: true
+
+output:
+  type: jsonl
+  path: ./examples/output-openai.jsonl
+
+processing:
+  mode: per_record
+  include_input_in_output: true
+  response_field: llm_response
+  continue_on_error: true
+  workers: 2

@@ -1,0 +1,35 @@
+api:
+  provider: generic
+  base_url: https://your-openai-compatible-endpoint.example/v1
+  api_key_env: GENERIC_LLM_API_KEY
+  model: your-model-name
+  timeout: 60s
+  max_output_tokens: 800
+
+prompt:
+  system: |
+    Du arbeitest deterministisch und gibst nur strukturierte Ergebnisse zurück.
+  input_template: |
+    Transformiere diesen Datensatz:
+
+    {{ toPrettyJSON .record }}
+
+  post_prompt: |
+    Antworte nur mit JSON.
+
+input:
+  type: csv
+  path: ./examples/input.csv
+  csv:
+    delimiter: ","
+    has_header: true
+
+output:
+  type: jsonl
+  path: ./examples/output-generic.jsonl
+
+processing:
+  include_input_in_output: true
+  response_field: generic_response
+  continue_on_error: true
+  workers: 2

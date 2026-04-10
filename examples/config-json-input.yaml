@@ -1,0 +1,30 @@
+api:
+  provider: openai
+  api_key_env: OPENAI_API_KEY
+  model: gpt-5.4-mini
+  timeout: 60s
+  max_output_tokens: 700
+
+prompt:
+  system: |
+    Du normalisierst strukturierte Datensätze.
+  input_template: |
+    JSON-Eintrag:
+    {{ toPrettyJSON .record }}
+
+  post_prompt: |
+    Gib ein knappes JSON-Objekt zurück.
+
+input:
+  type: json
+  path: ./examples/input.json
+
+output:
+  type: jsonl
+  path: ./examples/output-json-input.jsonl
+
+processing:
+  include_input_in_output: true
+  response_field: json_input_response
+  continue_on_error: true
+  workers: 2

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<records>
+  <record source="crm">
+    <name>Alice</name>
+    <description>Interessiert sich fuer Produkt A</description>
+  </record>
+  <record source="shop">
+    <name>Bob</name>
+    <description>Hat letzte Woche zweimal bestellt</description>
+  </record>
+</records>
