@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -12,6 +13,7 @@ import (
 	"github.com/SimonWaldherr/llmflow/internal/llm"
 	"github.com/SimonWaldherr/llmflow/internal/output"
 	"github.com/SimonWaldherr/llmflow/internal/prompt"
+	"github.com/SimonWaldherr/llmflow/internal/tools"
 )
 
 // Generator is the interface used to call an LLM, allowing injection of test fakes.
@@ -68,6 +70,9 @@ func (a *App) Run(ctx context.Context) error {
 	}
 	a.logger.Info("loaded input records", "count", len(records))
 
+	// Build the list of enabled tools (only relevant when tools.enabled = true).
+	activeTools := a.buildTools()
+
 	workers := a.cfg.Processing.Workers
 	if workers <= 0 {
 		workers = 1
@@ -80,7 +85,7 @@ func (a *App) Run(ctx context.Context) error {
 		rateLimiter = ticker.C
 	}
 
-	results, err := a.processRecords(ctx, gen, pb, records, workers, rateLimiter)
+	results, err := a.processRecords(ctx, gen, pb, activeTools, records, workers, rateLimiter)
 	if err != nil {
 		return err
 	}
@@ -92,6 +97,32 @@ func (a *App) Run(ctx context.Context) error {
 	return nil
 }
 
+// buildTools constructs the slice of active Tool objects from the config.
+func (a *App) buildTools() []tools.Tool {
+	if !a.cfg.Tools.Enabled {
+		return nil
+	}
+	var ts []tools.Tool
+	if a.cfg.Tools.WebFetch {
+		ts = append(ts, tools.NewWebFetchTool())
+		a.logger.Info("tool enabled", "tool", "web_fetch")
+	}
+	if a.cfg.Tools.WebSearch {
+		ts = append(ts, tools.NewWebSearchTool())
+		a.logger.Info("tool enabled", "tool", "web_search")
+	}
+	if a.cfg.Tools.SQLQuery {
+		dsn := config.ResolveSecret(a.cfg.Tools.SQL.DSN, a.cfg.Tools.SQL.DSNEnv)
+		driver := a.cfg.Tools.SQL.Driver
+		if driver == "" {
+			driver = "sqlite"
+		}
+		ts = append(ts, tools.NewSQLQueryTool(driver, dsn))
+		a.logger.Info("tool enabled", "tool", "sql_query", "driver", driver)
+	}
+	return ts
+}
+
 type indexedResult struct {
 	idx int
 	rec map[string]any
@@ -101,6 +132,7 @@ func (a *App) processRecords(
 	ctx context.Context,
 	gen Generator,
 	pb *prompt.Builder,
+	activeTools []tools.Tool,
 	records []input.Record,
 	workers int,
 	rateLimiter <-chan time.Time,
@@ -160,7 +192,12 @@ func (a *App) processRecords(
 					continue
 				}
 
-				responseText, err := a.generateWithRetry(ctx, gen, pb.SystemPrompt(), userPrompt)
+				var responseText string
+				if len(activeTools) > 0 {
+					responseText, err = a.runAgentic(ctx, gen, pb.SystemPrompt(), userPrompt, activeTools, j.idx)
+				} else {
+					responseText, err = a.generateWithRetry(ctx, gen, pb.SystemPrompt(), userPrompt)
+				}
 				if err != nil {
 					if !a.cfg.Processing.ContinueOnError {
 						mu.Lock()
@@ -214,6 +251,134 @@ func (a *App) processRecords(
 	return results, nil
 }
 
+// runAgentic executes the agentic tool-calling loop for a single record.
+// It requires the generator to implement llm.AgentGenerator; if it does not,
+// it falls back to a plain Generate call.
+func (a *App) runAgentic(
+	ctx context.Context,
+	gen Generator,
+	systemPrompt, userPrompt string,
+	activeTools []tools.Tool,
+	recIdx int,
+) (string, error) {
+	ag, ok := gen.(llm.AgentGenerator)
+	if !ok {
+		a.logger.Warn("generator does not support tool calling, falling back to standard generate",
+			"index", recIdx)
+		return a.generateWithRetry(ctx, gen, systemPrompt, userPrompt)
+	}
+
+	// Build tool definitions for the LLM.
+	toolDefs := make([]llm.ToolDef, len(activeTools))
+	for i, t := range activeTools {
+		// Parameters is a JSON Schema — unmarshal to any so it serializes
+		// without double-encoding.
+		var params any
+		if err := jsonUnmarshalParams(t.Parameters, &params); err != nil {
+			params = string(t.Parameters)
+		}
+		toolDefs[i] = llm.ToolDef{
+			Name:        t.Name,
+			Description: t.Description,
+			Parameters:  params,
+		}
+	}
+
+	// Index tools by name for fast lookup.
+	toolMap := make(map[string]tools.Tool, len(activeTools))
+	for _, t := range activeTools {
+		toolMap[t.Name] = t
+	}
+
+	messages := []llm.Message{
+		{Role: "system", Content: systemPrompt},
+		{Role: "user", Content: userPrompt},
+	}
+
+	maxRounds := a.cfg.Tools.MaxRounds
+	if maxRounds <= 0 {
+		maxRounds = 5
+	}
+
+	for round := 0; round < maxRounds; round++ {
+		resp, err := a.agentStepWithRetry(ctx, ag, messages, toolDefs)
+		if err != nil {
+			return "", err
+		}
+
+		// No tool calls → final answer.
+		if len(resp.ToolCalls) == 0 {
+			return resp.Content, nil
+		}
+
+		a.logger.Info("tool calls requested", "index", recIdx, "round", round+1, "count", len(resp.ToolCalls))
+
+		// Append the assistant's tool-call message.
+		messages = append(messages, llm.Message{
+			Role:      "assistant",
+			Content:   resp.Content,
+			ToolCalls: resp.ToolCalls,
+		})
+
+		// Execute each tool and append results.
+		for _, tc := range resp.ToolCalls {
+			result, toolErr := a.executeTool(ctx, toolMap, tc, recIdx)
+			messages = append(messages, llm.Message{
+				Role:       "tool",
+				Content:    result,
+				ToolCallID: tc.ID,
+				ToolName:   tc.Name,
+			})
+			if toolErr != nil {
+				a.logger.Warn("tool execution error", "tool", tc.Name, "index", recIdx, "error", toolErr)
+			}
+		}
+	}
+
+	return "", fmt.Errorf("exceeded maximum tool-calling rounds (%d) for record %d", maxRounds, recIdx)
+}
+
+// executeTool runs a single tool call and returns the string result.
+// Errors are embedded in the result string so the LLM can react to them.
+func (a *App) executeTool(ctx context.Context, toolMap map[string]tools.Tool, tc llm.ToolCall, recIdx int) (string, error) {
+	t, ok := toolMap[tc.Name]
+	if !ok {
+		msg := fmt.Sprintf("unknown tool: %s", tc.Name)
+		return msg, fmt.Errorf("%s", msg)
+	}
+	a.logger.Info("executing tool", "tool", tc.Name, "index", recIdx, "args", tc.Args)
+	result, err := t.Execute(ctx, tc.Args)
+	if err != nil {
+		msg := fmt.Sprintf("tool %s error: %s", tc.Name, err.Error())
+		return msg, err
+	}
+	a.logger.Info("tool result", "tool", tc.Name, "index", recIdx, "result_len", len(result))
+	return result, nil
+}
+
+// agentStepWithRetry calls GenerateAgent with retry logic.
+func (a *App) agentStepWithRetry(ctx context.Context, ag llm.AgentGenerator, messages []llm.Message, tools []llm.ToolDef) (*llm.AgentResponse, error) {
+	maxRetries := a.cfg.Processing.MaxRetries
+	var lastErr error
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		resp, err := ag.GenerateAgent(ctx, llm.AgentRequest{Messages: messages, Tools: tools})
+		if err == nil {
+			return resp, nil
+		}
+		lastErr = err
+		a.logger.Warn("agent step failed", "attempt", attempt, "error", err)
+		if attempt == maxRetries {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(llm.Backoff(attempt)):
+		}
+	}
+	return nil, lastErr
+}
+
 func (a *App) generateWithRetry(ctx context.Context, gen Generator, systemPrompt, userPrompt string) (string, error) {
 	maxRetries := a.cfg.Processing.MaxRetries
 	var lastErr error
@@ -241,4 +406,13 @@ type dryRunGenerator struct{}
 
 func (d *dryRunGenerator) Generate(_ context.Context, _, _ string) (string, error) {
 	return "[dry-run]", nil
+}
+
+// jsonUnmarshalParams parses the raw JSON bytes of a tool's parameter schema
+// into dest (usually *any).
+func jsonUnmarshalParams(raw []byte, dest any) error {
+	if len(raw) == 0 {
+		return nil
+	}
+	return json.Unmarshal(raw, dest)
 }

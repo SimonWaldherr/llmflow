@@ -94,7 +94,7 @@ func TestProcessRecords_SingleWorker(t *testing.T) {
 	pb := newTestPromptBuilder(t)
 
 	records := []map[string]any{{"name": "Alice"}, {"name": "Bob"}}
-	results, err := a.processRecords(context.Background(), gen, pb, records, 1, nil)
+	results, err := a.processRecords(context.Background(), gen, pb, nil, records, 1, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,7 +116,7 @@ func TestProcessRecords_MultiWorker(t *testing.T) {
 	for i := range records {
 		records[i] = map[string]any{"name": "item"}
 	}
-	results, err := a.processRecords(context.Background(), gen, pb, records, 4, nil)
+	results, err := a.processRecords(context.Background(), gen, pb, nil, records, 4, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,7 +134,7 @@ func TestProcessRecords_ContinueOnError(t *testing.T) {
 	pb := newTestPromptBuilder(t)
 
 	records := []map[string]any{{"name": "A"}, {"name": "B"}}
-	results, err := a.processRecords(context.Background(), gen, pb, records, 1, nil)
+	results, err := a.processRecords(context.Background(), gen, pb, nil, records, 1, nil)
 	if err != nil {
 		t.Fatalf("unexpected error with continue_on_error: %v", err)
 	}
@@ -152,7 +152,7 @@ func TestProcessRecords_StopOnError(t *testing.T) {
 	pb := newTestPromptBuilder(t)
 
 	records := []map[string]any{{"name": "A"}}
-	_, err := a.processRecords(context.Background(), gen, pb, records, 1, nil)
+	_, err := a.processRecords(context.Background(), gen, pb, nil, records, 1, nil)
 	if err == nil {
 		t.Fatal("expected error when continue_on_error is false")
 	}
