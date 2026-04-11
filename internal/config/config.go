@@ -18,6 +18,38 @@ type Config struct {
 	Input      InputConfig      `json:"input" yaml:"input"`
 	Output     OutputConfig     `json:"output" yaml:"output"`
 	Processing ProcessingConfig `json:"processing" yaml:"processing"`
+	Tools      ToolsConfig      `json:"tools" yaml:"tools"`
+}
+
+// ToolsConfig controls optional agent tools the LLM may call during processing.
+// When Enabled is true and at least one tool is active the app uses an agentic
+// loop: the LLM may invoke tools (web fetch, web search, SQL queries) to gather
+// information before returning a final answer.
+type ToolsConfig struct {
+	// Enabled activates the agentic tool-calling loop.
+	Enabled bool `json:"enabled" yaml:"enabled"`
+	// WebFetch allows the LLM to fetch the content of arbitrary URLs.
+	WebFetch bool `json:"web_fetch" yaml:"web_fetch"`
+	// WebSearch allows the LLM to search the web via DuckDuckGo.
+	WebSearch bool `json:"web_search" yaml:"web_search"`
+	// SQLQuery allows the LLM to run read-only SQL queries against a database.
+	SQLQuery bool `json:"sql_query" yaml:"sql_query"`
+	// SQL configures the database connection for the sql_query tool.
+	SQL ToolsSQLConfig `json:"sql" yaml:"sql"`
+	// MaxRounds caps the number of tool-call / result iterations per record
+	// (default 5 when zero).
+	MaxRounds int `json:"max_rounds" yaml:"max_rounds"`
+}
+
+// ToolsSQLConfig holds the connection details for the sql_query tool.
+type ToolsSQLConfig struct {
+	// Driver selects the database driver: "sqlite" or "sqlserver".
+	Driver string `json:"driver" yaml:"driver"`
+	// DSN is the data-source name (connection string).
+	DSN string `json:"dsn" yaml:"dsn"`
+	// DSNEnv is the name of an environment variable that holds the DSN.
+	// If both DSN and DSNEnv are set, DSN takes precedence.
+	DSNEnv string `json:"dsn_env" yaml:"dsn_env"`
 }
 
 // Provider constants for well-known LLM providers.
@@ -183,6 +215,9 @@ func (c *Config) ApplyDefaults() {
 	}
 	if c.Output.CSV.Delimiter == "" {
 		c.Output.CSV.Delimiter = ","
+	}
+	if c.Tools.MaxRounds <= 0 {
+		c.Tools.MaxRounds = 5
 	}
 }
 
