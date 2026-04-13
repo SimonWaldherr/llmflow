@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/SimonWaldherr/llmflow/internal/config"
 	"github.com/SimonWaldherr/llmflow/internal/prompt"
@@ -267,5 +268,21 @@ func TestBuildTools_SQLitePrefersExplicitDSN(t *testing.T) {
 	}
 	if strings.Contains(out, "fallback") {
 		t.Fatalf("unexpected fallback record in output: %s", out)
+	}
+}
+
+func TestBuildTools_CodeExecuteEnabled(t *testing.T) {
+	cfg := baseConfig(t)
+	cfg.Tools.Enabled = true
+	cfg.Tools.CodeExecute = true
+	cfg.Tools.Code.Timeout = 2 * time.Second
+
+	a := New(cfg, newTestLogger())
+	ts := a.buildTools()
+	if len(ts) != 1 {
+		t.Fatalf("expected 1 enabled tool, got %d", len(ts))
+	}
+	if ts[0].Name != "code_execute" {
+		t.Fatalf("expected code_execute tool, got %q", ts[0].Name)
 	}
 }

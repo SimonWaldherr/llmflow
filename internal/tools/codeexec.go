@@ -51,7 +51,7 @@ func NewCodeExecTool(cfg CodeExecConfig) Tool {
 	cfg = cfg.withDefaults()
 
 	return Tool{
-		Name: "code_execute",
+		Name:        "code_execute",
 		Description: "Executes sandboxed Go source code via nanoGo. Source must be a complete Go file with package main and main(). Optional natives: HostReadFile(path), HTTPGetText(url).",
 		Parameters: []byte(`{
   "type": "object",
