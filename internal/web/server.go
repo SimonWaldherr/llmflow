@@ -11,8 +11,10 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -32,7 +34,7 @@ type Server struct {
 	mu        sync.Mutex
 	jobs      []*JobStatus
 	jobIDSeq  int
-	wg        sync.WaitGroup // tracks running job goroutines
+	wg        sync.WaitGroup  // tracks running job goroutines
 	serverCtx context.Context // cancelled on graceful shutdown; used for job lifecycles
 }
 
@@ -354,79 +356,272 @@ type ProviderInfo struct {
 	Models   []string `json:"models"`
 }
 
+type detectProbe struct {
+	modelsURL     string
+	extractModels func(body []byte) []string
+}
+
+type detectCandidate struct {
+	provider string
+	baseURL  string
+	probes   []detectProbe
+}
+
+type detectResult struct {
+	info  ProviderInfo
+	score int
+}
+
 // handleDetect probes well-known local addresses for Ollama and LM Studio.
 func (s *Server) handleDetect(w http.ResponseWriter, r *http.Request) {
-	type candidate struct {
-		provider string
-		baseURL  string
-		modelsURL string
-		// extractModels parses the response body and returns model names.
-		extractModels func(body []byte) []string
+	candidates := buildDetectCandidates()
+	client := &http.Client{Timeout: 1200 * time.Millisecond}
+	results := make(chan detectResult, len(candidates))
+
+	var wg sync.WaitGroup
+	for _, candidate := range candidates {
+		candidate := candidate
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if res, ok := probeCandidate(client, candidate); ok {
+				results <- res
+			}
+		}()
+	}
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
+
+	bestByProvider := make(map[string]detectResult, 2)
+	for result := range results {
+		current, ok := bestByProvider[result.info.Provider]
+		if !ok || result.score > current.score || (result.score == current.score && result.info.BaseURL < current.info.BaseURL) {
+			bestByProvider[result.info.Provider] = result
+		}
 	}
 
-	candidates := []candidate{
-		{
-			provider:  config.ProviderOllama,
-			baseURL:   "http://localhost:11434",
-			modelsURL: "http://localhost:11434/api/tags",
-			extractModels: func(body []byte) []string {
-				var resp struct {
-					Models []struct {
-						Name string `json:"name"`
-					} `json:"models"`
-				}
-				if err := json.Unmarshal(body, &resp); err != nil {
-					return nil
-				}
-				out := make([]string, 0, len(resp.Models))
-				for _, m := range resp.Models {
-					out = append(out, m.Name)
-				}
-				return out
-			},
-		},
-		{
-			provider:  config.ProviderLMStudio,
-			baseURL:   "http://localhost:1234/v1",
-			modelsURL: "http://localhost:1234/v1/models",
-			extractModels: func(body []byte) []string {
-				var resp struct {
-					Data []struct {
-						ID string `json:"id"`
-					} `json:"data"`
-				}
-				if err := json.Unmarshal(body, &resp); err != nil {
-					return nil
-				}
-				out := make([]string, 0, len(resp.Data))
-				for _, m := range resp.Data {
-					out = append(out, m.ID)
-				}
-				return out
-			},
-		},
-	}
-
-	client := &http.Client{Timeout: 2 * time.Second}
-	var detected []ProviderInfo
-
-	for _, c := range candidates {
-		resp, err := client.Get(c.modelsURL)
-		if err != nil {
-			continue
+	detected := make([]ProviderInfo, 0, len(bestByProvider))
+	providerOrder := []string{config.ProviderOllama, config.ProviderLMStudio}
+	for _, provider := range providerOrder {
+		if result, ok := bestByProvider[provider]; ok {
+			detected = append(detected, result.info)
 		}
-		body, err := io.ReadAll(io.LimitReader(resp.Body, 256*1024))
-		resp.Body.Close()
-		if err != nil || resp.StatusCode != http.StatusOK {
-			continue
-		}
-		models := c.extractModels(body)
-		detected = append(detected, ProviderInfo{
-			Provider: c.provider,
-			BaseURL:  c.baseURL,
-			Models:   models,
-		})
 	}
 
 	writeJSON(w, http.StatusOK, apiResponse{OK: true, Data: detected})
+}
+
+func buildDetectCandidates() []detectCandidate {
+	ollamaBases := uniqueStrings([]string{
+		normalizeHostBaseURL(os.Getenv("OLLAMA_HOST")),
+		"http://localhost:11434",
+		"http://127.0.0.1:11434",
+	})
+
+	lmStudioBases := uniqueStrings([]string{
+		normalizeLMStudioBaseURL(os.Getenv("LLMFLOW_LMSTUDIO_BASE_URL")),
+		"http://localhost:1234/v1",
+		"http://127.0.0.1:1234/v1",
+	})
+
+	candidates := make([]detectCandidate, 0, len(ollamaBases)+len(lmStudioBases))
+	for _, baseURL := range ollamaBases {
+		candidates = append(candidates, detectCandidate{
+			provider: config.ProviderOllama,
+			baseURL:  baseURL,
+			probes: []detectProbe{
+				{
+					modelsURL:     baseURL + "/api/tags",
+					extractModels: parseOllamaTagsModels,
+				},
+				{
+					modelsURL:     baseURL + "/api/ps",
+					extractModels: parseOllamaRunningModels,
+				},
+			},
+		})
+	}
+	for _, baseURL := range lmStudioBases {
+		candidates = append(candidates, detectCandidate{
+			provider: config.ProviderLMStudio,
+			baseURL:  baseURL,
+			probes: []detectProbe{
+				{
+					modelsURL:     baseURL + "/models",
+					extractModels: parseOpenAICompatibleModels,
+				},
+			},
+		})
+	}
+
+	return candidates
+}
+
+func probeCandidate(client *http.Client, candidate detectCandidate) (detectResult, bool) {
+	if candidate.provider == "" || candidate.baseURL == "" {
+		return detectResult{}, false
+	}
+
+	models := make([]string, 0, 8)
+	reachable := false
+
+	for _, probe := range candidate.probes {
+		resp, err := client.Get(probe.modelsURL)
+		if err != nil {
+			continue
+		}
+
+		body, readErr := io.ReadAll(io.LimitReader(resp.Body, 256*1024))
+		resp.Body.Close()
+		if readErr != nil || resp.StatusCode != http.StatusOK {
+			continue
+		}
+
+		reachable = true
+		models = append(models, probe.extractModels(body)...)
+	}
+
+	if !reachable {
+		return detectResult{}, false
+	}
+
+	info := ProviderInfo{
+		Provider: candidate.provider,
+		BaseURL:  candidate.baseURL,
+		Models:   normalizeModelNames(models),
+	}
+
+	return detectResult{
+		info:  info,
+		score: detectionScore(info),
+	}, true
+}
+
+func parseOllamaTagsModels(body []byte) []string {
+	var resp struct {
+		Models []struct {
+			Name string `json:"name"`
+		} `json:"models"`
+	}
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return nil
+	}
+
+	out := make([]string, 0, len(resp.Models))
+	for _, model := range resp.Models {
+		out = append(out, model.Name)
+	}
+	return out
+}
+
+func parseOllamaRunningModels(body []byte) []string {
+	var resp struct {
+		Models []struct {
+			Name string `json:"name"`
+		} `json:"models"`
+	}
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return nil
+	}
+
+	out := make([]string, 0, len(resp.Models))
+	for _, model := range resp.Models {
+		out = append(out, model.Name)
+	}
+	return out
+}
+
+func parseOpenAICompatibleModels(body []byte) []string {
+	var resp struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return nil
+	}
+
+	out := make([]string, 0, len(resp.Data))
+	for _, model := range resp.Data {
+		out = append(out, model.ID)
+	}
+	return out
+}
+
+func detectionScore(info ProviderInfo) int {
+	score := len(info.Models) * 100
+	if strings.Contains(info.BaseURL, "localhost") {
+		score += 20
+	}
+	if strings.Contains(info.BaseURL, "127.0.0.1") {
+		score += 10
+	}
+	return score
+}
+
+func normalizeModelNames(models []string) []string {
+	set := make(map[string]struct{}, len(models))
+	out := make([]string, 0, len(models))
+	for _, model := range models {
+		model = strings.TrimSpace(model)
+		if model == "" {
+			continue
+		}
+		if _, exists := set[model]; exists {
+			continue
+		}
+		set[model] = struct{}{}
+		out = append(out, model)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func uniqueStrings(values []string) []string {
+	out := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out
+}
+
+func normalizeHostBaseURL(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	if !strings.Contains(raw, "://") {
+		raw = "http://" + raw
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		return ""
+	}
+	scheme := u.Scheme
+	if scheme == "" {
+		scheme = "http"
+	}
+	return scheme + "://" + u.Host
+}
+
+func normalizeLMStudioBaseURL(raw string) string {
+	base := normalizeHostBaseURL(raw)
+	if base == "" {
+		return ""
+	}
+	if strings.HasSuffix(base, "/v1") {
+		return base
+	}
+	return strings.TrimRight(base, "/") + "/v1"
 }

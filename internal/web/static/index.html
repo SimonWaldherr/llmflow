@@ -153,6 +153,41 @@ textarea { font-family: var(--font-mono); resize: vertical; }
   text-align: center; padding: 48px; color: var(--text-muted); font-size: 14px;
 }
 
+/* Detection banner */
+.detect-banner {
+  display: none;
+  margin-bottom: 16px;
+  padding: 12px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--green);
+  background: rgba(63,185,80,0.1);
+}
+.detect-banner.show { display: block; }
+.detect-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.detect-summary {
+  color: var(--text-muted);
+  font-size: 13px;
+}
+.detect-pills {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+.detect-pill {
+  padding: 3px 10px;
+  font-size: 12px;
+}
+.detect-pill small {
+  color: var(--text-muted);
+  margin-left: 4px;
+}
+
 /* Tools section */
 .tools-section {
   margin-top: 24px; padding: 16px; border: 1px solid var(--border);
@@ -202,10 +237,13 @@ textarea { font-family: var(--font-mono); resize: vertical; }
 </div>
 
 <!-- Detection banner (hidden by default) -->
-<div id="detect-banner" style="display:none; margin-bottom:16px; padding:12px 16px; border-radius:8px; background:rgba(63,185,80,0.1); border:1px solid var(--green); font-size:13px;">
-  <strong style="color:var(--green)">Local LLM detected</strong>
-  <span id="detect-summary" style="color:var(--text-muted)"></span>
-  <span id="detect-pills" style="margin-left:8px;"></span>
+<div id="detect-banner" class="detect-banner">
+  <div class="detect-row">
+    <strong style="color:var(--green)">Local LLM detected</strong>
+    <button id="detect-refresh" class="btn btn-secondary" style="padding:4px 10px;font-size:12px;">Rescan</button>
+  </div>
+  <div id="detect-summary" class="detect-summary"></div>
+  <div id="detect-pills" class="detect-pills"></div>
 </div>
 
 <!-- Quick Start Panel -->
@@ -224,7 +262,8 @@ textarea { font-family: var(--font-mono); resize: vertical; }
     </div>
     <div class="form-group">
       <label>Model</label>
-      <input id="q-model" type="text" placeholder="gpt-4o-mini">
+      <input id="q-model" type="text" placeholder="gpt-4o-mini" list="q-model-list">
+      <datalist id="q-model-list"></datalist>
     </div>
     <div class="form-group">
       <label>API Key Env Variable</label>
@@ -652,71 +691,97 @@ async function showJob(id) {
   pollInterval = setInterval(load, 1500);
 }
 
+const detectedProviders = new Map();
+let quickFormTouched = false;
+
+function providerLabel(provider) {
+  return provider === 'ollama' ? 'Ollama' : provider === 'lmstudio' ? 'LM Studio' : provider;
+}
+
+function setModelSuggestions(models) {
+  const list = document.getElementById('q-model-list');
+  list.innerHTML = '';
+  (models || []).forEach(model => {
+    const opt = document.createElement('option');
+    opt.value = model;
+    list.appendChild(opt);
+  });
+}
+
+function applyDetected(info, { markTouched = true } = {}) {
+  if (!info) return;
+  if (markTouched) quickFormTouched = true;
+
+  document.getElementById('q-provider').value = info.provider;
+  document.getElementById('q-baseurl').value = info.base_url || '';
+  document.getElementById('q-apikey').value = '';
+  setModelSuggestions(info.models || []);
+
+  if (info.models && info.models.length > 0) {
+    document.getElementById('q-model').value = info.models[0];
+  }
+}
+
+function renderDetectedProviders(items) {
+  const banner = document.getElementById('detect-banner');
+  const summary = document.getElementById('detect-summary');
+  const pills = document.getElementById('detect-pills');
+
+  if (!items || items.length === 0) {
+    banner.classList.remove('show');
+    summary.textContent = '';
+    pills.innerHTML = '';
+    detectedProviders.clear();
+    return;
+  }
+
+  detectedProviders.clear();
+  items.forEach(item => detectedProviders.set(item.provider, item));
+
+  const labels = items.map(item => providerLabel(item.provider));
+  summary.textContent = labels.join(' + ') + ' endpoint(s) detected locally';
+
+  pills.innerHTML = '';
+  items.forEach(item => {
+    const button = document.createElement('button');
+    button.className = 'btn btn-secondary detect-pill';
+    button.type = 'button';
+    const modelCount = (item.models || []).length;
+    button.innerHTML = `Use ${providerLabel(item.provider)}<small>${modelCount} model${modelCount === 1 ? '' : 's'}</small>`;
+    button.addEventListener('click', () => applyDetected(item));
+    pills.appendChild(button);
+  });
+
+  banner.classList.add('show');
+}
+
 // Auto-detect local providers on page load
-async function detectLocalProviders() {
+async function detectLocalProviders({ autoApply = false } = {}) {
   try {
     const r = await fetch('/api/detect');
     const d = await r.json();
-    if (!d.ok || !d.data || d.data.length === 0) return;
+    if (!d.ok) return;
 
-    const banner = document.getElementById('detect-banner');
-    const summary = document.getElementById('detect-summary');
-    const pills = document.getElementById('detect-pills');
+    const items = Array.isArray(d.data) ? d.data : [];
+    renderDetectedProviders(items);
 
-    const names = d.data.map(p => p.provider === 'ollama' ? 'Ollama' : 'LM Studio');
-    summary.textContent = ' — ' + names.join(' & ') + ' running locally';
+    if (!autoApply || quickFormTouched || items.length === 0) return;
 
-    // Render one pill/button per detected provider
-    pills.innerHTML = d.data.map(p => {
-      const label = p.provider === 'ollama' ? 'Ollama' : 'LM Studio';
-      const firstModel = p.models && p.models.length ? p.models[0] : '';
-      return `<button class="btn btn-secondary" style="padding:2px 10px;font-size:12px;" `
-        + `onclick="applyDetected('${p.provider}','${p.base_url}','${firstModel}',${JSON.stringify(p.models)})"`
-        + `>Use ${label}${firstModel ? ' · ' + firstModel : ''}</button>`;
-    }).join(' ');
-
-    banner.style.display = 'block';
-
-    // Auto-apply the first detected provider if nothing has been changed yet
-    const current = document.getElementById('q-provider').value;
-    if (current === 'openai') {
-      const first = d.data[0];
-      const firstModel = first.models && first.models.length ? first.models[0] : '';
-      applyDetected(first.provider, first.base_url, firstModel, first.models);
+    const currentProvider = document.getElementById('q-provider').value;
+    const baseURL = document.getElementById('q-baseurl').value.trim();
+    if (currentProvider === 'openai' && baseURL === '') {
+      applyDetected(items[0], { markTouched: false });
     }
   } catch(e) {
     // Detection is best-effort; silently ignore errors.
   }
 }
 
-function applyDetected(provider, baseURL, model, models) {
-  document.getElementById('q-provider').value = provider;
-  document.getElementById('q-baseurl').value = baseURL;
-  document.getElementById('q-apikey').value = '';
-  if (model) document.getElementById('q-model').value = model;
-
-  // Populate model picker if we have a list
-  if (models && models.length > 1) {
-    const modelInput = document.getElementById('q-model');
-    // Replace with a <select> if not already one
-    if (modelInput.tagName === 'INPUT') {
-      const sel = document.createElement('select');
-      sel.id = 'q-model';
-      models.forEach(m => {
-        const opt = document.createElement('option');
-        opt.value = m; opt.textContent = m;
-        if (m === model) opt.selected = true;
-        sel.appendChild(opt);
-      });
-      modelInput.replaceWith(sel);
-    }
-  }
-}
-
-detectLocalProviders();
+document.getElementById('detect-refresh').addEventListener('click', () => detectLocalProviders({ autoApply: false }));
 
 // Provider change updates defaults
 document.getElementById('q-provider').addEventListener('change', e => {
+  quickFormTouched = true;
   const defaults = {
     openai:    { model: 'gpt-4o-mini', key: 'OPENAI_API_KEY', url: '' },
     gemini:    { model: 'gemini-2.0-flash', key: 'GEMINI_API_KEY', url: '' },
@@ -728,8 +793,20 @@ document.getElementById('q-provider').addEventListener('change', e => {
   const d = defaults[e.target.value] || defaults.openai;
   document.getElementById('q-model').value = d.model;
   document.getElementById('q-apikey').value = d.key;
-  document.getElementById('q-baseurl').value = d.url;
+  const detected = detectedProviders.get(e.target.value);
+  document.getElementById('q-baseurl').value = detected ? detected.base_url : d.url;
+  setModelSuggestions(detected ? (detected.models || []) : []);
+  if (detected && detected.models && detected.models.length > 0) {
+    document.getElementById('q-model').value = detected.models[0];
+  }
 });
+
+['q-model', 'q-baseurl', 'q-apikey'].forEach(id => {
+  const el = document.getElementById(id);
+  el.addEventListener('input', () => { quickFormTouched = true; });
+});
+
+detectLocalProviders({ autoApply: true });
 
 // Show/hide SQL extra fields when sql_query checkbox changes
 document.getElementById('t-sql-query').addEventListener('change', e => {
