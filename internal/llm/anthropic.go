@@ -16,22 +16,25 @@ import (
 )
 
 const anthropicVersion = "2023-06-01"
+const anthropicCachingBeta = "prompt-caching-2024-07-31"
 
 type anthropicClient struct {
-	httpClient *http.Client
-	baseURL    string
-	apiKey     string
-	model      string
-	maxOut     int64
+	httpClient    *http.Client
+	baseURL       string
+	apiKey        string
+	model         string
+	maxOut        int64
+	promptCaching bool
 }
 
 func newAnthropicClient(cfg config.APIConfig, apiKey string) *anthropicClient {
 	return &anthropicClient{
-		httpClient: &http.Client{Timeout: cfg.Timeout},
-		baseURL:    strings.TrimRight(cfg.BaseURL, "/"),
-		apiKey:     apiKey,
-		model:      cfg.Model,
-		maxOut:     cfg.MaxOutputTokens,
+		httpClient:    &http.Client{Timeout: cfg.Timeout},
+		baseURL:       strings.TrimRight(cfg.BaseURL, "/"),
+		apiKey:        apiKey,
+		model:         cfg.Model,
+		maxOut:        cfg.MaxOutputTokens,
+		promptCaching: cfg.PromptCaching,
 	}
 }
 
@@ -39,9 +42,12 @@ func newAnthropicClient(cfg config.APIConfig, apiKey string) *anthropicClient {
 // Wire types
 // ---------------------------------------------------------------------------
 
+// anthropicRequest is the top-level body sent to /messages.
+// System can be a plain string or, when prompt caching is enabled, a slice of
+// anthropicSystemBlock so individual segments carry cache_control markers.
 type anthropicRequest struct {
 	Model     string             `json:"model"`
-	System    string             `json:"system,omitempty"`
+	System    any                `json:"system,omitempty"` // string | []anthropicSystemBlock
 	Messages  []anthropicMessage `json:"messages"`
 	MaxTokens int64              `json:"max_tokens"`
 	Tools     []anthropicTool    `json:"tools,omitempty"`
@@ -58,15 +64,28 @@ type anthropicTool struct {
 	InputSchema any    `json:"input_schema"`
 }
 
+// anthropicCacheControl marks a block as cacheable (ephemeral).
+type anthropicCacheControl struct {
+	Type string `json:"type"` // "ephemeral"
+}
+
+// anthropicSystemBlock is used when prompt caching is enabled so individual
+// system-prompt segments can carry cache_control markers.
+type anthropicSystemBlock struct {
+	Type         string                 `json:"type"` // "text"
+	Text         string                 `json:"text"`
+	CacheControl *anthropicCacheControl `json:"cache_control,omitempty"`
+}
+
 // anthropicBlock covers text, tool_use, and tool_result content blocks.
 type anthropicBlock struct {
 	Type      string `json:"type"`
 	Text      string `json:"text,omitempty"`
-	ID        string `json:"id,omitempty"`         // tool_use
-	Name      string `json:"name,omitempty"`       // tool_use
-	Input     any    `json:"input,omitempty"`      // tool_use
+	ID        string `json:"id,omitempty"`          // tool_use
+	Name      string `json:"name,omitempty"`        // tool_use
+	Input     any    `json:"input,omitempty"`       // tool_use
 	ToolUseID string `json:"tool_use_id,omitempty"` // tool_result
-	Content   string `json:"content,omitempty"`    // tool_result
+	Content   string `json:"content,omitempty"`     // tool_result
 }
 
 type anthropicResponse struct {
@@ -93,9 +112,20 @@ func (c *anthropicClient) Generate(ctx context.Context, systemPrompt, userPrompt
 	if maxTok <= 0 {
 		maxTok = 1024
 	}
+
+	// Build system field: a plain string normally, or a block with cache_control
+	// when prompt caching is enabled (the system prompt is the primary cache target
+	// because it stays identical across all records in a run).
+	var systemField any = systemPrompt
+	if c.promptCaching && systemPrompt != "" {
+		systemField = []anthropicSystemBlock{
+			{Type: "text", Text: systemPrompt, CacheControl: &anthropicCacheControl{Type: "ephemeral"}},
+		}
+	}
+
 	payload := anthropicRequest{
 		Model:     c.model,
-		System:    systemPrompt,
+		System:    systemField,
 		Messages:  []anthropicMessage{{Role: "user", Content: userPrompt}},
 		MaxTokens: maxTok,
 	}
@@ -111,6 +141,9 @@ func (c *anthropicClient) Generate(ctx context.Context, systemPrompt, userPrompt
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("x-api-key", c.apiKey)
 	req.Header.Set("anthropic-version", anthropicVersion)
+	if c.promptCaching {
+		req.Header.Set("anthropic-beta", anthropicCachingBeta)
+	}
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -152,12 +185,12 @@ func (c *anthropicClient) GenerateAgent(ctx context.Context, req AgentRequest) (
 	}
 
 	// Extract system prompt from the first system message, if any.
-	var systemPrompt string
+	var rawSystemPrompt string
 	msgs := make([]anthropicMessage, 0, len(req.Messages))
 	for _, m := range req.Messages {
 		switch m.Role {
 		case "system":
-			systemPrompt = m.Content
+			rawSystemPrompt = m.Content
 		case "tool":
 			// Anthropic expects tool results as user messages with typed blocks.
 			block := anthropicBlock{
@@ -202,9 +235,16 @@ func (c *anthropicClient) GenerateAgent(ctx context.Context, req AgentRequest) (
 		})
 	}
 
+	var systemField any = rawSystemPrompt
+	if c.promptCaching && rawSystemPrompt != "" {
+		systemField = []anthropicSystemBlock{
+			{Type: "text", Text: rawSystemPrompt, CacheControl: &anthropicCacheControl{Type: "ephemeral"}},
+		}
+	}
+
 	payload := anthropicRequest{
 		Model:     c.model,
-		System:    systemPrompt,
+		System:    systemField,
 		Messages:  msgs,
 		MaxTokens: maxTok,
 		Tools:     tools,
@@ -222,6 +262,9 @@ func (c *anthropicClient) GenerateAgent(ctx context.Context, req AgentRequest) (
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("x-api-key", c.apiKey)
 	httpReq.Header.Set("anthropic-version", anthropicVersion)
+	if c.promptCaching {
+		httpReq.Header.Set("anthropic-beta", anthropicCachingBeta)
+	}
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {

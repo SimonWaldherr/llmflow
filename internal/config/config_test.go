@@ -111,7 +111,7 @@ func TestApplyDefaults(t *testing.T) {
 	if c.API.BaseURL != "https://api.openai.com/v1" {
 		t.Fatalf("base_url = %q, want default openai url", c.API.BaseURL)
 	}
-	if c.API.Timeout != 60*time.Second {
+	if c.API.Timeout != 300*time.Second {
 		t.Fatal("expected default timeout")
 	}
 	if c.Processing.Mode != "per_record" {

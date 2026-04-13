@@ -21,6 +21,7 @@ import (
 
 	"github.com/SimonWaldherr/llmflow/internal/app"
 	"github.com/SimonWaldherr/llmflow/internal/config"
+	"github.com/SimonWaldherr/llmflow/internal/llm"
 	"gopkg.in/yaml.v3"
 )
 
@@ -46,18 +47,18 @@ type JobProgress struct {
 
 // JobStatus tracks a running or completed job.
 type JobStatus struct {
-	ID        int          `json:"id"`
-	Name      string       `json:"name,omitempty"`
-	Status    string       `json:"status"` // running | completed | failed | cancelled
-	StartedAt time.Time    `json:"started_at"`
-	EndedAt   time.Time    `json:"ended_at,omitempty"`
-	Error     string       `json:"error,omitempty"`
-	Config    string       `json:"config"`
-	Logs      []string     `json:"logs"`
-	Archived  bool         `json:"archived"`
-	Progress  JobProgress  `json:"progress"`
+	ID        int         `json:"id"`
+	Name      string      `json:"name,omitempty"`
+	Status    string      `json:"status"` // running | completed | failed | cancelled
+	StartedAt time.Time   `json:"started_at"`
+	EndedAt   time.Time   `json:"ended_at,omitempty"`
+	Error     string      `json:"error,omitempty"`
+	Config    string      `json:"config"`
+	Logs      []string    `json:"logs"`
+	Archived  bool        `json:"archived"`
+	Progress  JobProgress `json:"progress"`
 	// unexported – not serialised
-	cancelFn  context.CancelFunc
+	cancelFn context.CancelFunc
 }
 
 // NewServer creates a new web UI server.
@@ -109,6 +110,7 @@ func (s *Server) Run(ctx context.Context) error {
 	mux.HandleFunc("DELETE /api/jobs/{id}", s.handleDeleteJob)
 	mux.HandleFunc("POST /api/upload", s.handleUpload)
 	mux.HandleFunc("GET /api/detect", s.handleDetect)
+	mux.HandleFunc("POST /api/suggest", s.handleSuggest)
 
 	sub, err := fs.Sub(staticFS, "static")
 	if err != nil {
@@ -429,6 +431,142 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, apiResponse{OK: true, Data: map[string]string{"path": dst}})
+}
+
+// ─── /api/suggest ─────────────────────────────────────────────────────────────
+// handleSuggest accepts a plain-text task description and an (optional) partial
+// config YAML, calls an LLM to fill in / improve the config fields, and returns
+// a SuggestResponse with pre-filled values that the frontend can apply to the form.
+
+type suggestRequest struct {
+	// Task is the free-text description of what the user wants to do.
+	Task string `json:"task"`
+	// Config is the current (possibly empty) YAML config to base suggestions on.
+	Config string `json:"config"`
+	// Provider / model / key let the UI pass a temporary LLM config that is used
+	// only for this suggestion call, without having to run a full job.
+	Provider  string `json:"provider"`
+	Model     string `json:"model"`
+	APIKeyEnv string `json:"api_key_env"`
+	BaseURL   string `json:"base_url"`
+}
+
+type suggestResponse struct {
+	SystemPrompt  string `json:"system_prompt"`
+	PrePrompt     string `json:"pre_prompt"`
+	InputTemplate string `json:"input_template"`
+	PostPrompt    string `json:"post_prompt"`
+	JobName       string `json:"job_name"`
+	ResponseField string `json:"response_field"`
+}
+
+const suggestSystemPrompt = `You are an expert llmflow configuration assistant.
+llmflow is a batch-processing tool that reads records from a file (CSV/JSON/JSONL/XML),
+sends each record to an LLM with a configurable prompt pipeline, and writes the responses
+back to an output file.
+
+The prompt pipeline per record is:
+  system_prompt  → sent once as the LLM role / global instructions (NOT per record)
+  pre_prompt     → optional text prepended before each record's rendered data
+  input_template → Go template executed per record:
+                   {{ toPrettyJSON .record }} renders the full record as JSON,
+                   {{ .fieldName }} accesses a specific field.
+  post_prompt    → optional instruction appended after each record (e.g. output format)
+  response_field → the key in the output row where the LLM's answer is stored.
+
+The user will describe a task. Your job is to fill in the five prompt fields and a
+short job_name. Rules:
+- system_prompt: set the LLM's persona and any global constraints.
+- pre_prompt: frame the task or give context (optional – leave empty if not useful).
+- input_template: almost always "{{ toPrettyJSON .record }}" unless the user mentions
+  specific fields, in which case reference them by name.
+- post_prompt: enforce the output format (JSON schema, plain text, etc.) – especially
+  useful when structured output is needed.
+- response_field: a short snake_case key name describing the output (e.g. "sentiment",
+  "summary", "classification").
+- job_name: ≤ 6 words describing what this job does.
+
+Respond with ONLY a JSON object — no markdown, no explanation — following this schema:
+{
+  "system_prompt": "...",
+  "pre_prompt": "...",
+  "input_template": "...",
+  "post_prompt": "...",
+  "response_field": "...",
+  "job_name": "..."
+}`
+
+func (s *Server) handleSuggest(w http.ResponseWriter, r *http.Request) {
+	var req suggestRequest
+	if err := json.NewDecoder(io.LimitReader(r.Body, 64*1024)).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, apiResponse{Error: "invalid JSON body"})
+		return
+	}
+	if strings.TrimSpace(req.Task) == "" {
+		writeJSON(w, http.StatusBadRequest, apiResponse{Error: "task is required"})
+		return
+	}
+
+	// Build a minimal APIConfig from the quick-form state passed by the client.
+	provider := req.Provider
+	if provider == "" {
+		provider = config.ProviderOpenAI
+	}
+	apiCfg := config.APIConfig{
+		Provider:  provider,
+		Model:     req.Model,
+		APIKeyEnv: req.APIKeyEnv,
+		BaseURL:   req.BaseURL,
+		Timeout:   60 * time.Second,
+	}
+	apiCfg.ApplyProviderDefaults()
+
+	apiKey, err := func() (string, error) {
+		if apiCfg.APIKeyEnv == "" {
+			return "", nil
+		}
+		v := strings.TrimSpace(os.Getenv(apiCfg.APIKeyEnv))
+		return v, nil
+	}()
+	if err != nil || (apiCfg.APIKeyEnv != "" && apiKey == "") {
+		writeJSON(w, http.StatusBadRequest, apiResponse{
+			Error: fmt.Sprintf("API key env var %q is not set; set it on the server before using AI suggestions", apiCfg.APIKeyEnv),
+		})
+		return
+	}
+
+	gen := llm.New(apiCfg, apiKey)
+
+	userMsg := "Task description:\n" + strings.TrimSpace(req.Task)
+	if cfg := strings.TrimSpace(req.Config); cfg != "" {
+		userMsg += "\n\nCurrent config for reference:\n```yaml\n" + cfg + "\n```"
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 45*time.Second)
+	defer cancel()
+
+	raw, err := gen.Generate(ctx, suggestSystemPrompt, userMsg)
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, apiResponse{Error: "LLM call failed: " + err.Error()})
+		return
+	}
+
+	// Strip markdown code fences if the model wrapped the JSON anyway.
+	raw = strings.TrimSpace(raw)
+	if idx := strings.Index(raw, "{"); idx > 0 {
+		raw = raw[idx:]
+	}
+	if idx := strings.LastIndex(raw, "}"); idx >= 0 && idx < len(raw)-1 {
+		raw = raw[:idx+1]
+	}
+
+	var sr suggestResponse
+	if err := json.Unmarshal([]byte(raw), &sr); err != nil {
+		writeJSON(w, http.StatusInternalServerError, apiResponse{Error: "could not parse LLM response as JSON: " + err.Error()})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, apiResponse{OK: true, Data: sr})
 }
 
 func parseConfig(yamlText string) (config.Config, error) {

@@ -16,20 +16,22 @@ import (
 )
 
 type openAICompatClient struct {
-	httpClient *http.Client
-	baseURL    string
-	apiKey     string
-	model      string
-	maxOut     int64
+	httpClient    *http.Client
+	baseURL       string
+	apiKey        string
+	model         string
+	maxOut        int64
+	promptCaching bool
 }
 
 func newOpenAICompatClient(cfg config.APIConfig, apiKey string) *openAICompatClient {
 	return &openAICompatClient{
-		httpClient: &http.Client{Timeout: cfg.Timeout},
-		baseURL:    strings.TrimRight(cfg.BaseURL, "/"),
-		apiKey:     apiKey,
-		model:      cfg.Model,
-		maxOut:     cfg.MaxOutputTokens,
+		httpClient:    &http.Client{Timeout: cfg.Timeout},
+		baseURL:       strings.TrimRight(cfg.BaseURL, "/"),
+		apiKey:        apiKey,
+		model:         cfg.Model,
+		maxOut:        cfg.MaxOutputTokens,
+		promptCaching: cfg.PromptCaching,
 	}
 }
 
@@ -75,7 +77,7 @@ type oaiToolCall struct {
 type chatResponse struct {
 	Choices []struct {
 		Message struct {
-			Content   *string      `json:"content"`
+			Content   *string       `json:"content"`
 			ToolCalls []oaiToolCall `json:"tool_calls,omitempty"`
 		} `json:"message"`
 		FinishReason string `json:"finish_reason"`
@@ -229,6 +231,12 @@ func (c *openAICompatClient) doChat(ctx context.Context, payload chatRequest) (s
 	if c.apiKey != "" {
 		req.Header.Set("Authorization", "Bearer "+c.apiKey)
 	}
+	// Enable explicit prompt caching beta header for providers that support it
+	// (e.g. OpenAI). The static system-message prefix is automatically eligible
+	// for caching when it is ≥ 1024 tokens; this header opts in to the feature.
+	if c.promptCaching {
+		req.Header.Set("OpenAI-Beta", "prompt-caching=1")
+	}
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -259,4 +267,3 @@ func (c *openAICompatClient) doChat(ctx context.Context, payload chatRequest) (s
 	}
 	return *decoded.Choices[0].Message.Content, nil
 }
-

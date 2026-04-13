@@ -240,6 +240,47 @@ textarea { font-family: var(--font-mono); resize: vertical; }
 .tool-card .tool-extra.show { display: block; }
 
 .section-sep { border: none; border-top: 1px solid var(--border); margin: 20px 0; }
+
+/* AI-assist bar */
+.ai-assist-bar {
+  background: linear-gradient(135deg, rgba(124,58,237,0.08) 0%, rgba(124,58,237,0.03) 100%);
+  border: 1px solid rgba(124,58,237,0.25);
+  border-radius: 10px;
+  padding: 14px 16px;
+  margin-bottom: 20px;
+}
+.ai-assist-inner { display: flex; gap: 10px; align-items: flex-start; }
+.ai-assist-label { font-size: 13px; font-weight: 600; color: #a78bfa; white-space: nowrap; padding-top: 6px; }
+.ai-assist-input {
+  flex: 1;
+  min-height: 52px;
+  resize: vertical;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 13px;
+  padding: 8px 10px;
+  font-family: inherit;
+}
+.ai-assist-input:focus { outline: none; border-color: #7c3aed; box-shadow: 0 0 0 2px rgba(124,58,237,0.2); }
+.btn-accent {
+  background: #7c3aed;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s;
+}
+.btn-accent:hover:not(:disabled) { background: #6d28d9; }
+.btn-accent:disabled { opacity: 0.55; cursor: not-allowed; }
+.suggest-status { font-size: 12px; margin-top: 8px; min-height: 16px; }
+.suggest-status.ok    { color: var(--green); }
+.suggest-status.error { color: var(--red); }
 </style>
 </head>
 <body>
@@ -301,6 +342,16 @@ textarea { font-family: var(--font-mono); resize: vertical; }
     </div>
   </div>
 
+  <!-- AI-assist bar -->
+  <div class="ai-assist-bar">
+    <div class="ai-assist-inner">
+      <span class="ai-assist-label">✨ AI Quick Setup</span>
+      <textarea id="q-task" class="ai-assist-input" rows="2" placeholder="Describe your task in plain language — e.g. &#34;Classify each customer support ticket as Urgent / Normal / Low priority and give a one-sentence reason.&#34;"></textarea>
+      <button class="btn btn-accent" onclick="suggestConfig()" id="suggest-btn">Configure with AI</button>
+    </div>
+    <div id="suggest-status" class="suggest-status"></div>
+  </div>
+
   <div class="quick-grid">
 
     <!-- Provider / Model -->
@@ -319,6 +370,7 @@ textarea { font-family: var(--font-mono); resize: vertical; }
       <label>Model</label>
       <input id="q-model" type="text" placeholder="gpt-4o-mini" list="q-model-list">
       <datalist id="q-model-list"></datalist>
+      <div class="hint" id="q-model-hint"></div>
     </div>
     <div class="form-group">
       <label>API Key Environment Variable</label>
@@ -430,6 +482,14 @@ textarea { font-family: var(--font-mono); resize: vertical; }
       <label>Job Name <span style="font-weight:400">(optional)</span></label>
       <input id="q-name" type="text" placeholder="My sentiment analysis run">
       <div class="hint">A human-readable label shown in the Jobs list.</div>
+    </div>
+    <div class="form-group">
+      <label>Prompt Caching</label>
+      <select id="q-prompt-caching">
+        <option value="false">Disabled</option>
+        <option value="true">Enabled</option>
+      </select>
+      <div class="hint">Caches the static system/pre/post prompt prefix server-side. Supported by OpenAI (&ge;1024 tokens) and Anthropic.</div>
     </div>
   </div>
 
@@ -666,9 +726,11 @@ function buildYAMLFromForm() {
   const inputPath     = uploadedPath || './input.' + (inputType === 'jsonl' ? 'jsonl' : inputType);
   const outputPath    = './output.' + outputType;
 
+  const promptCaching = document.getElementById('q-prompt-caching').value;
   const ind4 = s => s.split('\n').join('\n    ');
 
   let yaml = `api:\n  provider: ${provider}\n  api_key_env: ${apikey}\n  model: ${model}\n  timeout: ${timeout}\n  rate_limit_rpm: ${rpm}`;
+  if (promptCaching === 'true') yaml += `\n  prompt_caching: true`;
   if (baseurl) yaml += `\n  base_url: ${baseurl}`;
 
   yaml += `\n\nprompt:\n  system: |\n    ${ind4(system)}`;
@@ -910,10 +972,29 @@ let quickFormTouched = false;
 function providerLabel(p) {
   return p === 'ollama' ? 'Ollama' : p === 'lmstudio' ? 'LM Studio' : p;
 }
+const PROVIDER_MODELS = {
+  openai:    ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'o1', 'o1-mini', 'o3-mini', 'o4-mini'],
+  gemini:    ['gemini-2.0-flash', 'gemini-2.0-flash-lite', 'gemini-2.5-pro', 'gemini-1.5-pro', 'gemini-1.5-flash'],
+  anthropic: ['claude-opus-4-5', 'claude-sonnet-4-20250514', 'claude-haiku-3-5', 'claude-3-5-sonnet-20241022', 'claude-3-5-haiku-20241022'],
+  ollama:    ['llama3.3', 'llama3.1', 'llama3', 'mistral', 'gemma3', 'gemma2', 'phi4', 'phi3', 'qwen2.5', 'qwen2', 'deepseek-r1'],
+  lmstudio:  ['local-model'],
+  generic:   [],
+};
+
 function setModelSuggestions(models) {
-  const list = document.getElementById('q-model-list');
+  const list    = document.getElementById('q-model-list');
+  const hint    = document.getElementById('q-model-hint');
+  const provider = document.getElementById('q-provider').value;
+  const curated  = PROVIDER_MODELS[provider] || [];
+  // Merge: detected live models first, then curated defaults
+  const merged = [...new Set([...(models || []), ...curated])];
   list.innerHTML = '';
-  (models || []).forEach(m => { const o = document.createElement('option'); o.value = m; list.appendChild(o); });
+  merged.forEach(m => { const o = document.createElement('option'); o.value = m; list.appendChild(o); });
+  if (curated.length > 0 && (models || []).length === 0) {
+    hint.textContent = 'Suggestions: ' + curated.slice(0, 4).join(' · ');
+  } else {
+    hint.textContent = '';
+  }
 }
 function applyDetected(info, { markTouched=true } = {}) {
   if (!info) return;
@@ -958,6 +1039,46 @@ async function detectLocalProviders({ autoApply=false } = {}) {
       applyDetected(items[0], { markTouched: false });
     }
   } catch(e) { /* best-effort */ }
+}
+
+// ── AI-assist / Suggest ──────────────────────────────────────────
+async function suggestConfig() {
+  const task = document.getElementById('q-task').value.trim();
+  if (!task) { document.getElementById('suggest-status').textContent = 'Please describe your task first.'; return; }
+  const btn = document.getElementById('suggest-btn');
+  const statusEl = document.getElementById('suggest-status');
+  btn.disabled = true;
+  btn.textContent = 'Thinking…';
+  statusEl.textContent = '';
+  statusEl.className = 'suggest-status';
+  try {
+    const body = {
+      task,
+      provider:    document.getElementById('q-provider').value,
+      model:       document.getElementById('q-model').value,
+      api_key_env: document.getElementById('q-apikey').value,
+      base_url:    document.getElementById('q-baseurl').value,
+    };
+    const r   = await fetch('/api/suggest', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+    const d   = await r.json();
+    if (!d.ok) { statusEl.textContent = 'Error: ' + d.error; statusEl.className = 'suggest-status error'; return; }
+    const s = d.data;
+    if (s.system_prompt)    document.getElementById('q-system').value         = s.system_prompt;
+    if (s.pre_prompt)       document.getElementById('q-pre').value            = s.pre_prompt;
+    if (s.input_template)   document.getElementById('q-template').value       = s.input_template;
+    if (s.post_prompt)      document.getElementById('q-post').value           = s.post_prompt;
+    if (s.response_field)   document.getElementById('q-response-field').value = s.response_field;
+    if (s.job_name)         document.getElementById('q-name').value           = s.job_name;
+    statusEl.textContent = '✓ Fields configured — review and adjust as needed.';
+    statusEl.className = 'suggest-status ok';
+    quickFormTouched = true;
+  } catch(e) {
+    statusEl.textContent = 'Request failed: ' + e.message;
+    statusEl.className = 'suggest-status error';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Configure with AI';
+  }
 }
 
 document.getElementById('detect-refresh').addEventListener('click', () => detectLocalProviders({ autoApply: false }));

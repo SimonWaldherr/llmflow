@@ -73,6 +73,10 @@ type APIConfig struct {
 	Timeout         time.Duration `json:"timeout" yaml:"timeout"`
 	MaxOutputTokens int64         `json:"max_output_tokens" yaml:"max_output_tokens"`
 	RateLimitRPM    int           `json:"rate_limit_rpm" yaml:"rate_limit_rpm"`
+	// PromptCaching enables provider-side prompt caching for the static parts of each
+	// request (system prompt, pre-prompt, post-prompt).
+	// Supported: anthropic (cache_control blocks), openai (automatic prefix caching + beta header).
+	PromptCaching bool `json:"prompt_caching" yaml:"prompt_caching"`
 }
 
 type PromptConfig struct {
@@ -192,15 +196,7 @@ func providerDefaultBaseURL(provider string) string {
 
 // ApplyDefaults fills in zero-value fields with sensible defaults.
 func (c *Config) ApplyDefaults() {
-	if c.API.Provider == "" {
-		c.API.Provider = ProviderOpenAI
-	}
-	if c.API.BaseURL == "" {
-		c.API.BaseURL = providerDefaultBaseURL(c.API.Provider)
-	}
-	if c.API.Timeout == 0 {
-		c.API.Timeout = 10 * time.Minute // 10 min; LLMs can be slow, especially local models
-	}
+	c.API.ApplyProviderDefaults()
 	if c.Processing.Mode == "" {
 		c.Processing.Mode = "per_record"
 	}
@@ -218,6 +214,20 @@ func (c *Config) ApplyDefaults() {
 	}
 	if c.Tools.MaxRounds <= 0 {
 		c.Tools.MaxRounds = 5
+	}
+}
+
+// ApplyProviderDefaults fills in zero-value API-level fields with sensible defaults.
+// This can be called independently of the full Config (e.g. for one-off LLM calls).
+func (c *APIConfig) ApplyProviderDefaults() {
+	if c.Provider == "" {
+		c.Provider = ProviderOpenAI
+	}
+	if c.BaseURL == "" {
+		c.BaseURL = providerDefaultBaseURL(c.Provider)
+	}
+	if c.Timeout == 0 {
+		c.Timeout = 300 * time.Second // 5 min; LLMs can be slow, especially local models
 	}
 }
 
