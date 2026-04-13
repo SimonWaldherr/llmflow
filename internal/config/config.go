@@ -23,8 +23,9 @@ type Config struct {
 
 // ToolsConfig controls optional agent tools the LLM may call during processing.
 // When Enabled is true and at least one tool is active the app uses an agentic
-// loop: the LLM may invoke tools (web fetch, web search, SQL queries) to gather
-// information before returning a final answer.
+// loop: the LLM may invoke tools (web fetch/search, link extraction,
+// sandboxed code execution, SQL queries) to gather information before
+// returning a final answer.
 type ToolsConfig struct {
 	// Enabled activates the agentic tool-calling loop.
 	Enabled bool `json:"enabled" yaml:"enabled"`
@@ -32,6 +33,12 @@ type ToolsConfig struct {
 	WebFetch bool `json:"web_fetch" yaml:"web_fetch"`
 	// WebSearch allows the LLM to search the web via DuckDuckGo.
 	WebSearch bool `json:"web_search" yaml:"web_search"`
+	// WebExtractLinks allows the LLM to extract absolute links from a web page.
+	WebExtractLinks bool `json:"web_extract_links" yaml:"web_extract_links"`
+	// CodeExecute allows the LLM to run sandboxed Go code via nanoGo.
+	CodeExecute bool `json:"code_execute" yaml:"code_execute"`
+	// Code configures the sandbox behavior for code_execute.
+	Code ToolsCodeConfig `json:"code" yaml:"code"`
 	// SQLQuery allows the LLM to run read-only SQL queries against a database.
 	SQLQuery bool `json:"sql_query" yaml:"sql_query"`
 	// SQL configures the database connection for the sql_query tool.
@@ -50,6 +57,24 @@ type ToolsSQLConfig struct {
 	// DSNEnv is the name of an environment variable that holds the DSN.
 	// If both DSN and DSNEnv are set, DSN takes precedence.
 	DSNEnv string `json:"dsn_env" yaml:"dsn_env"`
+}
+
+// ToolsCodeConfig controls sandboxed code execution via nanoGo.
+type ToolsCodeConfig struct {
+	// Timeout limits one interpreted program execution.
+	Timeout time.Duration `json:"timeout" yaml:"timeout"`
+	// MaxSourceBytes limits the source size accepted by the tool.
+	MaxSourceBytes int `json:"max_source_bytes" yaml:"max_source_bytes"`
+	// ReadOnlyFS enables HostReadFile(path) native for whitelisted relative paths.
+	ReadOnlyFS bool `json:"read_only_fs" yaml:"read_only_fs"`
+	// ReadWhitelist lists allowed files/folders relative to repo root.
+	ReadWhitelist []string `json:"read_whitelist" yaml:"read_whitelist"`
+	// HTTPGet enables HTTPGetText(url) native.
+	HTTPGet bool `json:"http_get" yaml:"http_get"`
+	// HTTPTimeout limits each HTTPGetText call.
+	HTTPTimeout time.Duration `json:"http_timeout" yaml:"http_timeout"`
+	// HTTPMinInterval enforces delay between HTTPGetText calls.
+	HTTPMinInterval time.Duration `json:"http_min_interval" yaml:"http_min_interval"`
 }
 
 // Provider constants for well-known LLM providers.
@@ -214,6 +239,21 @@ func (c *Config) ApplyDefaults() {
 	}
 	if c.Tools.MaxRounds <= 0 {
 		c.Tools.MaxRounds = 5
+	}
+	if c.Tools.Code.Timeout <= 0 {
+		c.Tools.Code.Timeout = 10 * time.Second
+	}
+	if c.Tools.Code.MaxSourceBytes <= 0 {
+		c.Tools.Code.MaxSourceBytes = 64 * 1024
+	}
+	if c.Tools.Code.HTTPTimeout <= 0 {
+		c.Tools.Code.HTTPTimeout = 5 * time.Second
+	}
+	if c.Tools.Code.HTTPMinInterval <= 0 {
+		c.Tools.Code.HTTPMinInterval = 200 * time.Millisecond
+	}
+	if len(c.Tools.Code.ReadWhitelist) == 0 {
+		c.Tools.Code.ReadWhitelist = []string{"examples", "README.md", "LICENSE"}
 	}
 }
 

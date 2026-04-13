@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -26,10 +27,17 @@ type App struct {
 	logger       *slog.Logger
 	dryRun       bool
 	progressFunc func(current, total int)
+	resultFunc   func(index, total int, record map[string]any)
 }
 
 // WithProgressFunc sets a callback invoked after each record is processed.
 func (a *App) WithProgressFunc(f func(current, total int)) *App { a.progressFunc = f; return a }
+
+// WithResultFunc sets a callback invoked for each successful output record.
+func (a *App) WithResultFunc(f func(index, total int, record map[string]any)) *App {
+	a.resultFunc = f
+	return a
+}
 
 func New(cfg config.Config, logger *slog.Logger) *App {
 	cfg.ApplyDefaults()
@@ -116,11 +124,38 @@ func (a *App) buildTools() []tools.Tool {
 		ts = append(ts, tools.NewWebSearchTool())
 		a.logger.Info("tool enabled", "tool", "web_search")
 	}
+	if a.cfg.Tools.WebExtractLinks {
+		ts = append(ts, tools.NewWebExtractLinksTool())
+		a.logger.Info("tool enabled", "tool", "web_extract_links")
+	}
+	if a.cfg.Tools.CodeExecute {
+		ts = append(ts, tools.NewCodeExecTool(tools.CodeExecConfig{
+			Timeout:         a.cfg.Tools.Code.Timeout,
+			MaxSourceBytes:  a.cfg.Tools.Code.MaxSourceBytes,
+			ReadOnlyFS:      a.cfg.Tools.Code.ReadOnlyFS,
+			ReadWhitelist:   a.cfg.Tools.Code.ReadWhitelist,
+			HTTPGet:         a.cfg.Tools.Code.HTTPGet,
+			HTTPTimeout:     a.cfg.Tools.Code.HTTPTimeout,
+			HTTPMinInterval: a.cfg.Tools.Code.HTTPMinInterval,
+		}))
+		a.logger.Info("tool enabled", "tool", "code_execute")
+	}
 	if a.cfg.Tools.SQLQuery {
 		dsn := config.ResolveSecret(a.cfg.Tools.SQL.DSN, a.cfg.Tools.SQL.DSNEnv)
 		driver := a.cfg.Tools.SQL.Driver
 		if driver == "" {
 			driver = "sqlite"
+		}
+		if strings.TrimSpace(dsn) == "" && strings.EqualFold(driver, "sqlite") {
+			switch {
+			case strings.EqualFold(a.cfg.Input.Type, "sqlite") && strings.TrimSpace(a.cfg.Input.Path) != "":
+				dsn = a.cfg.Input.Path
+			case strings.EqualFold(a.cfg.Output.Type, "sqlite") && strings.TrimSpace(a.cfg.Output.Path) != "":
+				dsn = a.cfg.Output.Path
+			}
+		}
+		if strings.TrimSpace(dsn) == "" {
+			a.logger.Warn("sql_query tool enabled with empty DSN; set tools.sql.dsn or tools.sql.dsn_env", "driver", driver)
 		}
 		ts = append(ts, tools.NewSQLQueryTool(driver, dsn))
 		a.logger.Info("tool enabled", "tool", "sql_query", "driver", driver)
@@ -227,9 +262,19 @@ func (a *App) processRecords(
 				}
 				outRec[a.cfg.Processing.ResponseField] = responseText
 				resultCh <- indexedResult{idx: j.idx, rec: outRec}
+				cur := int(atomic.AddInt64(&processed, 1))
 				if a.progressFunc != nil {
-					cur := int(atomic.AddInt64(&processed, 1))
 					a.progressFunc(cur, len(records))
+				}
+				if a.resultFunc != nil {
+					preview := make(map[string]any, len(outRec))
+					for k, v := range outRec {
+						preview[k] = v
+					}
+					a.resultFunc(j.idx, len(records), preview)
+				}
+				if cur == 1 || cur == len(records) || cur%10 == 0 {
+					a.logger.Info("processing progress", "current", cur, "total", len(records))
 				}
 			}
 		}()

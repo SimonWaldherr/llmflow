@@ -6,6 +6,7 @@ import (
 	"crypto/subtle"
 	"embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -45,18 +46,26 @@ type JobProgress struct {
 	Total   int `json:"total"`
 }
 
+// JobPreviewItem captures one completed output record for live preview.
+type JobPreviewItem struct {
+	Index  int            `json:"index"`
+	Record map[string]any `json:"record"`
+}
+
 // JobStatus tracks a running or completed job.
 type JobStatus struct {
-	ID        int         `json:"id"`
-	Name      string      `json:"name,omitempty"`
-	Status    string      `json:"status"` // running | completed | failed | cancelled
-	StartedAt time.Time   `json:"started_at"`
-	EndedAt   time.Time   `json:"ended_at,omitempty"`
-	Error     string      `json:"error,omitempty"`
-	Config    string      `json:"config"`
-	Logs      []string    `json:"logs"`
-	Archived  bool        `json:"archived"`
-	Progress  JobProgress `json:"progress"`
+	ID           int              `json:"id"`
+	Name         string           `json:"name,omitempty"`
+	Status       string           `json:"status"` // running | completed | failed | cancelled
+	StartedAt    time.Time        `json:"started_at"`
+	EndedAt      time.Time        `json:"ended_at,omitempty"`
+	Error        string           `json:"error,omitempty"`
+	Config       string           `json:"config"`
+	Logs         []string         `json:"logs"`
+	Preview      []JobPreviewItem `json:"preview,omitempty"`
+	PreviewCount int              `json:"preview_count"`
+	Archived     bool             `json:"archived"`
+	Progress     JobProgress      `json:"progress"`
 	// unexported – not serialised
 	cancelFn context.CancelFunc
 }
@@ -241,6 +250,8 @@ func (s *Server) handleRun(w http.ResponseWriter, r *http.Request) {
 		lc := &logCollector{job: job, mu: &s.mu}
 		logger := slog.New(slog.NewJSONHandler(lc, &slog.HandlerOptions{Level: slog.LevelDebug}))
 
+		const maxPreviewItems = 20
+
 		// Progress callback – updates the job in a goroutine-safe way.
 		progress := func(current, total int) {
 			s.mu.Lock()
@@ -249,7 +260,19 @@ func (s *Server) handleRun(w http.ResponseWriter, r *http.Request) {
 			s.mu.Unlock()
 		}
 
-		a := app.New(cfg, logger).WithDryRun(req.DryRun).WithProgressFunc(progress)
+		resultPreview := func(index, total int, record map[string]any) {
+			s.mu.Lock()
+			defer s.mu.Unlock()
+			job.PreviewCount++
+			item := JobPreviewItem{Index: index, Record: record}
+			if len(job.Preview) >= maxPreviewItems {
+				job.Preview = append(job.Preview[1:], item)
+				return
+			}
+			job.Preview = append(job.Preview, item)
+		}
+
+		a := app.New(cfg, logger).WithDryRun(req.DryRun).WithProgressFunc(progress).WithResultFunc(resultPreview)
 		runErr := a.Run(jobCtx)
 
 		s.mu.Lock()
@@ -449,6 +472,7 @@ type suggestRequest struct {
 	Model     string `json:"model"`
 	APIKeyEnv string `json:"api_key_env"`
 	BaseURL   string `json:"base_url"`
+	Timeout   string `json:"timeout"`
 }
 
 type suggestResponse struct {
@@ -507,6 +531,12 @@ func (s *Server) handleSuggest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	suggestTimeout, err := resolveSuggestTimeout(req.Timeout)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, apiResponse{Error: err.Error()})
+		return
+	}
+
 	// Build a minimal APIConfig from the quick-form state passed by the client.
 	provider := req.Provider
 	if provider == "" {
@@ -517,7 +547,7 @@ func (s *Server) handleSuggest(w http.ResponseWriter, r *http.Request) {
 		Model:     req.Model,
 		APIKeyEnv: req.APIKeyEnv,
 		BaseURL:   req.BaseURL,
-		Timeout:   60 * time.Second,
+		Timeout:   suggestTimeout,
 	}
 	apiCfg.ApplyProviderDefaults()
 
@@ -535,19 +565,32 @@ func (s *Server) handleSuggest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	gen := llm.New(apiCfg, apiKey)
-
 	userMsg := "Task description:\n" + strings.TrimSpace(req.Task)
 	if cfg := strings.TrimSpace(req.Config); cfg != "" {
 		userMsg += "\n\nCurrent config for reference:\n```yaml\n" + cfg + "\n```"
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), 45*time.Second)
-	defer cancel()
+	generateWithTimeout := func(timeout time.Duration) (string, error) {
+		tmpCfg := apiCfg
+		tmpCfg.Timeout = timeout
+		gen := llm.New(tmpCfg, apiKey)
+		ctx, cancel := context.WithTimeout(r.Context(), timeout+5*time.Second)
+		defer cancel()
+		return gen.Generate(ctx, suggestSystemPrompt, userMsg)
+	}
 
-	raw, err := gen.Generate(ctx, suggestSystemPrompt, userMsg)
+	raw, err := generateWithTimeout(suggestTimeout)
+	if err != nil && errors.Is(err, context.DeadlineExceeded) {
+		retryTimeout := suggestTimeout * 2
+		if retryTimeout > 10*time.Minute {
+			retryTimeout = 10 * time.Minute
+		}
+		if retryTimeout > suggestTimeout {
+			raw, err = generateWithTimeout(retryTimeout)
+		}
+	}
 	if err != nil {
-		writeJSON(w, http.StatusBadGateway, apiResponse{Error: "LLM call failed: " + err.Error()})
+		writeJSON(w, http.StatusBadGateway, apiResponse{Error: fmt.Sprintf("LLM call failed after %s timeout budget: %s", suggestTimeout.String(), err.Error())})
 		return
 	}
 
@@ -567,6 +610,35 @@ func (s *Server) handleSuggest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, apiResponse{OK: true, Data: sr})
+}
+
+func resolveSuggestTimeout(raw string) (time.Duration, error) {
+	// Default timeout for quick suggestions. Can be overridden server-side.
+	timeout := 120 * time.Second
+	if fromEnv := strings.TrimSpace(os.Getenv("LLMFLOW_WEB_SUGGEST_TIMEOUT")); fromEnv != "" {
+		d, err := time.ParseDuration(fromEnv)
+		if err != nil || d <= 0 {
+			return 0, fmt.Errorf("invalid LLMFLOW_WEB_SUGGEST_TIMEOUT value %q", fromEnv)
+		}
+		timeout = d
+	}
+
+	if raw = strings.TrimSpace(raw); raw != "" {
+		d, err := time.ParseDuration(raw)
+		if err != nil || d <= 0 {
+			return 0, fmt.Errorf("invalid suggest timeout %q (use duration like 60s or 5m)", raw)
+		}
+		timeout = d
+	}
+
+	if timeout < 10*time.Second {
+		timeout = 10 * time.Second
+	}
+	if timeout > 10*time.Minute {
+		timeout = 10 * time.Minute
+	}
+
+	return timeout, nil
 }
 
 func parseConfig(yamlText string) (config.Config, error) {

@@ -15,6 +15,8 @@ results to various output destinations.
 - Structured JSON logs via `log/slog`
 - Configurable concurrency, rate limiting, and retry count
 - Web UI with optional Bearer-token authentication and graceful shutdown
+- Live job monitoring with progress, logs, and intermediate result previews
+- Optional sandboxed code execution tool via nanoGo
 - Health endpoint (`GET /health`) for container orchestrators
 
 ## Quick start
@@ -44,6 +46,10 @@ The web UI exposes:
 | `GET`  | `/api/jobs/{id}` | Get job status and logs |
 | `POST` | `/api/upload` | Upload an input file |
 | `GET`  | `/api/detect` | Detect local Ollama / LM Studio |
+
+Notes:
+- `AI Quick Setup` uses the same timeout as the quick form (`api.timeout`) and supports longer-running local models.
+- You can set `LLMFLOW_WEB_SUGGEST_TIMEOUT` on the server to override the default suggestion timeout budget.
 
 ## Provider examples
 
@@ -97,6 +103,27 @@ processing:
   workers: 2                # parallel workers
   max_retries: 3            # LLM call retries per record
   dry_run: false
+
+tools:
+  enabled: true
+  web_fetch: true
+  web_search: true
+  web_extract_links: true
+  code_execute: true
+  sql_query: false
+  max_rounds: 5
+  code:
+    timeout: 10s            # per snippet execution timeout
+    max_source_bytes: 65536
+    read_only_fs: false     # enables HostReadFile(path)
+    read_whitelist: [examples, README.md, LICENSE]
+    http_get: false         # enables HTTPGetText(url)
+    http_timeout: 5s
+    http_min_interval: 200ms
+  sql:
+    driver: sqlite          # sqlite | sqlserver
+    dsn: ./lookup.db        # optional direct DSN
+    dsn_env: DB_DSN         # optional env fallback
 ```
 
 ### Example files in `examples/`

@@ -176,6 +176,17 @@ textarea { font-family: var(--font-mono); resize: vertical; }
   max-height: 500px; overflow-y: auto; white-space: pre-wrap; word-break: break-all;
   line-height: 1.7; color: var(--text-muted);
 }
+.preview-box {
+  background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+  padding: 10px 12px; font-family: var(--font-mono); font-size: 12px;
+  max-height: 280px; overflow-y: auto; line-height: 1.5;
+}
+.preview-item { padding: 8px 0; border-bottom: 1px dashed var(--border); }
+.preview-item:last-child { border-bottom: none; }
+.preview-meta { color: var(--accent); font-size: 11px; margin-bottom: 6px; }
+.preview-json {
+  margin: 0; white-space: pre-wrap; word-break: break-word; color: var(--text-muted);
+}
 .detail-header {
   display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 12px;
 }
@@ -520,7 +531,7 @@ textarea { font-family: var(--font-mono); resize: vertical; }
 
   <!-- Agentic tools -->
   <details id="tools-section" class="tools-section">
-    <summary>Agentic Tools <span style="color:var(--text-muted);font-weight:400">(optional — let the LLM call tools: web fetch, web search, SQL)</span></summary>
+    <summary>Agentic Tools <span style="color:var(--text-muted);font-weight:400">(optional — let the LLM call tools: web fetch/search, code execution, SQL)</span></summary>
     <div class="tools-grid">
       <div class="tool-card">
         <label><input type="checkbox" id="t-enabled"> Enable Agent Tools</label>
@@ -539,6 +550,42 @@ textarea { font-family: var(--font-mono); resize: vertical; }
         <p>Search the web via DuckDuckGo — no API key required. Good for current information.</p>
       </div>
       <div class="tool-card">
+        <label><input type="checkbox" id="t-web-extract-links"> Web Extract Links</label>
+        <p>Extract absolute HTTP(S) links from a page so the LLM can quickly discover useful follow-up sources.</p>
+      </div>
+      <div class="tool-card">
+        <label><input type="checkbox" id="t-code-exec"> Sandbox Code Execution (nanoGo)</label>
+        <p>Execute restricted Go snippets in an interpreter. Useful for lightweight transforms and calculations.</p>
+        <div id="t-code-extra" class="tool-extra">
+          <div class="form-group" style="margin-bottom:8px">
+            <label>Execution Timeout</label>
+            <input id="t-code-timeout" type="text" value="10s" style="margin-top:4px">
+          </div>
+          <div class="form-group" style="margin-bottom:8px">
+            <label>Max Source Bytes</label>
+            <input id="t-code-max-bytes" type="number" value="65536" min="1024" max="1048576" style="margin-top:4px">
+          </div>
+          <div class="form-group" style="margin-bottom:8px">
+            <label><input type="checkbox" id="t-code-readonlyfs" style="width:auto"> Enable HostReadFile(path)</label>
+          </div>
+          <div class="form-group" style="margin-bottom:8px">
+            <label>Read Whitelist (comma-separated, repo-relative)</label>
+            <input id="t-code-read-whitelist" type="text" value="examples,README.md,LICENSE" style="margin-top:4px">
+          </div>
+          <div class="form-group" style="margin-bottom:8px">
+            <label><input type="checkbox" id="t-code-httpget" style="width:auto"> Enable HTTPGetText(url)</label>
+          </div>
+          <div class="form-group" style="margin-bottom:8px">
+            <label>HTTP Timeout</label>
+            <input id="t-code-http-timeout" type="text" value="5s" style="margin-top:4px">
+          </div>
+          <div class="form-group" style="margin-bottom:0">
+            <label>HTTP Min Interval</label>
+            <input id="t-code-http-min-interval" type="text" value="200ms" style="margin-top:4px">
+          </div>
+        </div>
+      </div>
+      <div class="tool-card">
         <label><input type="checkbox" id="t-sql-query"> SQL Query</label>
         <p>Execute read-only SELECT queries to enrich records with data from a database.</p>
         <div id="t-sql-extra" class="tool-extra">
@@ -549,8 +596,12 @@ textarea { font-family: var(--font-mono); resize: vertical; }
               <option value="sqlserver">SQL Server (MSSQL)</option>
             </select>
           </div>
+          <div class="form-group" style="margin-bottom:8px">
+            <label>DSN <span style="font-weight:400">(optional direct string)</span></label>
+            <input id="t-sql-dsn" type="text" placeholder="file:./data.db?_pragma=busy_timeout%3D5000" style="margin-top:4px">
+          </div>
           <div class="form-group" style="margin-bottom:0">
-            <label>DSN Env Variable</label>
+            <label>DSN Env Variable <span style="font-weight:400">(fallback)</span></label>
             <input id="t-sql-dsn-env" type="text" placeholder="DB_DSN" style="margin-top:4px">
           </div>
         </div>
@@ -619,8 +670,18 @@ processing:
 #   enabled: true
 #   web_fetch: true
 #   web_search: true
+#   web_extract_links: true
+#   code_execute: true
 #   sql_query: false
 #   max_rounds: 5
+#   code:
+#     timeout: 10s
+#     max_source_bytes: 65536
+#     read_only_fs: false
+#     read_whitelist: ["examples", "README.md", "LICENSE"]
+#     http_get: false
+#     http_timeout: 5s
+#     http_min_interval: 200ms
 #   sql:
 #     driver: sqlite        # sqlite or sqlserver
 #     dsn_env: DB_DSN       # env var holding the connection string
@@ -664,6 +725,11 @@ processing:
       <div class="progress-label" id="detail-progress-label"></div>
     </div>
     <div id="detail-error" class="status-bar error" style="display:none; margin-bottom:12px;"></div>
+
+    <h4 class="section-title" style="font-size:14px;margin-top:4px;margin-bottom:8px;">Live Results Preview <span id="detail-preview-count" style="font-weight:400;color:var(--text-muted)"></span></h4>
+    <div class="preview-box" id="detail-preview">(no completed records yet)</div>
+
+    <h4 class="section-title" style="font-size:14px;margin-top:16px;margin-bottom:8px;">Execution Logs</h4>
     <div class="log-box" id="detail-logs"></div>
   </div>
 </div>
@@ -672,13 +738,19 @@ processing:
 
 <script>
 // ── Tabs ───────────────────────────────────────────────────────────
+function activatePanel(panelName) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  const tab = document.querySelector(`[data-panel="${panelName}"]`);
+  if (tab) tab.classList.add('active');
+  const panel = document.getElementById('panel-' + panelName);
+  if (panel) panel.classList.add('active');
+  if (panelName === 'jobs') refreshJobs();
+}
+
 document.querySelectorAll('.tab').forEach(tab => {
   tab.addEventListener('click', () => {
-    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-    document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
-    tab.classList.add('active');
-    document.getElementById('panel-' + tab.dataset.panel).classList.add('active');
-    if (tab.dataset.panel === 'jobs') refreshJobs();
+    activatePanel(tab.dataset.panel);
   });
 });
 
@@ -774,13 +846,32 @@ function buildYAMLFromForm() {
   if (document.getElementById('t-enabled').checked) {
     const webFetch  = document.getElementById('t-web-fetch').checked;
     const webSearch = document.getElementById('t-web-search').checked;
+    const webExtractLinks = document.getElementById('t-web-extract-links').checked;
+    const codeExecute = document.getElementById('t-code-exec').checked;
     const sqlQuery  = document.getElementById('t-sql-query').checked;
     const maxRounds = document.getElementById('t-max-rounds').value || '5';
-    yaml += `\n\ntools:\n  enabled: true\n  web_fetch: ${webFetch}\n  web_search: ${webSearch}\n  sql_query: ${sqlQuery}\n  max_rounds: ${maxRounds}`;
+    yaml += `\n\ntools:\n  enabled: true\n  web_fetch: ${webFetch}\n  web_search: ${webSearch}\n  web_extract_links: ${webExtractLinks}\n  code_execute: ${codeExecute}\n  sql_query: ${sqlQuery}\n  max_rounds: ${maxRounds}`;
+    if (codeExecute) {
+      const codeTimeout = document.getElementById('t-code-timeout').value.trim() || '10s';
+      const codeMaxBytes = document.getElementById('t-code-max-bytes').value || '65536';
+      const codeReadOnlyFS = document.getElementById('t-code-readonlyfs').checked;
+      const codeReadWhitelist = document.getElementById('t-code-read-whitelist').value.trim();
+      const codeHTTPGet = document.getElementById('t-code-httpget').checked;
+      const codeHTTPTimeout = document.getElementById('t-code-http-timeout').value.trim() || '5s';
+      const codeHTTPMinInterval = document.getElementById('t-code-http-min-interval').value.trim() || '200ms';
+      yaml += `\n  code:\n    timeout: ${codeTimeout}\n    max_source_bytes: ${codeMaxBytes}\n    read_only_fs: ${codeReadOnlyFS}\n    http_get: ${codeHTTPGet}\n    http_timeout: ${codeHTTPTimeout}\n    http_min_interval: ${codeHTTPMinInterval}`;
+      if (codeReadWhitelist) {
+        const items = codeReadWhitelist.split(',').map(v => v.trim()).filter(Boolean).map(v => `"${v.replace(/"/g, '\\\"')}"`);
+        if (items.length > 0) yaml += `\n    read_whitelist: [${items.join(', ')}]`;
+      }
+    }
     if (sqlQuery) {
       const sqlDriver = document.getElementById('t-sql-driver').value;
+      const sqlDsn    = document.getElementById('t-sql-dsn').value.trim();
       const sqlDsnEnv = document.getElementById('t-sql-dsn-env').value || 'DB_DSN';
-      yaml += `\n  sql:\n    driver: ${sqlDriver}\n    dsn_env: ${sqlDsnEnv}`;
+      yaml += `\n  sql:\n    driver: ${sqlDriver}`;
+      if (sqlDsn) yaml += `\n    dsn: ${sqlDsn}`;
+      else yaml += `\n    dsn_env: ${sqlDsnEnv}`;
     }
   }
   return yaml;
@@ -788,10 +879,7 @@ function buildYAMLFromForm() {
 
 function generateYAML() {
   document.getElementById('yaml-editor').value = buildYAMLFromForm();
-  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
-  document.querySelector('[data-panel="editor"]').classList.add('active');
-  document.getElementById('panel-editor').classList.add('active');
+  activatePanel('editor');
   showStatus('editor-status', 'info', 'YAML generated from Quick Start form.');
 }
 
@@ -828,6 +916,7 @@ async function runQuick(dryRun) {
   if (d.ok) {
     showStatus('quick-status', 'ok', `Job #${d.data.id} started${dryRun?' (dry run)':''}. Switch to the Jobs tab to monitor.`);
     startAutoRefresh();
+    await openJobsAndFocus(d.data.id);
   } else {
     showStatus('quick-status', 'error', 'Failed: ' + d.error);
   }
@@ -838,9 +927,16 @@ async function runYAML(dryRun) {
   if (d.ok) {
     showStatus('editor-status', 'ok', `Job #${d.data.id} started${dryRun?' (dry run)':''}. See the Jobs tab.`);
     startAutoRefresh();
+    await openJobsAndFocus(d.data.id);
   } else {
     showStatus('editor-status', 'error', 'Failed: ' + d.error);
   }
+}
+
+async function openJobsAndFocus(id) {
+  activatePanel('jobs');
+  await refreshJobs();
+  await selectJob(id);
 }
 
 // ── Jobs ──────────────────────────────────────────────────────────
@@ -960,6 +1056,25 @@ async function loadJobDetail(id) {
     const atBottom = logsEl.scrollHeight - logsEl.scrollTop <= logsEl.clientHeight + 60;
     logsEl.textContent = (j.logs || []).join('\n') || '(no logs yet)';
     if (atBottom) logsEl.scrollTop = logsEl.scrollHeight;
+
+    // Live preview of completed records
+    const previewEl = document.getElementById('detail-preview');
+    const previewCountEl = document.getElementById('detail-preview-count');
+    const preview = Array.isArray(j.preview) ? j.preview : [];
+    if (typeof j.preview_count === 'number' && j.preview_count > 0) {
+      previewCountEl.textContent = `(showing last ${preview.length} of ${j.preview_count})`;
+    } else {
+      previewCountEl.textContent = '';
+    }
+    if (preview.length === 0) {
+      previewEl.textContent = '(no completed records yet)';
+    } else {
+      previewEl.innerHTML = preview.map(item => {
+        const n = typeof item.index === 'number' ? item.index + 1 : '?';
+        const json = escHtml(JSON.stringify(item.record || {}, null, 2));
+        return `<div class="preview-item"><div class="preview-meta">Record #${n}</div><pre class="preview-json">${json}</pre></div>`;
+      }).join('');
+    }
 
     if (j.status !== 'running') stopAutoRefresh();
   } catch(e) { console.error('loadJobDetail:', e); }
@@ -1092,10 +1207,16 @@ async function suggestConfig() {
   if (!task) { document.getElementById('suggest-status').textContent = 'Please describe your task first.'; return; }
   const btn = document.getElementById('suggest-btn');
   const statusEl = document.getElementById('suggest-status');
+  const suggestTimeout = (document.getElementById('q-timeout').value || '300s').trim();
   btn.disabled = true;
   btn.textContent = 'Thinking…';
-  statusEl.textContent = '';
+  const startedAt = Date.now();
+  statusEl.textContent = 'Analyzing your task…';
   statusEl.className = 'suggest-status';
+  const tick = setInterval(() => {
+    const sec = Math.max(1, Math.floor((Date.now() - startedAt) / 1000));
+    statusEl.textContent = `Analyzing your task… ${sec}s`;
+  }, 1000);
   try {
     const body = {
       task,
@@ -1103,6 +1224,7 @@ async function suggestConfig() {
       model:       getModelValue(),
       api_key_env: document.getElementById('q-apikey').value,
       base_url:    document.getElementById('q-baseurl').value,
+      timeout:     suggestTimeout,
     };
     const r   = await fetch('/api/suggest', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
     const d   = await r.json();
@@ -1121,6 +1243,7 @@ async function suggestConfig() {
     statusEl.textContent = 'Request failed: ' + e.message;
     statusEl.className = 'suggest-status error';
   } finally {
+    clearInterval(tick);
     btn.disabled = false;
     btn.textContent = 'Configure with AI';
   }
@@ -1152,6 +1275,10 @@ document.getElementById('q-provider').addEventListener('change', e => {
 
 document.getElementById('t-sql-query').addEventListener('change', e =>
   document.getElementById('t-sql-extra').classList.toggle('show', e.target.checked)
+);
+
+document.getElementById('t-code-exec').addEventListener('change', e =>
+  document.getElementById('t-code-extra').classList.toggle('show', e.target.checked)
 );
 
 // ── Init ──────────────────────────────────────────────────────────

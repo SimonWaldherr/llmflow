@@ -2,6 +2,7 @@ package web
 
 import (
 	"testing"
+	"time"
 
 	"github.com/SimonWaldherr/llmflow/internal/config"
 )
@@ -68,5 +69,58 @@ func TestBuildDetectCandidatesUsesEnvOverrides(t *testing.T) {
 	}
 	if !foundLMStudio {
 		t.Fatal("expected lmstudio candidate from LLMFLOW_LMSTUDIO_BASE_URL")
+	}
+}
+
+func TestResolveSuggestTimeout_Default(t *testing.T) {
+	t.Setenv("LLMFLOW_WEB_SUGGEST_TIMEOUT", "")
+
+	got, err := resolveSuggestTimeout("")
+	if err != nil {
+		t.Fatalf("resolveSuggestTimeout returned error: %v", err)
+	}
+	if got != 120*time.Second {
+		t.Fatalf("expected 120s default, got %s", got)
+	}
+}
+
+func TestResolveSuggestTimeout_UsesRequestOverride(t *testing.T) {
+	t.Setenv("LLMFLOW_WEB_SUGGEST_TIMEOUT", "90s")
+
+	got, err := resolveSuggestTimeout("5m")
+	if err != nil {
+		t.Fatalf("resolveSuggestTimeout returned error: %v", err)
+	}
+	if got != 5*time.Minute {
+		t.Fatalf("expected 5m from request override, got %s", got)
+	}
+}
+
+func TestResolveSuggestTimeout_ClampsAndValidates(t *testing.T) {
+	t.Setenv("LLMFLOW_WEB_SUGGEST_TIMEOUT", "1s")
+
+	got, err := resolveSuggestTimeout("")
+	if err != nil {
+		t.Fatalf("resolveSuggestTimeout returned error: %v", err)
+	}
+	if got != 10*time.Second {
+		t.Fatalf("expected lower clamp to 10s, got %s", got)
+	}
+
+	got, err = resolveSuggestTimeout("20m")
+	if err != nil {
+		t.Fatalf("resolveSuggestTimeout returned error: %v", err)
+	}
+	if got != 10*time.Minute {
+		t.Fatalf("expected upper clamp to 10m, got %s", got)
+	}
+
+	if _, err := resolveSuggestTimeout("invalid"); err == nil {
+		t.Fatal("expected invalid request timeout to fail")
+	}
+
+	t.Setenv("LLMFLOW_WEB_SUGGEST_TIMEOUT", "nope")
+	if _, err := resolveSuggestTimeout(""); err == nil {
+		t.Fatal("expected invalid env timeout to fail")
 	}
 }

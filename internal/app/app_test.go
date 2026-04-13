@@ -2,9 +2,11 @@ package app
 
 import (
 	"context"
+	"database/sql"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/SimonWaldherr/llmflow/internal/config"
@@ -155,5 +157,115 @@ func TestProcessRecords_StopOnError(t *testing.T) {
 	_, err := a.processRecords(context.Background(), gen, pb, nil, records, 1, nil)
 	if err == nil {
 		t.Fatal("expected error when continue_on_error is false")
+	}
+}
+
+func TestProcessRecords_ResultCallback(t *testing.T) {
+	cfg := baseConfig(t)
+	a := New(cfg, newTestLogger())
+	gen := &fakeGenerator{response: "ok"}
+	pb := newTestPromptBuilder(t)
+
+	var got int
+	a.WithResultFunc(func(_ int, _ int, record map[string]any) {
+		if record["result"] == "ok" {
+			got++
+		}
+	})
+
+	records := []map[string]any{{"name": "Alice"}, {"name": "Bob"}}
+	_, err := a.processRecords(context.Background(), gen, pb, nil, records, 1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != 2 {
+		t.Fatalf("expected result callback to fire twice, got %d", got)
+	}
+}
+
+func TestBuildTools_SQLiteUsesInputPathFallback(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "lookup.db")
+
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec(`CREATE TABLE items (name TEXT); INSERT INTO items(name) VALUES ('alpha'), ('beta');`); err != nil {
+		t.Fatalf("seed sqlite: %v", err)
+	}
+
+	cfg := baseConfig(t)
+	cfg.Input.Type = "sqlite"
+	cfg.Input.Path = dbPath
+	cfg.Tools.Enabled = true
+	cfg.Tools.SQLQuery = true
+	cfg.Tools.SQL.Driver = "sqlite"
+	cfg.Tools.SQL.DSN = ""
+	cfg.Tools.SQL.DSNEnv = ""
+
+	a := New(cfg, newTestLogger())
+	ts := a.buildTools()
+	if len(ts) != 1 {
+		t.Fatalf("expected 1 enabled tool, got %d", len(ts))
+	}
+	if ts[0].Name != "sql_query" {
+		t.Fatalf("expected sql_query tool, got %q", ts[0].Name)
+	}
+
+	out, err := ts[0].Execute(context.Background(), `{"query":"SELECT name FROM items ORDER BY name"}`)
+	if err != nil {
+		t.Fatalf("sql_query execute failed: %v", err)
+	}
+	if !strings.Contains(out, "alpha") || !strings.Contains(out, "beta") {
+		t.Fatalf("unexpected sql_query output: %s", out)
+	}
+}
+
+func TestBuildTools_SQLitePrefersExplicitDSN(t *testing.T) {
+	dir := t.TempDir()
+	explicitPath := filepath.Join(dir, "explicit.db")
+	fallbackPath := filepath.Join(dir, "fallback.db")
+
+	seedDB := func(path, value string) {
+		t.Helper()
+		db, err := sql.Open("sqlite", path)
+		if err != nil {
+			t.Fatalf("open sqlite %s: %v", path, err)
+		}
+		defer db.Close()
+		if _, err := db.Exec(`CREATE TABLE items (name TEXT); INSERT INTO items(name) VALUES (?);`, value); err != nil {
+			t.Fatalf("seed sqlite %s: %v", path, err)
+		}
+	}
+
+	seedDB(explicitPath, "explicit")
+	seedDB(fallbackPath, "fallback")
+
+	cfg := baseConfig(t)
+	cfg.Input.Type = "sqlite"
+	cfg.Input.Path = fallbackPath
+	cfg.Tools.Enabled = true
+	cfg.Tools.SQLQuery = true
+	cfg.Tools.SQL.Driver = "sqlite"
+	cfg.Tools.SQL.DSN = explicitPath
+
+	a := New(cfg, newTestLogger())
+	ts := a.buildTools()
+	if len(ts) != 1 {
+		t.Fatalf("expected 1 enabled tool, got %d", len(ts))
+	}
+
+	out, err := ts[0].Execute(context.Background(), `{"query":"SELECT name FROM items"}`)
+	if err != nil {
+		t.Fatalf("sql_query execute failed: %v", err)
+	}
+	if !strings.Contains(out, "explicit") {
+		t.Fatalf("expected query against explicit DSN, output: %s", out)
+	}
+	if strings.Contains(out, "fallback") {
+		t.Fatalf("unexpected fallback record in output: %s", out)
 	}
 }
