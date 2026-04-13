@@ -241,6 +241,26 @@ textarea { font-family: var(--font-mono); resize: vertical; }
 
 .section-sep { border: none; border-top: 1px solid var(--border); margin: 20px 0; }
 
+/* Advanced processing collapsible */
+.adv-processing {
+  grid-column: 1 / -1;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  padding: 12px 16px;
+  margin-top: 4px;
+}
+.adv-processing summary {
+  cursor: pointer; font-size: 13px; font-weight: 600; color: var(--text-muted);
+  user-select: none; list-style: none;
+}
+.adv-processing summary::before { content: '▶ '; font-size: 11px; }
+.adv-processing[open] summary::before { content: '▼ '; }
+.adv-processing .adv-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 14px;
+}
+@media (max-width: 800px) { .adv-processing .adv-grid { grid-template-columns: 1fr; } }
+
 /* AI-assist bar */
 .ai-assist-bar {
   background: linear-gradient(135deg, rgba(124,58,237,0.08) 0%, rgba(124,58,237,0.03) 100%);
@@ -368,11 +388,11 @@ textarea { font-family: var(--font-mono); resize: vertical; }
     </div>
     <div class="form-group">
       <label>Model</label>
-      <input id="q-model" type="text" placeholder="gpt-4o-mini" list="q-model-list">
-      <datalist id="q-model-list"></datalist>
+      <select id="q-model" onchange="onModelSelectChange()"></select>
+      <input id="q-model-custom" type="text" placeholder="your-model-name" style="display:none; margin-top:6px">
       <div class="hint" id="q-model-hint"></div>
     </div>
-    <div class="form-group">
+    <div class="form-group q-cloud-only">
       <label>API Key Environment Variable</label>
       <input id="q-apikey" type="text" placeholder="OPENAI_API_KEY">
       <div class="hint">Name of the env var that holds the API key. Not required for local providers.</div>
@@ -458,39 +478,44 @@ textarea { font-family: var(--font-mono); resize: vertical; }
       <div class="hint">Number of records processed concurrently.</div>
     </div>
     <div class="form-group">
-      <label>Rate Limit (RPM, 0 = unlimited)</label>
-      <input id="q-rpm" type="number" value="60" min="0">
-    </div>
-    <div class="form-group">
-      <label>Timeout per LLM request</label>
-      <input id="q-timeout" type="text" value="300s">
-      <div class="hint">Increase for slow / local models. Format: <code>60s</code>, <code>5m</code>. Default 300 s.</div>
-    </div>
-    <div class="form-group">
-      <label>Max Retries</label>
-      <input id="q-retries" type="number" value="3" min="0" max="10">
-      <div class="hint">Retry on transient errors with exponential back-off.</div>
-    </div>
-    <div class="form-group">
-      <label>On Error</label>
-      <select id="q-continue-on-error">
-        <option value="true">Continue — skip failed records</option>
-        <option value="false">Stop — abort job on first error</option>
-      </select>
-    </div>
-    <div class="form-group">
       <label>Job Name <span style="font-weight:400">(optional)</span></label>
       <input id="q-name" type="text" placeholder="My sentiment analysis run">
       <div class="hint">A human-readable label shown in the Jobs list.</div>
     </div>
-    <div class="form-group">
-      <label>Prompt Caching</label>
-      <select id="q-prompt-caching">
-        <option value="false">Disabled</option>
-        <option value="true">Enabled</option>
-      </select>
-      <div class="hint">Caches the static system/pre/post prompt prefix server-side. Supported by OpenAI (&ge;1024 tokens) and Anthropic.</div>
-    </div>
+    <details class="adv-processing quick-full">
+      <summary>⚙ Advanced settings</summary>
+      <div class="adv-grid">
+        <div class="form-group">
+          <label>Rate Limit (RPM, 0 = unlimited)</label>
+          <input id="q-rpm" type="number" value="60" min="0">
+        </div>
+        <div class="form-group">
+          <label>Timeout per LLM request</label>
+          <input id="q-timeout" type="text" value="300s">
+          <div class="hint">Increase for slow / local models. Format: <code>60s</code>, <code>5m</code>.</div>
+        </div>
+        <div class="form-group">
+          <label>Max Retries</label>
+          <input id="q-retries" type="number" value="3" min="0" max="10">
+          <div class="hint">Retry on transient errors with exponential back-off.</div>
+        </div>
+        <div class="form-group">
+          <label>On Error</label>
+          <select id="q-continue-on-error">
+            <option value="true">Continue — skip failed records</option>
+            <option value="false">Stop — abort job on first error</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Prompt Caching</label>
+          <select id="q-prompt-caching">
+            <option value="false">Disabled</option>
+            <option value="true">Enabled</option>
+          </select>
+          <div class="hint">Caches static system/pre/post prompt. Supported by OpenAI (&ge;1024 tokens) and Anthropic.</div>
+        </div>
+      </div>
+    </details>
   </div>
 
   <!-- Agentic tools -->
@@ -707,7 +732,7 @@ function escHtml(s) {
 // ── YAML builder ──────────────────────────────────────────────────
 function buildYAMLFromForm() {
   const provider      = document.getElementById('q-provider').value;
-  const model         = document.getElementById('q-model').value || 'gpt-4o-mini';
+  const model         = getModelValue();
   const apikey        = document.getElementById('q-apikey').value || 'OPENAI_API_KEY';
   const baseurl       = document.getElementById('q-baseurl').value;
   const system        = document.getElementById('q-system').value || 'You are a helpful data-processing assistant.';
@@ -981,20 +1006,40 @@ const PROVIDER_MODELS = {
   generic:   [],
 };
 
+function getModelValue() {
+  const sel = document.getElementById('q-model');
+  if (sel.value === '__custom__') return document.getElementById('q-model-custom').value.trim() || 'gpt-4o-mini';
+  return sel.value || 'gpt-4o-mini';
+}
+function onModelSelectChange() {
+  const isCustom = document.getElementById('q-model').value === '__custom__';
+  document.getElementById('q-model-custom').style.display = isCustom ? 'block' : 'none';
+}
+function updateProviderUI(provider) {
+  const isLocal = provider === 'ollama' || provider === 'lmstudio';
+  document.querySelectorAll('.q-cloud-only').forEach(el => { el.style.display = isLocal ? 'none' : ''; });
+}
 function setModelSuggestions(models) {
-  const list    = document.getElementById('q-model-list');
-  const hint    = document.getElementById('q-model-hint');
+  const sel      = document.getElementById('q-model');
+  const hint     = document.getElementById('q-model-hint');
   const provider = document.getElementById('q-provider').value;
   const curated  = PROVIDER_MODELS[provider] || [];
-  // Merge: detected live models first, then curated defaults
-  const merged = [...new Set([...(models || []), ...curated])];
-  list.innerHTML = '';
-  merged.forEach(m => { const o = document.createElement('option'); o.value = m; list.appendChild(o); });
-  if (curated.length > 0 && (models || []).length === 0) {
-    hint.textContent = 'Suggestions: ' + curated.slice(0, 4).join(' · ');
-  } else {
-    hint.textContent = '';
-  }
+  const merged   = [...new Set([...(models || []), ...curated])];
+  const prev     = sel.value;
+  sel.innerHTML  = '';
+  merged.forEach(m => {
+    const o = document.createElement('option');
+    o.value = m; o.textContent = m;
+    sel.appendChild(o);
+  });
+  const custom = document.createElement('option');
+  custom.value = '__custom__'; custom.textContent = '— Custom model name —';
+  sel.appendChild(custom);
+  // Restore previous selection if still in list
+  if (prev && prev !== '__custom__' && merged.includes(prev)) sel.value = prev;
+  else sel.value = merged[0] || '__custom__';
+  hint.textContent = '';
+  onModelSelectChange();
 }
 function applyDetected(info, { markTouched=true } = {}) {
   if (!info) return;
@@ -1003,7 +1048,7 @@ function applyDetected(info, { markTouched=true } = {}) {
   document.getElementById('q-baseurl').value  = info.base_url || '';
   document.getElementById('q-apikey').value   = '';
   setModelSuggestions(info.models || []);
-  if (info.models && info.models.length > 0) document.getElementById('q-model').value = info.models[0];
+  updateProviderUI(info.provider);
 }
 
 function renderDetectedProviders(items) {
@@ -1055,7 +1100,7 @@ async function suggestConfig() {
     const body = {
       task,
       provider:    document.getElementById('q-provider').value,
-      model:       document.getElementById('q-model').value,
+      model:       getModelValue(),
       api_key_env: document.getElementById('q-apikey').value,
       base_url:    document.getElementById('q-baseurl').value,
     };
@@ -1086,23 +1131,22 @@ document.getElementById('detect-refresh').addEventListener('click', () => detect
 document.getElementById('q-provider').addEventListener('change', e => {
   quickFormTouched = true;
   const D = {
-    openai:    { model:'gpt-4o-mini',             key:'OPENAI_API_KEY',    url:'' },
-    gemini:    { model:'gemini-2.0-flash',          key:'GEMINI_API_KEY',    url:'' },
-    anthropic: { model:'claude-sonnet-4-20250514',  key:'ANTHROPIC_API_KEY', url:'' },
-    ollama:    { model:'llama3',                    key:'',                  url:'http://localhost:11434' },
-    lmstudio:  { model:'local-model',               key:'',                  url:'http://localhost:1234/v1' },
-    generic:   { model:'my-model',                  key:'API_KEY',           url:'' },
+    openai:    { key:'OPENAI_API_KEY',    url:'' },
+    gemini:    { key:'GEMINI_API_KEY',    url:'' },
+    anthropic: { key:'ANTHROPIC_API_KEY', url:'' },
+    ollama:    { key:'',                  url:'http://localhost:11434' },
+    lmstudio:  { key:'',                  url:'http://localhost:1234/v1' },
+    generic:   { key:'API_KEY',           url:'' },
   };
   const d = D[e.target.value] || D.openai;
-  document.getElementById('q-model').value  = d.model;
   document.getElementById('q-apikey').value = d.key;
   const det = detectedProviders.get(e.target.value);
   document.getElementById('q-baseurl').value = det ? det.base_url : d.url;
   setModelSuggestions(det ? (det.models||[]) : []);
-  if (det && det.models && det.models.length > 0) document.getElementById('q-model').value = det.models[0];
+  updateProviderUI(e.target.value);
 });
 
-['q-model','q-baseurl','q-apikey'].forEach(id =>
+['q-model-custom','q-baseurl','q-apikey'].forEach(id =>
   document.getElementById(id).addEventListener('input', () => { quickFormTouched = true; })
 );
 
@@ -1111,6 +1155,8 @@ document.getElementById('t-sql-query').addEventListener('change', e =>
 );
 
 // ── Init ──────────────────────────────────────────────────────────
+setModelSuggestions([]);  // populate select for default provider (openai)
+updateProviderUI(document.getElementById('q-provider').value);
 detectLocalProviders({ autoApply: true });
 </script>
 </body>
