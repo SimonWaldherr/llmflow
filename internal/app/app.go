@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/SimonWaldherr/llmflow/internal/config"
@@ -21,10 +22,14 @@ type Generator interface {
 	Generate(ctx context.Context, systemPrompt, userPrompt string) (string, error)
 }
 type App struct {
-	cfg    config.Config
-	logger *slog.Logger
-	dryRun bool
+	cfg          config.Config
+	logger       *slog.Logger
+	dryRun       bool
+	progressFunc func(current, total int)
 }
+
+// WithProgressFunc sets a callback invoked after each record is processed.
+func (a *App) WithProgressFunc(f func(current, total int)) *App { a.progressFunc = f; return a }
 
 func New(cfg config.Config, logger *slog.Logger) *App {
 	cfg.ApplyDefaults()
@@ -140,6 +145,8 @@ func (a *App) processRecords(
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
+	var processed int64 // atomic counter for progress reporting
+
 	type job struct {
 		idx int
 		rec input.Record
@@ -220,6 +227,10 @@ func (a *App) processRecords(
 				}
 				outRec[a.cfg.Processing.ResponseField] = responseText
 				resultCh <- indexedResult{idx: j.idx, rec: outRec}
+				if a.progressFunc != nil {
+					cur := int(atomic.AddInt64(&processed, 1))
+					a.progressFunc(cur, len(records))
+				}
 			}
 		}()
 	}

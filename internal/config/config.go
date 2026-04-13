@@ -199,7 +199,7 @@ func (c *Config) ApplyDefaults() {
 		c.API.BaseURL = providerDefaultBaseURL(c.API.Provider)
 	}
 	if c.API.Timeout == 0 {
-		c.API.Timeout = 60 * time.Second
+		c.API.Timeout = 10 * time.Minute // 10 min; LLMs can be slow, especially local models
 	}
 	if c.Processing.Mode == "" {
 		c.Processing.Mode = "per_record"

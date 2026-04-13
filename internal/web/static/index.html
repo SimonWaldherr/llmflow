@@ -16,6 +16,7 @@
   --green: #3fb950;
   --red: #f85149;
   --yellow: #d29922;
+  --orange: #e3712a;
   --font-mono: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace;
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -53,16 +54,14 @@ header h1 span { color: var(--accent); }
 .panel { display: none; }
 .panel.active { display: block; }
 
-/* Config Editor */
-.config-area {
-  display: grid; grid-template-columns: 1fr 1fr; gap: 24px;
-}
-@media (max-width: 800px) { .config-area { grid-template-columns: 1fr; } }
-
+/* Form */
 .form-group { margin-bottom: 16px; }
 .form-group label {
   display: block; font-size: 13px; color: var(--text-muted);
   margin-bottom: 4px; font-weight: 500;
+}
+.form-group .hint {
+  font-size: 12px; color: var(--text-muted); margin-top: 4px; line-height: 1.5;
 }
 input, select, textarea {
   width: 100%; padding: 8px 12px; background: var(--bg); color: var(--text);
@@ -81,7 +80,7 @@ textarea { font-family: var(--font-mono); resize: vertical; }
   tab-size: 2; line-height: 1.6;
 }
 
-.btn-row { display: flex; gap: 8px; margin-top: 16px; flex-wrap: wrap; }
+.btn-row { display: flex; gap: 8px; margin-top: 16px; flex-wrap: wrap; align-items: center; }
 
 .btn {
   padding: 8px 20px; border-radius: 6px; border: 1px solid var(--border);
@@ -91,8 +90,12 @@ textarea { font-family: var(--font-mono); resize: vertical; }
 .btn-primary:hover { background: var(--accent-hover); }
 .btn-secondary { background: var(--surface); color: var(--text); }
 .btn-secondary:hover { background: var(--border); }
-.btn-danger { background: var(--red); color: #fff; border-color: var(--red); }
-.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn-danger { background: transparent; color: var(--red); border-color: var(--red); }
+.btn-danger:hover { background: rgba(248,81,73,0.1); }
+.btn-warning { background: transparent; color: var(--orange); border-color: var(--orange); }
+.btn-warning:hover { background: rgba(227,113,42,0.1); }
+.btn-sm { padding: 4px 12px; font-size: 12px; }
+.btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
 .status-bar {
   margin-top: 12px; padding: 10px 14px; border-radius: 6px; font-size: 13px;
@@ -103,23 +106,68 @@ textarea { font-family: var(--font-mono); resize: vertical; }
 .status-bar.error { background: rgba(248,81,73,0.15); border: 1px solid var(--red); color: var(--red); }
 .status-bar.info { background: rgba(88,166,255,0.15); border: 1px solid var(--accent); color: var(--accent); }
 
+/* Quick-start grid */
+.quick-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 16px;
+}
+@media (max-width: 800px) { .quick-grid { grid-template-columns: 1fr; } }
+.quick-full { grid-column: 1 / -1; }
+
+/* Prompt flow diagram */
+.prompt-flow {
+  background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+  padding: 16px; margin-bottom: 24px;
+}
+.prompt-flow h3 { font-size: 14px; font-weight: 600; margin-bottom: 12px; color: var(--text); }
+.prompt-flow-steps {
+  display: flex; align-items: stretch; flex-wrap: wrap; gap: 4px;
+}
+.pf-step {
+  flex: 1; min-width: 130px; padding: 10px 12px;
+  background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+  font-size: 12px;
+}
+.pf-step .pf-label { font-weight: 600; color: var(--accent); margin-bottom: 4px; }
+.pf-step .pf-desc { color: var(--text-muted); line-height: 1.4; }
+.pf-arrow {
+  display: flex; align-items: center; padding: 0 2px; color: var(--text-muted);
+  font-size: 16px; flex-shrink: 0;
+}
+.pf-output { border-color: var(--green); }
+.pf-output .pf-label { color: var(--green); }
+
 /* Jobs list */
 .job-list { display: flex; flex-direction: column; gap: 8px; }
 .job-card {
-  padding: 14px 18px; background: var(--surface); border: 1px solid var(--border);
-  border-radius: 8px; display: flex; align-items: center; gap: 16px;
+  padding: 12px 16px; background: var(--surface); border: 1px solid var(--border);
+  border-radius: 8px; display: flex; align-items: center; gap: 12px;
   cursor: pointer; transition: border-color 0.15s;
 }
 .job-card:hover { border-color: var(--accent); }
+.job-card.archived { opacity: 0.45; }
 .job-badge {
   padding: 2px 10px; border-radius: 12px; font-size: 12px; font-weight: 600;
-  text-transform: uppercase; letter-spacing: 0.5px;
+  text-transform: uppercase; letter-spacing: 0.5px; white-space: nowrap; flex-shrink: 0;
 }
-.job-badge.running { background: rgba(210,153,34,0.2); color: var(--yellow); }
-.job-badge.completed { background: rgba(63,185,80,0.2); color: var(--green); }
-.job-badge.failed { background: rgba(248,81,73,0.2); color: var(--red); }
-.job-meta { flex: 1; font-size: 13px; color: var(--text-muted); }
-.job-id { font-weight: 600; color: var(--text); margin-right: 8px; }
+.job-badge.running   { background: rgba(210,153,34,0.2);  color: var(--yellow); }
+.job-badge.completed { background: rgba(63,185,80,0.2);   color: var(--green); }
+.job-badge.failed    { background: rgba(248,81,73,0.2);   color: var(--red); }
+.job-badge.cancelled { background: rgba(139,148,158,0.2); color: var(--text-muted); }
+.job-meta { flex: 1; font-size: 13px; color: var(--text-muted); min-width: 0; overflow: hidden; }
+.job-id { font-weight: 600; color: var(--text); margin-right: 6px; }
+.job-name { color: var(--text); margin-right: 6px; }
+.job-actions { display: flex; gap: 6px; flex-shrink: 0; }
+
+/* Progress */
+.progress-wrap { margin: 8px 0 4px; }
+.progress-bar-bg {
+  height: 4px; background: var(--border); border-radius: 2px; overflow: hidden;
+}
+.progress-bar-fill {
+  height: 100%; background: var(--accent); border-radius: 2px;
+  transition: width 0.4s ease;
+}
+.progress-label { font-size: 11px; color: var(--text-muted); margin-top: 3px; }
 
 /* Job detail */
 .log-box {
@@ -128,13 +176,18 @@ textarea { font-family: var(--font-mono); resize: vertical; }
   max-height: 500px; overflow-y: auto; white-space: pre-wrap; word-break: break-all;
   line-height: 1.7; color: var(--text-muted);
 }
+.detail-header {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 12px;
+}
+.detail-header h3 { flex: 1; margin-bottom: 0; }
 
 .section-title {
   font-size: 15px; font-weight: 600; margin-bottom: 12px; color: var(--text);
 }
 
+/* Upload */
 .upload-zone {
-  border: 2px dashed var(--border); border-radius: 8px; padding: 32px;
+  border: 2px dashed var(--border); border-radius: 8px; padding: 28px;
   text-align: center; color: var(--text-muted); cursor: pointer;
   transition: border-color 0.15s;
 }
@@ -142,53 +195,24 @@ textarea { font-family: var(--font-mono); resize: vertical; }
 .upload-zone.dragover { border-color: var(--accent); background: rgba(88,166,255,0.05); }
 .upload-path { margin-top: 8px; font-family: var(--font-mono); font-size: 13px; color: var(--green); }
 
-/* Quick form */
-.quick-grid {
-  display: grid; grid-template-columns: 1fr 1fr; gap: 16px;
-}
-@media (max-width: 800px) { .quick-grid { grid-template-columns: 1fr; } }
-.quick-full { grid-column: 1 / -1; }
-
 .empty-state {
   text-align: center; padding: 48px; color: var(--text-muted); font-size: 14px;
 }
 
 /* Detection banner */
 .detect-banner {
-  display: none;
-  margin-bottom: 16px;
-  padding: 12px 14px;
-  border-radius: 8px;
-  border: 1px solid var(--green);
-  background: rgba(63,185,80,0.1);
+  display: none; margin-bottom: 16px; padding: 12px 14px;
+  border-radius: 8px; border: 1px solid var(--green);
+  background: rgba(63,185,80,0.08);
 }
 .detect-banner.show { display: block; }
-.detect-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-.detect-summary {
-  color: var(--text-muted);
-  font-size: 13px;
-}
-.detect-pills {
-  display: flex;
-  gap: 6px;
-  margin-top: 8px;
-  flex-wrap: wrap;
-}
-.detect-pill {
-  padding: 3px 10px;
-  font-size: 12px;
-}
-.detect-pill small {
-  color: var(--text-muted);
-  margin-left: 4px;
-}
+.detect-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.detect-summary { color: var(--text-muted); font-size: 13px; }
+.detect-pills { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+.detect-pill { padding: 3px 10px; font-size: 12px; }
+.detect-pill small { color: var(--text-muted); margin-left: 4px; }
 
-/* Tools section */
+/* Tools */
 .tools-section {
   margin-top: 24px; padding: 16px; border: 1px solid var(--border);
   border-radius: 8px; background: var(--surface);
@@ -197,28 +221,25 @@ textarea { font-family: var(--font-mono); resize: vertical; }
   cursor: pointer; font-size: 14px; font-weight: 600; color: var(--text);
   user-select: none; list-style: none;
 }
-.tools-section summary::before {
-  content: '▶ '; font-size: 11px; color: var(--text-muted);
-}
+.tools-section summary::before { content: '▶ '; font-size: 11px; color: var(--text-muted); }
 .tools-section[open] summary::before { content: '▼ '; }
 .tools-section .tools-grid {
   display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 14px;
 }
 @media (max-width: 800px) { .tools-section .tools-grid { grid-template-columns: 1fr; } }
 .tool-card {
-  padding: 12px 14px; border: 1px solid var(--border); border-radius: 6px;
-  background: var(--bg);
+  padding: 12px 14px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg);
 }
 .tool-card label {
   display: flex; align-items: center; gap: 8px; cursor: pointer;
   font-size: 14px; font-weight: 600; color: var(--text); margin-bottom: 4px;
 }
 .tool-card label input[type=checkbox] { width: auto; }
-.tool-card p {
-  font-size: 12px; color: var(--text-muted); margin: 0 0 0 22px;
-}
+.tool-card p { font-size: 12px; color: var(--text-muted); margin: 0 0 0 22px; }
 .tool-card .tool-extra { margin-top: 8px; display: none; }
 .tool-card .tool-extra.show { display: block; }
+
+.section-sep { border: none; border-top: 1px solid var(--border); margin: 20px 0; }
 </style>
 </head>
 <body>
@@ -236,7 +257,7 @@ textarea { font-family: var(--font-mono); resize: vertical; }
   <button class="tab" data-panel="jobs">Jobs</button>
 </div>
 
-<!-- Detection banner (hidden by default) -->
+<!-- Detection banner -->
 <div id="detect-banner" class="detect-banner">
   <div class="detect-row">
     <strong style="color:var(--green)">Local LLM detected</strong>
@@ -246,18 +267,52 @@ textarea { font-family: var(--font-mono); resize: vertical; }
   <div id="detect-pills" class="detect-pills"></div>
 </div>
 
-<!-- Quick Start Panel -->
+<!-- ═══════════════════════ Quick Start ═══════════════════════ -->
 <div id="panel-quick" class="panel active">
+
+  <!-- How it works -->
+  <div class="prompt-flow">
+    <h3>How llmflow works — the prompt pipeline per record</h3>
+    <div class="prompt-flow-steps">
+      <div class="pf-step">
+        <div class="pf-label">① System Prompt</div>
+        <div class="pf-desc">Sets the LLM's role &amp; global instructions. Sent once — not per record.</div>
+      </div>
+      <div class="pf-arrow">→</div>
+      <div class="pf-step">
+        <div class="pf-label">② Pre-Prompt</div>
+        <div class="pf-desc">Optional text prepended before each record's data. Good for task framing.</div>
+      </div>
+      <div class="pf-arrow">→</div>
+      <div class="pf-step">
+        <div class="pf-label">③ Input Template</div>
+        <div class="pf-desc">Go template rendered per record. Use <code style="color:var(--accent)">{{ toPrettyJSON .record }}</code> or <code style="color:var(--accent)">{{ .fieldName }}</code>.</div>
+      </div>
+      <div class="pf-arrow">→</div>
+      <div class="pf-step">
+        <div class="pf-label">④ Post-Prompt</div>
+        <div class="pf-desc">Optional instruction appended after data. Enforce output format here (e.g. "Reply in JSON").</div>
+      </div>
+      <div class="pf-arrow">→</div>
+      <div class="pf-step pf-output">
+        <div class="pf-label">⑤ Output</div>
+        <div class="pf-desc">LLM's text response is stored in the <em>Response Field</em> of each output row (default: <code>llm_response</code>).</div>
+      </div>
+    </div>
+  </div>
+
   <div class="quick-grid">
+
+    <!-- Provider / Model -->
     <div class="form-group">
       <label>Provider</label>
       <select id="q-provider">
         <option value="openai">OpenAI</option>
-        <option value="gemini">Gemini</option>
-        <option value="anthropic">Anthropic</option>
-        <option value="ollama">Ollama</option>
-        <option value="lmstudio">LM Studio</option>
-        <option value="generic">Generic (OpenAI-compatible)</option>
+        <option value="gemini">Google Gemini</option>
+        <option value="anthropic">Anthropic Claude</option>
+        <option value="ollama">Ollama (local)</option>
+        <option value="lmstudio">LM Studio (local)</option>
+        <option value="generic">Generic OpenAI-compatible</option>
       </select>
     </div>
     <div class="form-group">
@@ -266,35 +321,71 @@ textarea { font-family: var(--font-mono); resize: vertical; }
       <datalist id="q-model-list"></datalist>
     </div>
     <div class="form-group">
-      <label>API Key Env Variable</label>
+      <label>API Key Environment Variable</label>
       <input id="q-apikey" type="text" placeholder="OPENAI_API_KEY">
+      <div class="hint">Name of the env var that holds the API key. Not required for local providers.</div>
     </div>
     <div class="form-group">
-      <label>Base URL (optional)</label>
-      <input id="q-baseurl" type="text" placeholder="Leave empty for default">
+      <label>Base URL <span style="font-weight:400">(optional)</span></label>
+      <input id="q-baseurl" type="text" placeholder="Leave empty for provider default">
+    </div>
+
+    <hr class="section-sep quick-full">
+
+    <!-- Prompts -->
+    <div class="form-group quick-full">
+      <label>① System Prompt</label>
+      <textarea id="q-system" rows="3" placeholder="You are a helpful data-processing assistant. Respond concisely."></textarea>
+      <div class="hint">Sets the LLM's persona and global instructions. Not repeated per record.</div>
     </div>
     <div class="form-group quick-full">
-      <label>System Prompt</label>
-      <textarea id="q-system" rows="3" placeholder="You are a helpful assistant."></textarea>
+      <label>② Pre-Prompt <span style="font-weight:400">(optional)</span></label>
+      <textarea id="q-pre" rows="2" placeholder="Analyze the following record:"></textarea>
+      <div class="hint">Prepended before each record's rendered data. Good for task instructions.</div>
     </div>
     <div class="form-group quick-full">
-      <label>Input Template (Go template syntax)</label>
-      <textarea id="q-template" rows="3" placeholder='{{ toPrettyJSON .record }}'></textarea>
+      <label>③ Input Template</label>
+      <textarea id="q-template" rows="4" placeholder="{{ toPrettyJSON .record }}"></textarea>
+      <div class="hint">Go template rendered once per input record.
+        <code>{{ toPrettyJSON .record }}</code> = full record as JSON.
+        <code>{{ .fieldName }}</code> = single field.
+        Available helpers: <code>toPrettyJSON</code>.</div>
     </div>
+    <div class="form-group quick-full">
+      <label>④ Post-Prompt <span style="font-weight:400">(optional)</span></label>
+      <textarea id="q-post" rows="2" placeholder='Reply with ONLY a JSON object: {"sentiment":"positive|negative|neutral","score":0.0-1.0}'></textarea>
+      <div class="hint">Appended after the rendered record. Use to enforce output format or add follow-up instructions.</div>
+    </div>
+
+    <hr class="section-sep quick-full">
+
+    <!-- I/O -->
     <div class="form-group">
       <label>Input Type</label>
       <select id="q-input-type">
         <option value="csv">CSV</option>
-        <option value="json">JSON</option>
-        <option value="jsonl">JSONL</option>
+        <option value="json">JSON (array)</option>
+        <option value="jsonl">JSONL (JSON Lines)</option>
         <option value="xml">XML</option>
       </select>
     </div>
     <div class="form-group">
       <label>Output Type</label>
       <select id="q-output-type">
-        <option value="jsonl">JSONL</option>
+        <option value="jsonl">JSONL (JSON Lines)</option>
         <option value="csv">CSV</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label>⑤ Response Field Name</label>
+      <input id="q-response-field" type="text" value="llm_response">
+      <div class="hint">The key in each output row where the LLM's answer is stored.</div>
+    </div>
+    <div class="form-group">
+      <label>Include Input in Output</label>
+      <select id="q-include-input">
+        <option value="true">Yes — copy all input fields alongside the response</option>
+        <option value="false">No — output only the response field</option>
       </select>
     </div>
     <div class="form-group quick-full">
@@ -305,23 +396,50 @@ textarea { font-family: var(--font-mono); resize: vertical; }
         <div id="upload-path" class="upload-path" style="display:none"></div>
       </div>
     </div>
+
+    <hr class="section-sep quick-full">
+
+    <!-- Processing -->
     <div class="form-group">
-      <label>Workers</label>
+      <label>Workers (parallel)</label>
       <input id="q-workers" type="number" value="2" min="1" max="32">
+      <div class="hint">Number of records processed concurrently.</div>
     </div>
     <div class="form-group">
-      <label>Rate Limit (RPM)</label>
+      <label>Rate Limit (RPM, 0 = unlimited)</label>
       <input id="q-rpm" type="number" value="60" min="0">
+    </div>
+    <div class="form-group">
+      <label>Timeout per LLM request</label>
+      <input id="q-timeout" type="text" value="300s">
+      <div class="hint">Increase for slow / local models. Format: <code>60s</code>, <code>5m</code>. Default 300 s.</div>
+    </div>
+    <div class="form-group">
+      <label>Max Retries</label>
+      <input id="q-retries" type="number" value="3" min="0" max="10">
+      <div class="hint">Retry on transient errors with exponential back-off.</div>
+    </div>
+    <div class="form-group">
+      <label>On Error</label>
+      <select id="q-continue-on-error">
+        <option value="true">Continue — skip failed records</option>
+        <option value="false">Stop — abort job on first error</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label>Job Name <span style="font-weight:400">(optional)</span></label>
+      <input id="q-name" type="text" placeholder="My sentiment analysis run">
+      <div class="hint">A human-readable label shown in the Jobs list.</div>
     </div>
   </div>
 
-  <!-- Tool configuration -->
+  <!-- Agentic tools -->
   <details id="tools-section" class="tools-section">
-    <summary>Agent Tools <span style="color:var(--text-muted);font-weight:400">(optional — let the LLM fetch web pages, search the web, and query databases)</span></summary>
+    <summary>Agentic Tools <span style="color:var(--text-muted);font-weight:400">(optional — let the LLM call tools: web fetch, web search, SQL)</span></summary>
     <div class="tools-grid">
       <div class="tool-card">
         <label><input type="checkbox" id="t-enabled"> Enable Agent Tools</label>
-        <p>When enabled, the LLM may call the tools below to gather information before responding.</p>
+        <p>When enabled the LLM may call the selected tools before producing its final answer (multi-turn agentic loop).</p>
         <div class="form-group" style="margin-top:8px;margin-bottom:0">
           <label style="color:var(--text-muted);font-weight:500">Max Tool Rounds</label>
           <input id="t-max-rounds" type="number" value="5" min="1" max="20" style="margin-top:4px">
@@ -329,15 +447,15 @@ textarea { font-family: var(--font-mono); resize: vertical; }
       </div>
       <div class="tool-card">
         <label><input type="checkbox" id="t-web-fetch"> Web Fetch</label>
-        <p>Fetch the text content of any URL. Useful for reading documentation or articles.</p>
+        <p>Fetch the content of any URL. Useful for reading docs, articles, or real-time pages.</p>
       </div>
       <div class="tool-card">
         <label><input type="checkbox" id="t-web-search"> Web Search</label>
-        <p>Search the web via DuckDuckGo (no API key required). Useful for looking up current information.</p>
+        <p>Search the web via DuckDuckGo — no API key required. Good for current information.</p>
       </div>
       <div class="tool-card">
         <label><input type="checkbox" id="t-sql-query"> SQL Query</label>
-        <p>Execute read-only SQL SELECT queries against a database.</p>
+        <p>Execute read-only SELECT queries to enrich records with data from a database.</p>
         <div id="t-sql-extra" class="tool-extra">
           <div class="form-group" style="margin-bottom:8px">
             <label>SQL Driver</label>
@@ -358,26 +476,37 @@ textarea { font-family: var(--font-mono); resize: vertical; }
   <div class="btn-row">
     <button class="btn btn-secondary" onclick="generateYAML()">Generate YAML</button>
     <button class="btn btn-secondary" onclick="validateQuick()">Validate</button>
-    <button class="btn btn-primary" onclick="runQuick(false)">Run</button>
+    <button class="btn btn-primary" onclick="runQuick(false)">▶ Run</button>
     <button class="btn btn-secondary" onclick="runQuick(true)">Dry Run</button>
   </div>
   <div id="quick-status" class="status-bar"></div>
 </div>
 
-<!-- YAML Editor Panel -->
+<!-- ═══════════════════════ YAML Editor ═══════════════════════ -->
 <div id="panel-editor" class="panel">
   <textarea id="yaml-editor" class="editor-full" spellcheck="false">api:
   provider: openai
   api_key_env: OPENAI_API_KEY
   model: gpt-4o-mini
-  timeout: 60s
+  # timeout: how long to wait for the LLM (increase for local/slow models)
+  timeout: 300s
   rate_limit_rpm: 60
 
 prompt:
+  # system: role and global instructions for the LLM (sent once, not per record)
   system: |
-    You are a helpful assistant.
+    You are a helpful data-processing assistant. Respond concisely.
+  # pre_prompt: prepended before each record's data (optional)
+  pre_prompt: |
+    Analyze the following record:
+  # input_template: Go template rendered per record
+  #   {{ toPrettyJSON .record }} → full record as JSON
+  #   {{ .fieldName }}           → single field value
   input_template: |
     {{ toPrettyJSON .record }}
+  # post_prompt: appended after each record – enforce output format here (optional)
+  # post_prompt: |
+  #   Reply with ONLY a JSON object: {"sentiment":"positive|negative|neutral"}
 
 input:
   type: csv
@@ -393,12 +522,14 @@ output:
 processing:
   mode: per_record
   include_input_in_output: true
+  # response_field: key in each output row that holds the LLM answer
   response_field: llm_response
   continue_on_error: true
   workers: 2
+  max_retries: 3
   dry_run: false
 
-# Optional: enable agent tools so the LLM can search the web, fetch pages, or query a database.
+# Optional: enable agentic tools so the LLM can search, fetch pages, or query a DB.
 # tools:
 #   enabled: true
 #   web_fetch: true
@@ -407,35 +538,55 @@ processing:
 #   max_rounds: 5
 #   sql:
 #     driver: sqlite        # sqlite or sqlserver
-#     dsn_env: DB_DSN       # env var holding the connection string</textarea>
+#     dsn_env: DB_DSN       # env var holding the connection string
+</textarea>
 
   <div class="btn-row">
     <button class="btn btn-secondary" onclick="validateYAML()">Validate</button>
-    <button class="btn btn-primary" onclick="runYAML(false)">Run</button>
+    <button class="btn btn-primary" onclick="runYAML(false)">▶ Run</button>
     <button class="btn btn-secondary" onclick="runYAML(true)">Dry Run</button>
   </div>
   <div id="editor-status" class="status-bar"></div>
 </div>
 
-<!-- Jobs Panel -->
+<!-- ═══════════════════════ Jobs ═══════════════════════ -->
 <div id="panel-jobs" class="panel">
   <div class="btn-row" style="margin-bottom:16px;margin-top:0">
-    <button class="btn btn-secondary" onclick="refreshJobs()">Refresh</button>
+    <button class="btn btn-secondary" onclick="refreshJobs()">↻ Refresh</button>
+    <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--text-muted);cursor:pointer">
+      <input type="checkbox" id="show-archived" style="width:auto" onchange="refreshJobs()"> Show archived
+    </label>
+    <span id="jobs-running-badge" style="font-size:12px;color:var(--yellow);margin-left:auto;display:none">● running — auto-refresh on</span>
   </div>
+
   <div id="job-list" class="job-list">
     <div class="empty-state">No jobs yet. Run a job from the Quick Start or YAML Editor tab.</div>
   </div>
+
+  <!-- Job detail -->
   <div id="job-detail" style="display:none; margin-top:24px;">
-    <h3 class="section-title">Job <span id="detail-id"></span> — <span id="detail-status"></span></h3>
+    <div class="detail-header">
+      <h3 class="section-title" style="margin-bottom:0">
+        Job <span id="detail-id"></span><span id="detail-name" style="font-weight:400;color:var(--text-muted)"></span>
+        — <span id="detail-status"></span>
+      </h3>
+      <div id="detail-actions" class="btn-row" style="margin-top:0;margin-left:auto"></div>
+    </div>
+    <div id="detail-progress-wrap" style="display:none;margin-bottom:12px">
+      <div class="progress-bar-bg">
+        <div class="progress-bar-fill" id="detail-progress-fill" style="width:0%"></div>
+      </div>
+      <div class="progress-label" id="detail-progress-label"></div>
+    </div>
     <div id="detail-error" class="status-bar error" style="display:none; margin-bottom:12px;"></div>
     <div class="log-box" id="detail-logs"></div>
   </div>
 </div>
 
-</div>
+</div><!-- .container -->
 
 <script>
-// Tab switching
+// ── Tabs ───────────────────────────────────────────────────────────
 document.querySelectorAll('.tab').forEach(tab => {
   tab.addEventListener('click', () => {
     document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
@@ -446,9 +597,9 @@ document.querySelectorAll('.tab').forEach(tab => {
   });
 });
 
-// File upload
+// ── File upload ───────────────────────────────────────────────────
 const uploadZone = document.getElementById('upload-zone');
-const fileInput = document.getElementById('file-input');
+const fileInput  = document.getElementById('file-input');
 let uploadedPath = '';
 
 uploadZone.addEventListener('click', () => fileInput.click());
@@ -468,6 +619,9 @@ async function uploadFile(file) {
     const d = await r.json();
     if (d.ok) {
       uploadedPath = d.data.path;
+      const ext = file.name.split('.').pop().toLowerCase();
+      const typeMap = { csv:'csv', json:'json', jsonl:'jsonl', xml:'xml' };
+      if (typeMap[ext]) document.getElementById('q-input-type').value = typeMap[ext];
       const el = document.getElementById('upload-path');
       el.textContent = '✓ ' + uploadedPath;
       el.style.display = 'block';
@@ -479,116 +633,83 @@ async function uploadFile(file) {
   }
 }
 
+// ── Helpers ───────────────────────────────────────────────────────
 function showStatus(id, type, msg) {
   const el = document.getElementById(id);
   el.className = 'status-bar show ' + type;
   el.textContent = msg;
 }
 
-function buildYAMLFromForm() {
-  const provider = document.getElementById('q-provider').value;
-  const model = document.getElementById('q-model').value || 'gpt-4o-mini';
-  const apikey = document.getElementById('q-apikey').value || 'OPENAI_API_KEY';
-  const baseurl = document.getElementById('q-baseurl').value;
-  const system = document.getElementById('q-system').value || 'You are a helpful assistant.';
-  const template = document.getElementById('q-template').value || '{{ toPrettyJSON .record }}';
-  const inputType = document.getElementById('q-input-type').value;
-  const outputType = document.getElementById('q-output-type').value;
-  const workers = document.getElementById('q-workers').value || '2';
-  const rpm = document.getElementById('q-rpm').value || '60';
-  const inputPath = uploadedPath || './input.' + inputType;
-  const outputPath = './output.' + (outputType === 'jsonl' ? 'jsonl' : outputType);
+function escHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
 
-  let yaml = `api:
-  provider: ${provider}
-  api_key_env: ${apikey}
-  model: ${model}
-  timeout: 60s
-  rate_limit_rpm: ${rpm}`;
+// ── YAML builder ──────────────────────────────────────────────────
+function buildYAMLFromForm() {
+  const provider      = document.getElementById('q-provider').value;
+  const model         = document.getElementById('q-model').value || 'gpt-4o-mini';
+  const apikey        = document.getElementById('q-apikey').value || 'OPENAI_API_KEY';
+  const baseurl       = document.getElementById('q-baseurl').value;
+  const system        = document.getElementById('q-system').value || 'You are a helpful data-processing assistant.';
+  const pre           = document.getElementById('q-pre').value;
+  const template      = document.getElementById('q-template').value || '{{ toPrettyJSON .record }}';
+  const post          = document.getElementById('q-post').value;
+  const inputType     = document.getElementById('q-input-type').value;
+  const outputType    = document.getElementById('q-output-type').value;
+  const workers       = document.getElementById('q-workers').value || '2';
+  const rpm           = document.getElementById('q-rpm').value || '60';
+  const timeout       = document.getElementById('q-timeout').value || '300s';
+  const retries       = document.getElementById('q-retries').value || '3';
+  const continueErr   = document.getElementById('q-continue-on-error').value;
+  const responseField = document.getElementById('q-response-field').value || 'llm_response';
+  const includeInput  = document.getElementById('q-include-input').value;
+  const inputPath     = uploadedPath || './input.' + (inputType === 'jsonl' ? 'jsonl' : inputType);
+  const outputPath    = './output.' + outputType;
+
+  const ind4 = s => s.split('\n').join('\n    ');
+
+  let yaml = `api:\n  provider: ${provider}\n  api_key_env: ${apikey}\n  model: ${model}\n  timeout: ${timeout}\n  rate_limit_rpm: ${rpm}`;
   if (baseurl) yaml += `\n  base_url: ${baseurl}`;
 
-  yaml += `
+  yaml += `\n\nprompt:\n  system: |\n    ${ind4(system)}`;
+  if (pre.trim()) yaml += `\n  pre_prompt: |\n    ${ind4(pre)}`;
+  yaml += `\n  input_template: |\n    ${ind4(template)}`;
+  if (post.trim()) yaml += `\n  post_prompt: |\n    ${ind4(post)}`;
 
-prompt:
-  system: |
-    ${system.split('\n').join('\n    ')}
-  input_template: |
-    ${template.split('\n').join('\n    ')}
+  yaml += `\n\ninput:\n  type: ${inputType}\n  path: ${inputPath}`;
+  if (inputType === 'csv') yaml += `\n  csv:\n    delimiter: ","\n    has_header: true`;
 
-input:
-  type: ${inputType}
-  path: ${inputPath}`;
+  yaml += `\n\noutput:\n  type: ${outputType}\n  path: ${outputPath}`;
+  if (outputType === 'csv') yaml += `\n  csv:\n    delimiter: ","\n    has_header: true`;
 
-  if (inputType === 'csv') {
-    yaml += `
-  csv:
-    delimiter: ","
-    has_header: true`;
-  }
+  yaml += `\n\nprocessing:\n  mode: per_record\n  include_input_in_output: ${includeInput}\n  response_field: ${responseField}\n  continue_on_error: ${continueErr}\n  workers: ${workers}\n  max_retries: ${retries}\n  dry_run: false`;
 
-  yaml += `
-
-output:
-  type: ${outputType}
-  path: ${outputPath}`;
-
-  if (outputType === 'csv') {
-    yaml += `
-  csv:
-    delimiter: ","
-    has_header: true`;
-  }
-
-  yaml += `
-
-processing:
-  mode: per_record
-  include_input_in_output: true
-  response_field: llm_response
-  continue_on_error: true
-  workers: ${workers}
-  dry_run: false`;
-
-  // Tools section (only when enabled)
-  const toolsEnabled = document.getElementById('t-enabled').checked;
-  if (toolsEnabled) {
+  if (document.getElementById('t-enabled').checked) {
     const webFetch  = document.getElementById('t-web-fetch').checked;
     const webSearch = document.getElementById('t-web-search').checked;
     const sqlQuery  = document.getElementById('t-sql-query').checked;
     const maxRounds = document.getElementById('t-max-rounds').value || '5';
-    yaml += `
-
-tools:
-  enabled: true
-  web_fetch: ${webFetch}
-  web_search: ${webSearch}
-  sql_query: ${sqlQuery}
-  max_rounds: ${maxRounds}`;
+    yaml += `\n\ntools:\n  enabled: true\n  web_fetch: ${webFetch}\n  web_search: ${webSearch}\n  sql_query: ${sqlQuery}\n  max_rounds: ${maxRounds}`;
     if (sqlQuery) {
       const sqlDriver = document.getElementById('t-sql-driver').value;
       const sqlDsnEnv = document.getElementById('t-sql-dsn-env').value || 'DB_DSN';
-      yaml += `
-  sql:
-    driver: ${sqlDriver}
-    dsn_env: ${sqlDsnEnv}`;
+      yaml += `\n  sql:\n    driver: ${sqlDriver}\n    dsn_env: ${sqlDsnEnv}`;
     }
   }
-
   return yaml;
 }
 
 function generateYAML() {
-  const yaml = buildYAMLFromForm();
-  document.getElementById('yaml-editor').value = yaml;
-  // Switch to editor tab
+  document.getElementById('yaml-editor').value = buildYAMLFromForm();
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
   document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
   document.querySelector('[data-panel="editor"]').classList.add('active');
   document.getElementById('panel-editor').classList.add('active');
-  showStatus('editor-status', 'info', 'YAML generated from Quick Start form');
+  showStatus('editor-status', 'info', 'YAML generated from Quick Start form.');
 }
 
-async function apiCall(endpoint, body) {
+// ── API helpers ───────────────────────────────────────────────────
+async function apiPost(endpoint, body) {
   const r = await fetch(endpoint, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -596,222 +717,280 @@ async function apiCall(endpoint, body) {
   });
   return r.json();
 }
+async function apiAction(endpoint, method = 'POST') {
+  const r = await fetch(endpoint, { method });
+  return r.json();
+}
 
+// ── Validate / Run ────────────────────────────────────────────────
 async function validateQuick() {
-  const yaml = buildYAMLFromForm();
-  const d = await apiCall('/api/validate', { config: yaml });
-  if (d.ok) showStatus('quick-status', 'ok', 'Configuration is valid');
+  const d = await apiPost('/api/validate', { config: buildYAMLFromForm() });
+  if (d.ok) showStatus('quick-status', 'ok', 'Configuration is valid ✓');
   else showStatus('quick-status', 'error', 'Validation failed: ' + d.error);
 }
 
 async function validateYAML() {
-  const yaml = document.getElementById('yaml-editor').value;
-  const d = await apiCall('/api/validate', { config: yaml });
-  if (d.ok) showStatus('editor-status', 'ok', 'Configuration is valid');
+  const d = await apiPost('/api/validate', { config: document.getElementById('yaml-editor').value });
+  if (d.ok) showStatus('editor-status', 'ok', 'Configuration is valid ✓');
   else showStatus('editor-status', 'error', 'Validation failed: ' + d.error);
 }
 
 async function runQuick(dryRun) {
-  const yaml = buildYAMLFromForm();
-  const d = await apiCall('/api/run', { config: yaml, dry_run: dryRun });
+  const name = document.getElementById('q-name').value;
+  const d = await apiPost('/api/run', { config: buildYAMLFromForm(), dry_run: dryRun, name });
   if (d.ok) {
-    showStatus('quick-status', 'ok', 'Job #' + d.data.id + ' started' + (dryRun ? ' (dry run)' : ''));
+    showStatus('quick-status', 'ok', `Job #${d.data.id} started${dryRun?' (dry run)':''}. Switch to the Jobs tab to monitor.`);
+    startAutoRefresh();
   } else {
     showStatus('quick-status', 'error', 'Failed: ' + d.error);
   }
 }
 
 async function runYAML(dryRun) {
-  const yaml = document.getElementById('yaml-editor').value;
-  const d = await apiCall('/api/run', { config: yaml, dry_run: dryRun });
+  const d = await apiPost('/api/run', { config: document.getElementById('yaml-editor').value, dry_run: dryRun });
   if (d.ok) {
-    showStatus('editor-status', 'ok', 'Job #' + d.data.id + ' started' + (dryRun ? ' (dry run)' : ''));
+    showStatus('editor-status', 'ok', `Job #${d.data.id} started${dryRun?' (dry run)':''}. See the Jobs tab.`);
+    startAutoRefresh();
   } else {
     showStatus('editor-status', 'error', 'Failed: ' + d.error);
   }
 }
 
-async function refreshJobs() {
-  try {
-    const r = await fetch('/api/jobs');
-    const d = await r.json();
-    const list = document.getElementById('job-list');
-    if (!d.ok || !d.data || d.data.length === 0) {
-      list.innerHTML = '<div class="empty-state">No jobs yet.</div>';
-      return;
-    }
-    list.innerHTML = d.data.map(j => `
-      <div class="job-card" onclick="showJob(${j.id})">
-        <span class="job-badge ${j.status}">${j.status}</span>
-        <span class="job-meta">
-          <span class="job-id">#${j.id}</span>
-          Started ${new Date(j.started_at).toLocaleString()}
-          ${j.ended_at && j.ended_at !== '0001-01-01T00:00:00Z' ? ' · Ended ' + new Date(j.ended_at).toLocaleString() : ''}
-        </span>
-      </div>
-    `).join('');
-  } catch(e) {
-    console.error('refresh jobs:', e);
-  }
+// ── Jobs ──────────────────────────────────────────────────────────
+let autoRefreshTimer = null;
+let selectedJobID = null;
+
+function startAutoRefresh() {
+  if (autoRefreshTimer) return;
+  autoRefreshTimer = setInterval(async () => {
+    await refreshJobs();
+    if (selectedJobID) await loadJobDetail(selectedJobID);
+  }, 2000);
 }
 
-let pollInterval = null;
+function stopAutoRefresh() {
+  if (autoRefreshTimer) { clearInterval(autoRefreshTimer); autoRefreshTimer = null; }
+}
 
-async function showJob(id) {
-  if (pollInterval) clearInterval(pollInterval);
+async function refreshJobs() {
+  const showArchived = document.getElementById('show-archived').checked;
+  try {
+    const r = await fetch('/api/jobs' + (showArchived ? '?archived=true' : ''));
+    const d = await r.json();
+    const list  = document.getElementById('job-list');
+    const badge = document.getElementById('jobs-running-badge');
 
-  const detail = document.getElementById('job-detail');
-  detail.style.display = 'block';
+    if (!d.ok || !d.data || d.data.length === 0) {
+      list.innerHTML = '<div class="empty-state">No jobs yet. Run one from the Quick Start or YAML Editor tab.</div>';
+      badge.style.display = 'none';
+      stopAutoRefresh();
+      return;
+    }
 
-  async function load() {
+    const hasRunning = d.data.some(j => j.status === 'running');
+    badge.style.display = hasRunning ? 'inline' : 'none';
+    if (hasRunning) startAutoRefresh();
+
+    list.innerHTML = d.data.map(j => {
+      const dur = jobDuration(j);
+      const prog = j.progress && j.progress.total > 0
+        ? ` · ${j.progress.current}/${j.progress.total} records`
+        : (j.status === 'running' ? ' · processing…' : '');
+      return `<div class="job-card${j.archived?' archived':''}" onclick="selectJob(${j.id})">
+        <span class="job-badge ${j.status}">${j.status}</span>
+        <span class="job-meta">
+          <span class="job-id">#${j.id}</span>${j.name?`<span class="job-name">${escHtml(j.name)}</span>`:''}
+          <span>${new Date(j.started_at).toLocaleString()}${dur?' · '+dur:''}${prog}</span>
+        </span>
+        <div class="job-actions" onclick="event.stopPropagation()">
+          ${j.status==='running'?`<button class="btn btn-sm btn-warning" onclick="cancelJob(${j.id})">■ Stop</button>`:''}
+          ${j.status!=='running'&&!j.archived?`<button class="btn btn-sm btn-secondary" onclick="archiveJob(${j.id})">Archive</button>`:''}
+          ${j.status!=='running'?`<button class="btn btn-sm btn-danger" onclick="deleteJob(${j.id})">Delete</button>`:''}
+        </div>
+      </div>`;
+    }).join('');
+  } catch(e) { console.error('refresh:', e); }
+}
+
+function jobDuration(j) {
+  if (!j.ended_at || j.ended_at === '0001-01-01T00:00:00Z') return '';
+  const ms = new Date(j.ended_at) - new Date(j.started_at);
+  if (ms < 1000) return ms + 'ms';
+  if (ms < 60000) return (ms/1000).toFixed(1) + 's';
+  return Math.floor(ms/60000) + 'm ' + Math.floor((ms%60000)/1000) + 's';
+}
+
+async function selectJob(id) {
+  selectedJobID = id;
+  document.getElementById('job-detail').style.display = 'block';
+  await loadJobDetail(id);
+  startAutoRefresh();
+  document.getElementById('job-detail').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+async function loadJobDetail(id) {
+  try {
     const r = await fetch('/api/jobs/' + id);
     const d = await r.json();
     if (!d.ok) return;
     const j = d.data;
+
     document.getElementById('detail-id').textContent = '#' + j.id;
+    document.getElementById('detail-name').textContent = j.name ? ' — ' + j.name : '';
+
+    const sc = {completed:'var(--green)',failed:'var(--red)',cancelled:'var(--text-muted)',running:'var(--yellow)'};
     const statusEl = document.getElementById('detail-status');
     statusEl.textContent = j.status;
-    statusEl.style.color = j.status === 'completed' ? 'var(--green)' : j.status === 'failed' ? 'var(--red)' : 'var(--yellow)';
+    statusEl.style.color = sc[j.status] || 'var(--text)';
 
+    // Progress bar
+    const pw = document.getElementById('detail-progress-wrap');
+    if (j.progress && j.progress.total > 0) {
+      pw.style.display = 'block';
+      const pct = Math.round(j.progress.current / j.progress.total * 100);
+      document.getElementById('detail-progress-fill').style.width = pct + '%';
+      document.getElementById('detail-progress-label').textContent =
+        j.progress.current + ' / ' + j.progress.total + ' records (' + pct + '%)';
+    } else { pw.style.display = 'none'; }
+
+    // Error
     const errEl = document.getElementById('detail-error');
     if (j.error) { errEl.textContent = j.error; errEl.style.display = 'block'; }
     else { errEl.style.display = 'none'; }
 
+    // Actions
+    const actEl = document.getElementById('detail-actions');
+    actEl.innerHTML = '';
+    if (j.status === 'running')
+      actEl.innerHTML += `<button class="btn btn-sm btn-warning" onclick="cancelJob(${j.id})">■ Stop job</button>`;
+    if (j.status !== 'running' && !j.archived)
+      actEl.innerHTML += `<button class="btn btn-sm btn-secondary" onclick="archiveJob(${j.id})">Archive</button>`;
+    if (j.status !== 'running')
+      actEl.innerHTML += `<button class="btn btn-sm btn-danger" onclick="deleteJob(${j.id})">Delete</button>`;
+
+    // Logs — keep scroll position at bottom if already there
     const logsEl = document.getElementById('detail-logs');
+    const atBottom = logsEl.scrollHeight - logsEl.scrollTop <= logsEl.clientHeight + 60;
     logsEl.textContent = (j.logs || []).join('\n') || '(no logs yet)';
-    logsEl.scrollTop = logsEl.scrollHeight;
+    if (atBottom) logsEl.scrollTop = logsEl.scrollHeight;
 
-    if (j.status !== 'running' && pollInterval) {
-      clearInterval(pollInterval);
-      pollInterval = null;
-    }
-  }
-
-  await load();
-  pollInterval = setInterval(load, 1500);
+    if (j.status !== 'running') stopAutoRefresh();
+  } catch(e) { console.error('loadJobDetail:', e); }
 }
 
+async function cancelJob(id) {
+  if (!confirm('Stop job #' + id + '? The job will be marked as cancelled.')) return;
+  const d = await apiAction('/api/jobs/' + id + '/cancel', 'POST');
+  if (d.ok) { await refreshJobs(); if (selectedJobID === id) await loadJobDetail(id); }
+  else alert('Error: ' + d.error);
+}
+
+async function archiveJob(id) {
+  const d = await apiAction('/api/jobs/' + id + '/archive', 'POST');
+  if (d.ok) { await refreshJobs(); if (selectedJobID === id) await loadJobDetail(id); }
+  else alert('Error: ' + d.error);
+}
+
+async function deleteJob(id) {
+  if (!confirm('Permanently delete job #' + id + '?')) return;
+  const d = await apiAction('/api/jobs/' + id, 'DELETE');
+  if (d.ok) {
+    if (selectedJobID === id) {
+      selectedJobID = null;
+      document.getElementById('job-detail').style.display = 'none';
+    }
+    await refreshJobs();
+  } else { alert('Error: ' + d.error); }
+}
+
+// ── Detect local providers ────────────────────────────────────────
 const detectedProviders = new Map();
 let quickFormTouched = false;
 
-function providerLabel(provider) {
-  return provider === 'ollama' ? 'Ollama' : provider === 'lmstudio' ? 'LM Studio' : provider;
+function providerLabel(p) {
+  return p === 'ollama' ? 'Ollama' : p === 'lmstudio' ? 'LM Studio' : p;
 }
-
 function setModelSuggestions(models) {
   const list = document.getElementById('q-model-list');
   list.innerHTML = '';
-  (models || []).forEach(model => {
-    const opt = document.createElement('option');
-    opt.value = model;
-    list.appendChild(opt);
-  });
+  (models || []).forEach(m => { const o = document.createElement('option'); o.value = m; list.appendChild(o); });
 }
-
-function applyDetected(info, { markTouched = true } = {}) {
+function applyDetected(info, { markTouched=true } = {}) {
   if (!info) return;
   if (markTouched) quickFormTouched = true;
-
   document.getElementById('q-provider').value = info.provider;
-  document.getElementById('q-baseurl').value = info.base_url || '';
-  document.getElementById('q-apikey').value = '';
+  document.getElementById('q-baseurl').value  = info.base_url || '';
+  document.getElementById('q-apikey').value   = '';
   setModelSuggestions(info.models || []);
-
-  if (info.models && info.models.length > 0) {
-    document.getElementById('q-model').value = info.models[0];
-  }
+  if (info.models && info.models.length > 0) document.getElementById('q-model').value = info.models[0];
 }
 
 function renderDetectedProviders(items) {
   const banner = document.getElementById('detect-banner');
   const summary = document.getElementById('detect-summary');
-  const pills = document.getElementById('detect-pills');
-
-  if (!items || items.length === 0) {
-    banner.classList.remove('show');
-    summary.textContent = '';
-    pills.innerHTML = '';
-    detectedProviders.clear();
-    return;
-  }
-
+  const pills   = document.getElementById('detect-pills');
+  if (!items || items.length === 0) { banner.classList.remove('show'); detectedProviders.clear(); return; }
   detectedProviders.clear();
   items.forEach(item => detectedProviders.set(item.provider, item));
-
-  const labels = items.map(item => providerLabel(item.provider));
-  summary.textContent = labels.join(' + ') + ' endpoint(s) detected locally';
-
+  summary.textContent = items.map(i => providerLabel(i.provider)).join(' + ') + ' endpoint(s) detected locally';
   pills.innerHTML = '';
   items.forEach(item => {
-    const button = document.createElement('button');
-    button.className = 'btn btn-secondary detect-pill';
-    button.type = 'button';
-    const modelCount = (item.models || []).length;
-    button.innerHTML = `Use ${providerLabel(item.provider)}<small>${modelCount} model${modelCount === 1 ? '' : 's'}</small>`;
-    button.addEventListener('click', () => applyDetected(item));
-    pills.appendChild(button);
+    const btn = document.createElement('button');
+    btn.className = 'btn btn-secondary detect-pill';
+    btn.type = 'button';
+    const mc = (item.models||[]).length;
+    btn.innerHTML = `Use ${providerLabel(item.provider)}<small>${mc} model${mc===1?'':'s'}</small>`;
+    btn.addEventListener('click', () => applyDetected(item));
+    pills.appendChild(btn);
   });
-
   banner.classList.add('show');
 }
 
-// Auto-detect local providers on page load
-async function detectLocalProviders({ autoApply = false } = {}) {
+async function detectLocalProviders({ autoApply=false } = {}) {
   try {
     const r = await fetch('/api/detect');
     const d = await r.json();
     if (!d.ok) return;
-
     const items = Array.isArray(d.data) ? d.data : [];
     renderDetectedProviders(items);
-
     if (!autoApply || quickFormTouched || items.length === 0) return;
-
-    const currentProvider = document.getElementById('q-provider').value;
-    const baseURL = document.getElementById('q-baseurl').value.trim();
-    if (currentProvider === 'openai' && baseURL === '') {
+    if (document.getElementById('q-provider').value === 'openai' && !document.getElementById('q-baseurl').value.trim()) {
       applyDetected(items[0], { markTouched: false });
     }
-  } catch(e) {
-    // Detection is best-effort; silently ignore errors.
-  }
+  } catch(e) { /* best-effort */ }
 }
 
 document.getElementById('detect-refresh').addEventListener('click', () => detectLocalProviders({ autoApply: false }));
 
-// Provider change updates defaults
 document.getElementById('q-provider').addEventListener('change', e => {
   quickFormTouched = true;
-  const defaults = {
-    openai:    { model: 'gpt-4o-mini', key: 'OPENAI_API_KEY', url: '' },
-    gemini:    { model: 'gemini-2.0-flash', key: 'GEMINI_API_KEY', url: '' },
-    anthropic: { model: 'claude-sonnet-4-20250514', key: 'ANTHROPIC_API_KEY', url: '' },
-    ollama:    { model: 'llama3', key: '', url: 'http://localhost:11434' },
-    lmstudio:  { model: 'local-model', key: '', url: 'http://localhost:1234/v1' },
-    generic:   { model: 'my-model', key: 'API_KEY', url: '' },
+  const D = {
+    openai:    { model:'gpt-4o-mini',             key:'OPENAI_API_KEY',    url:'' },
+    gemini:    { model:'gemini-2.0-flash',          key:'GEMINI_API_KEY',    url:'' },
+    anthropic: { model:'claude-sonnet-4-20250514',  key:'ANTHROPIC_API_KEY', url:'' },
+    ollama:    { model:'llama3',                    key:'',                  url:'http://localhost:11434' },
+    lmstudio:  { model:'local-model',               key:'',                  url:'http://localhost:1234/v1' },
+    generic:   { model:'my-model',                  key:'API_KEY',           url:'' },
   };
-  const d = defaults[e.target.value] || defaults.openai;
-  document.getElementById('q-model').value = d.model;
+  const d = D[e.target.value] || D.openai;
+  document.getElementById('q-model').value  = d.model;
   document.getElementById('q-apikey').value = d.key;
-  const detected = detectedProviders.get(e.target.value);
-  document.getElementById('q-baseurl').value = detected ? detected.base_url : d.url;
-  setModelSuggestions(detected ? (detected.models || []) : []);
-  if (detected && detected.models && detected.models.length > 0) {
-    document.getElementById('q-model').value = detected.models[0];
-  }
+  const det = detectedProviders.get(e.target.value);
+  document.getElementById('q-baseurl').value = det ? det.base_url : d.url;
+  setModelSuggestions(det ? (det.models||[]) : []);
+  if (det && det.models && det.models.length > 0) document.getElementById('q-model').value = det.models[0];
 });
 
-['q-model', 'q-baseurl', 'q-apikey'].forEach(id => {
-  const el = document.getElementById(id);
-  el.addEventListener('input', () => { quickFormTouched = true; });
-});
+['q-model','q-baseurl','q-apikey'].forEach(id =>
+  document.getElementById(id).addEventListener('input', () => { quickFormTouched = true; })
+);
 
+document.getElementById('t-sql-query').addEventListener('change', e =>
+  document.getElementById('t-sql-extra').classList.toggle('show', e.target.checked)
+);
+
+// ── Init ──────────────────────────────────────────────────────────
 detectLocalProviders({ autoApply: true });
-
-// Show/hide SQL extra fields when sql_query checkbox changes
-document.getElementById('t-sql-query').addEventListener('change', e => {
-  document.getElementById('t-sql-extra').classList.toggle('show', e.target.checked);
-});
 </script>
 </body>
 </html>

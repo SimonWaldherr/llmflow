@@ -38,15 +38,26 @@ type Server struct {
 	serverCtx context.Context // cancelled on graceful shutdown; used for job lifecycles
 }
 
+// JobProgress tracks how many records have been processed.
+type JobProgress struct {
+	Current int `json:"current"`
+	Total   int `json:"total"`
+}
+
 // JobStatus tracks a running or completed job.
 type JobStatus struct {
-	ID        int       `json:"id"`
-	Status    string    `json:"status"`
-	StartedAt time.Time `json:"started_at"`
-	EndedAt   time.Time `json:"ended_at,omitempty"`
-	Error     string    `json:"error,omitempty"`
-	Config    string    `json:"config"`
-	Logs      []string  `json:"logs"`
+	ID        int          `json:"id"`
+	Name      string       `json:"name,omitempty"`
+	Status    string       `json:"status"` // running | completed | failed | cancelled
+	StartedAt time.Time    `json:"started_at"`
+	EndedAt   time.Time    `json:"ended_at,omitempty"`
+	Error     string       `json:"error,omitempty"`
+	Config    string       `json:"config"`
+	Logs      []string     `json:"logs"`
+	Archived  bool         `json:"archived"`
+	Progress  JobProgress  `json:"progress"`
+	// unexported – not serialised
+	cancelFn  context.CancelFunc
 }
 
 // NewServer creates a new web UI server.
@@ -93,6 +104,9 @@ func (s *Server) Run(ctx context.Context) error {
 	mux.HandleFunc("POST /api/run", s.handleRun)
 	mux.HandleFunc("GET /api/jobs", s.handleListJobs)
 	mux.HandleFunc("GET /api/jobs/", s.handleGetJob)
+	mux.HandleFunc("POST /api/jobs/{id}/cancel", s.handleCancelJob)
+	mux.HandleFunc("POST /api/jobs/{id}/archive", s.handleArchiveJob)
+	mux.HandleFunc("DELETE /api/jobs/{id}", s.handleDeleteJob)
 	mux.HandleFunc("POST /api/upload", s.handleUpload)
 	mux.HandleFunc("GET /api/detect", s.handleDetect)
 
@@ -183,6 +197,7 @@ func (s *Server) handleValidate(w http.ResponseWriter, r *http.Request) {
 type runRequest struct {
 	Config string `json:"config"`
 	DryRun bool   `json:"dry_run"`
+	Name   string `json:"name"`
 }
 
 func (s *Server) handleRun(w http.ResponseWriter, r *http.Request) {
@@ -202,6 +217,7 @@ func (s *Server) handleRun(w http.ResponseWriter, r *http.Request) {
 	s.jobIDSeq++
 	job := &JobStatus{
 		ID:        s.jobIDSeq,
+		Name:      req.Name,
 		Status:    "running",
 		StartedAt: time.Now(),
 		Config:    req.Config,
@@ -212,20 +228,35 @@ func (s *Server) handleRun(w http.ResponseWriter, r *http.Request) {
 	// Use the server context so jobs are cancelled during graceful shutdown,
 	// not when the HTTP response is sent.
 	s.mu.Lock()
-	jobCtx := s.serverCtx
+	jobCtx, jobCancel := context.WithCancel(s.serverCtx)
+	job.cancelFn = jobCancel
 	s.mu.Unlock()
 
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
+		defer jobCancel() // ensure context is always released
 		lc := &logCollector{job: job, mu: &s.mu}
 		logger := slog.New(slog.NewJSONHandler(lc, &slog.HandlerOptions{Level: slog.LevelDebug}))
-		a := app.New(cfg, logger).WithDryRun(req.DryRun)
+
+		// Progress callback – updates the job in a goroutine-safe way.
+		progress := func(current, total int) {
+			s.mu.Lock()
+			job.Progress.Current = current
+			job.Progress.Total = total
+			s.mu.Unlock()
+		}
+
+		a := app.New(cfg, logger).WithDryRun(req.DryRun).WithProgressFunc(progress)
 		runErr := a.Run(jobCtx)
 
 		s.mu.Lock()
 		defer s.mu.Unlock()
 		job.EndedAt = time.Now()
+		// Respect an explicit cancellation – don't overwrite the status set by handleCancelJob.
+		if job.Status == "cancelled" {
+			return
+		}
 		if runErr != nil {
 			job.Status = "failed"
 			job.Error = runErr.Error()
@@ -238,17 +269,22 @@ func (s *Server) handleRun(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleListJobs(w http.ResponseWriter, r *http.Request) {
+	showArchived := r.URL.Query().Get("archived") == "true"
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	n := len(s.jobs)
 	start := 0
-	if n > 50 {
-		start = n - 50
+	if n > 100 {
+		start = n - 100
 	}
 	result := make([]*JobStatus, 0, n-start)
 	for i := n - 1; i >= start; i-- {
-		result = append(result, s.jobs[i])
+		j := s.jobs[i]
+		if !showArchived && j.Archived {
+			continue
+		}
+		result = append(result, j)
 	}
 	writeJSON(w, http.StatusOK, apiResponse{OK: true, Data: result})
 }
@@ -271,6 +307,79 @@ func (s *Server) handleGetJob(w http.ResponseWriter, r *http.Request) {
 	for _, j := range s.jobs {
 		if j.ID == id {
 			writeJSON(w, http.StatusOK, apiResponse{OK: true, Data: j})
+			return
+		}
+	}
+	writeJSON(w, http.StatusNotFound, apiResponse{Error: "job not found"})
+}
+
+// parsePatternID extracts the numeric {id} path parameter from a ServeMux pattern route.
+func parsePatternID(r *http.Request) (int, bool) {
+	var id int
+	_, err := fmt.Sscan(r.PathValue("id"), &id)
+	return id, err == nil
+}
+
+func (s *Server) handleCancelJob(w http.ResponseWriter, r *http.Request) {
+	id, ok := parsePatternID(r)
+	if !ok {
+		writeJSON(w, http.StatusBadRequest, apiResponse{Error: "invalid job id"})
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, j := range s.jobs {
+		if j.ID == id {
+			if j.Status != "running" {
+				writeJSON(w, http.StatusConflict, apiResponse{Error: "job is not running"})
+				return
+			}
+			j.Status = "cancelled"
+			j.EndedAt = time.Now()
+			if j.cancelFn != nil {
+				j.cancelFn()
+			}
+			writeJSON(w, http.StatusOK, apiResponse{OK: true})
+			return
+		}
+	}
+	writeJSON(w, http.StatusNotFound, apiResponse{Error: "job not found"})
+}
+
+func (s *Server) handleArchiveJob(w http.ResponseWriter, r *http.Request) {
+	id, ok := parsePatternID(r)
+	if !ok {
+		writeJSON(w, http.StatusBadRequest, apiResponse{Error: "invalid job id"})
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, j := range s.jobs {
+		if j.ID == id {
+			j.Archived = true
+			writeJSON(w, http.StatusOK, apiResponse{OK: true})
+			return
+		}
+	}
+	writeJSON(w, http.StatusNotFound, apiResponse{Error: "job not found"})
+}
+
+func (s *Server) handleDeleteJob(w http.ResponseWriter, r *http.Request) {
+	id, ok := parsePatternID(r)
+	if !ok {
+		writeJSON(w, http.StatusBadRequest, apiResponse{Error: "invalid job id"})
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i, j := range s.jobs {
+		if j.ID == id {
+			if j.Status == "running" {
+				writeJSON(w, http.StatusConflict, apiResponse{Error: "cannot delete a running job; cancel it first"})
+				return
+			}
+			s.jobs = append(s.jobs[:i], s.jobs[i+1:]...)
+			writeJSON(w, http.StatusOK, apiResponse{OK: true})
 			return
 		}
 	}
