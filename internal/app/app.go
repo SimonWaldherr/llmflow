@@ -266,7 +266,7 @@ func (a *App) processRecords(
 					var parsed map[string]any
 					trimmed := strings.TrimSpace(responseText)
 					// Strip markdown code fences if present (e.g. ```json ... ```).
-					if idx := strings.Index(trimmed, "{"); idx > 0 {
+					if idx := strings.Index(trimmed, "{"); idx >= 0 {
 						trimmed = trimmed[idx:]
 					}
 					if idx := strings.LastIndex(trimmed, "}"); idx >= 0 && idx < len(trimmed)-1 {
