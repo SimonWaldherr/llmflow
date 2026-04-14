@@ -481,7 +481,7 @@ textarea { font-family: var(--font-mono); resize: vertical; }
       <select id="q-csv-delimiter">
         <option value=",">, (comma)</option>
         <option value=";">; (semicolon)</option>
-        <option value="&#9;">⇥ (tab)</option>
+        <option value="\t">⇥ (tab)</option>
         <option value="|">| (pipe)</option>
         <option value="__custom__">— Custom —</option>
       </select>
@@ -876,6 +876,7 @@ function escHtml(s) {
 function getCsvDelimiter() {
   const sel = document.getElementById('q-csv-delimiter').value;
   if (sel === '__custom__') return document.getElementById('q-csv-delimiter-custom').value || ',';
+  if (sel === '\\t') return '\t';
   return sel;
 }
 
@@ -914,7 +915,7 @@ function buildYAMLFromForm() {
   yaml += `\n  input_template: |\n    ${ind4(template)}`;
   if (post.trim()) yaml += `\n  post_prompt: |\n    ${ind4(post)}`;
 
-  const escapedDelim = csvDelimiter === '"' ? '\\"' : csvDelimiter;
+  const escapedDelim = csvDelimiter === '\t' ? '\\t' : csvDelimiter === '"' ? '\\"' : csvDelimiter;
   yaml += `\n\ninput:\n  type: ${inputType}\n  path: ${inputPath}`;
   if (inputType === 'csv') yaml += `\n  csv:\n    delimiter: "${escapedDelim}"\n    has_header: true`;
 

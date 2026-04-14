@@ -1020,6 +1020,16 @@ func (s *Server) handleListFiles(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, apiResponse{OK: true, Data: files})
 }
 
+// safeInDir verifies that dst is a direct child of dirPath (no traversal).
+func safeInDir(dirPath, dst string) bool {
+	rel, err := filepath.Rel(filepath.Clean(dirPath), filepath.Clean(dst))
+	if err != nil {
+		return false
+	}
+	// rel must be a plain filename (no ".." components, no path separator).
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator)) && !strings.ContainsRune(rel, os.PathSeparator)
+}
+
 // handleDeleteFile deletes a file from data/input or data/output.
 func (s *Server) handleDeleteFile(w http.ResponseWriter, r *http.Request) {
 	dir := r.PathValue("dir")
@@ -1039,8 +1049,7 @@ func (s *Server) handleDeleteFile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	dst := filepath.Join(dirPath, name)
-	// Ensure the resolved path is still inside the expected directory.
-	if !strings.HasPrefix(dst, filepath.Clean(dirPath)+string(os.PathSeparator)) {
+	if !safeInDir(dirPath, dst) {
 		writeJSON(w, http.StatusBadRequest, apiResponse{Error: "invalid filename"})
 		return
 	}
@@ -1074,7 +1083,7 @@ func (s *Server) handleDownloadFile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	dst := filepath.Join(dirPath, name)
-	if !strings.HasPrefix(dst, filepath.Clean(dirPath)+string(os.PathSeparator)) {
+	if !safeInDir(dirPath, dst) {
 		http.Error(w, "invalid filename", http.StatusBadRequest)
 		return
 	}
@@ -1102,12 +1111,19 @@ func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
 	}
 	apiCfg.ApplyProviderDefaults()
 
+	// Validate the resolved base URL is a well-formed http(s) URL to prevent SSRF.
+	parsedURL, err := url.Parse(strings.TrimRight(apiCfg.BaseURL, "/"))
+	if err != nil || (parsedURL.Scheme != "http" && parsedURL.Scheme != "https") || parsedURL.Host == "" {
+		writeJSON(w, http.StatusBadRequest, apiResponse{Error: "invalid or unsupported base_url"})
+		return
+	}
+
 	apiKey := ""
 	if apiKeyEnv != "" {
 		apiKey = strings.TrimSpace(os.Getenv(apiKeyEnv))
 	}
 
-	modelsURL := strings.TrimRight(apiCfg.BaseURL, "/") + "/models"
+	modelsURL := parsedURL.String() + "/models"
 
 	client := &http.Client{Timeout: 10 * time.Second}
 	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, modelsURL, nil)

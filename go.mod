@@ -6,6 +6,7 @@ require (
 	github.com/microsoft/go-mssqldb v1.9.8
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.48.2
+	simonwaldherr.de/go/nanogo v0.0.4
 )
 
 require (
@@ -24,5 +25,4 @@ require (
 	modernc.org/libc v1.72.0 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
-	simonwaldherr.de/go/nanogo v0.0.4 // indirect
 )

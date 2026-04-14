@@ -265,7 +265,7 @@ func (a *App) processRecords(
 				if a.cfg.Processing.ParseJSONResponse {
 					var parsed map[string]any
 					trimmed := strings.TrimSpace(responseText)
-					// Strip markdown code fences if present.
+					// Strip markdown code fences if present (e.g. ```json ... ```).
 					if idx := strings.Index(trimmed, "{"); idx > 0 {
 						trimmed = trimmed[idx:]
 					}
@@ -274,6 +274,10 @@ func (a *App) processRecords(
 					}
 					if err := json.Unmarshal([]byte(trimmed), &parsed); err == nil {
 						for k, v := range parsed {
+							if _, exists := outRec[k]; exists {
+								a.logger.Warn("parse_json_response: JSON key conflicts with existing field, overwriting",
+									"key", k, "index", j.idx)
+							}
 							outRec[k] = v
 						}
 					} else {
