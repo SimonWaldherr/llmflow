@@ -33,6 +33,7 @@ var staticFS embed.FS
 type Server struct {
 	logger    *slog.Logger
 	addr      string
+	dataDir   string
 	mu        sync.Mutex
 	jobs      []*JobStatus
 	jobIDSeq  int
@@ -72,8 +73,13 @@ type JobStatus struct {
 
 // NewServer creates a new web UI server.
 func NewServer(addr string, logger *slog.Logger) *Server {
+	dataDir := strings.TrimSpace(os.Getenv("LLMFLOW_DATA_DIR"))
+	if dataDir == "" {
+		dataDir = "data"
+	}
 	return &Server{
 		addr:      addr,
+		dataDir:   dataDir,
 		logger:    logger,
 		serverCtx: context.Background(), // replaced by Run(); guards against nil if handleRun is called early
 	}
@@ -107,6 +113,14 @@ func (s *Server) Run(ctx context.Context) error {
 	s.serverCtx = ctx
 	s.mu.Unlock()
 
+	// Ensure the data directories exist.
+	for _, sub := range []string{"input", "output"} {
+		dir := filepath.Join(s.dataDir, sub)
+		if err := os.MkdirAll(dir, 0o750); err != nil {
+			return fmt.Errorf("create data dir %s: %w", dir, err)
+		}
+	}
+
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /health", s.handleHealth)
@@ -120,6 +134,10 @@ func (s *Server) Run(ctx context.Context) error {
 	mux.HandleFunc("POST /api/upload", s.handleUpload)
 	mux.HandleFunc("GET /api/detect", s.handleDetect)
 	mux.HandleFunc("POST /api/suggest", s.handleSuggest)
+	mux.HandleFunc("GET /api/files", s.handleListFiles)
+	mux.HandleFunc("DELETE /api/files/{dir}/{name}", s.handleDeleteFile)
+	mux.HandleFunc("GET /api/files/download/{dir}/{name}", s.handleDownloadFile)
+	mux.HandleFunc("GET /api/models", s.handleListModels)
 
 	sub, err := fs.Sub(staticFS, "static")
 	if err != nil {
@@ -432,15 +450,18 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	uploadDir := filepath.Join(os.TempDir(), "llmflow-uploads")
+	uploadDir := filepath.Join(s.dataDir, "input")
 	if err := os.MkdirAll(uploadDir, 0o750); err != nil {
 		writeJSON(w, http.StatusInternalServerError, apiResponse{Error: "create upload dir"})
 		return
 	}
 
-	// Prefix with a nanosecond timestamp so uploads never overwrite each other.
-	uniqueName := fmt.Sprintf("%d-%s", time.Now().UnixNano(), name)
-	dst := filepath.Join(uploadDir, uniqueName)
+	// If the file already exists, prefix with a nanosecond timestamp so uploads never overwrite each other.
+	dst := filepath.Join(uploadDir, name)
+	if _, statErr := os.Stat(dst); statErr == nil {
+		name = fmt.Sprintf("%d-%s", time.Now().UnixNano(), name)
+		dst = filepath.Join(uploadDir, name)
+	}
 	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0o640)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, apiResponse{Error: "create file"})
@@ -453,7 +474,7 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, apiResponse{OK: true, Data: map[string]string{"path": dst}})
+	writeJSON(w, http.StatusOK, apiResponse{OK: true, Data: map[string]string{"path": dst, "name": name}})
 }
 
 // ─── /api/suggest ─────────────────────────────────────────────────────────────
@@ -943,4 +964,195 @@ func normalizeLMStudioBaseURL(raw string) string {
 		return base
 	}
 	return strings.TrimRight(base, "/") + "/v1"
+}
+
+// ─── /api/files ───────────────────────────────────────────────────────────────
+
+// FileInfo describes a file in the data directory.
+type FileInfo struct {
+	Name    string `json:"name"`
+	Dir     string `json:"dir"` // "input" or "output"
+	Size    int64  `json:"size"`
+	ModTime string `json:"mod_time"`
+	Path    string `json:"path"`
+}
+
+// allowedFileDir validates and returns the absolute path for "input" or "output".
+func (s *Server) allowedFileDir(dir string) (string, bool) {
+	if dir != "input" && dir != "output" {
+		return "", false
+	}
+	return filepath.Join(s.dataDir, dir), true
+}
+
+// handleListFiles lists files in data/input and data/output.
+func (s *Server) handleListFiles(w http.ResponseWriter, r *http.Request) {
+	var files []FileInfo
+	for _, dir := range []string{"input", "output"} {
+		dirPath := filepath.Join(s.dataDir, dir)
+		if err := os.MkdirAll(dirPath, 0o750); err != nil {
+			continue
+		}
+		entries, err := os.ReadDir(dirPath)
+		if err != nil {
+			continue
+		}
+		for _, e := range entries {
+			if e.IsDir() {
+				continue
+			}
+			info, err := e.Info()
+			if err != nil {
+				continue
+			}
+			files = append(files, FileInfo{
+				Name:    e.Name(),
+				Dir:     dir,
+				Size:    info.Size(),
+				ModTime: info.ModTime().UTC().Format(time.RFC3339),
+				Path:    filepath.Join(dirPath, e.Name()),
+			})
+		}
+	}
+	if files == nil {
+		files = []FileInfo{}
+	}
+	writeJSON(w, http.StatusOK, apiResponse{OK: true, Data: files})
+}
+
+// safeInDir verifies that dst is a direct child of dirPath (no traversal).
+func safeInDir(dirPath, dst string) bool {
+	rel, err := filepath.Rel(filepath.Clean(dirPath), filepath.Clean(dst))
+	if err != nil {
+		return false
+	}
+	// rel must be a plain filename (no ".." components, no path separator).
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator)) && !strings.ContainsRune(rel, os.PathSeparator)
+}
+
+// handleDeleteFile deletes a file from data/input or data/output.
+func (s *Server) handleDeleteFile(w http.ResponseWriter, r *http.Request) {
+	dir := r.PathValue("dir")
+	name := r.PathValue("name")
+
+	dirPath, ok := s.allowedFileDir(dir)
+	if !ok {
+		writeJSON(w, http.StatusBadRequest, apiResponse{Error: "invalid dir; must be 'input' or 'output'"})
+		return
+	}
+
+	// Sanitize name to prevent path traversal.
+	name = filepath.Base(name)
+	if name == "." || name == string(filepath.Separator) {
+		writeJSON(w, http.StatusBadRequest, apiResponse{Error: "invalid filename"})
+		return
+	}
+
+	dst := filepath.Join(dirPath, name)
+	if !safeInDir(dirPath, dst) {
+		writeJSON(w, http.StatusBadRequest, apiResponse{Error: "invalid filename"})
+		return
+	}
+
+	if err := os.Remove(dst); err != nil {
+		if os.IsNotExist(err) {
+			writeJSON(w, http.StatusNotFound, apiResponse{Error: "file not found"})
+		} else {
+			writeJSON(w, http.StatusInternalServerError, apiResponse{Error: "delete file: " + err.Error()})
+		}
+		return
+	}
+	writeJSON(w, http.StatusOK, apiResponse{OK: true})
+}
+
+// handleDownloadFile serves a file from data/input or data/output for download.
+func (s *Server) handleDownloadFile(w http.ResponseWriter, r *http.Request) {
+	dir := r.PathValue("dir")
+	name := r.PathValue("name")
+
+	dirPath, ok := s.allowedFileDir(dir)
+	if !ok {
+		http.Error(w, "invalid dir", http.StatusBadRequest)
+		return
+	}
+
+	name = filepath.Base(name)
+	if name == "." || name == string(filepath.Separator) {
+		http.Error(w, "invalid filename", http.StatusBadRequest)
+		return
+	}
+
+	dst := filepath.Join(dirPath, name)
+	if !safeInDir(dirPath, dst) {
+		http.Error(w, "invalid filename", http.StatusBadRequest)
+		return
+	}
+
+	w.Header().Set("Content-Disposition", `attachment; filename="`+name+`"`)
+	http.ServeFile(w, r, dst)
+}
+
+// ─── /api/models ──────────────────────────────────────────────────────────────
+
+// handleListModels fetches the available models from the provider API and returns them.
+// Query params: provider, base_url, api_key_env.
+func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
+	provider := r.URL.Query().Get("provider")
+	if provider == "" {
+		provider = config.ProviderOpenAI
+	}
+	baseURL := strings.TrimSpace(r.URL.Query().Get("base_url"))
+	apiKeyEnv := strings.TrimSpace(r.URL.Query().Get("api_key_env"))
+
+	apiCfg := config.APIConfig{
+		Provider:  provider,
+		BaseURL:   baseURL,
+		APIKeyEnv: apiKeyEnv,
+	}
+	apiCfg.ApplyProviderDefaults()
+
+	// Validate the resolved base URL is a well-formed http(s) URL to prevent SSRF.
+	parsedURL, err := url.Parse(strings.TrimRight(apiCfg.BaseURL, "/"))
+	if err != nil || (parsedURL.Scheme != "http" && parsedURL.Scheme != "https") || parsedURL.Host == "" {
+		writeJSON(w, http.StatusBadRequest, apiResponse{Error: "invalid or unsupported base_url"})
+		return
+	}
+
+	apiKey := ""
+	if apiKeyEnv != "" {
+		apiKey = strings.TrimSpace(os.Getenv(apiKeyEnv))
+	}
+
+	modelsURL := parsedURL.String() + "/models"
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, modelsURL, nil)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, apiResponse{Error: "build request: " + err.Error()})
+		return
+	}
+	if apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+apiKey)
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, apiResponse{Error: "fetch models: " + err.Error()})
+		return
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 256*1024))
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, apiResponse{Error: "read response: " + err.Error()})
+		return
+	}
+	if resp.StatusCode != http.StatusOK {
+		writeJSON(w, http.StatusBadGateway, apiResponse{Error: fmt.Sprintf("provider returned %d: %s", resp.StatusCode, string(body))})
+		return
+	}
+
+	models := parseOpenAICompatibleModels(body)
+	sort.Strings(models)
+	writeJSON(w, http.StatusOK, apiResponse{OK: true, Data: models})
 }

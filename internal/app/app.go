@@ -260,7 +260,33 @@ func (a *App) processRecords(
 						outRec[k] = v
 					}
 				}
-				outRec[a.cfg.Processing.ResponseField] = responseText
+				// Attempt to expand the LLM response as a JSON object into
+				// multiple output columns when parse_json_response is enabled.
+				if a.cfg.Processing.ParseJSONResponse {
+					var parsed map[string]any
+					trimmed := strings.TrimSpace(responseText)
+					// Strip markdown code fences if present (e.g. ```json ... ```).
+					if idx := strings.Index(trimmed, "{"); idx >= 0 {
+						trimmed = trimmed[idx:]
+					}
+					if idx := strings.LastIndex(trimmed, "}"); idx >= 0 && idx < len(trimmed)-1 {
+						trimmed = trimmed[:idx+1]
+					}
+					if err := json.Unmarshal([]byte(trimmed), &parsed); err == nil {
+						for k, v := range parsed {
+							if _, exists := outRec[k]; exists {
+								a.logger.Warn("parse_json_response: JSON key conflicts with existing field, overwriting",
+									"key", k, "index", j.idx)
+							}
+							outRec[k] = v
+						}
+					} else {
+						// Fallback: store as plain text under the response field.
+						outRec[a.cfg.Processing.ResponseField] = responseText
+					}
+				} else {
+					outRec[a.cfg.Processing.ResponseField] = responseText
+				}
 				resultCh <- indexedResult{idx: j.idx, rec: outRec}
 				cur := int(atomic.AddInt64(&processed, 1))
 				if a.progressFunc != nil {
