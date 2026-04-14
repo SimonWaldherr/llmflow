@@ -1,6 +1,10 @@
 package web
 
 import (
+	"bytes"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -72,6 +76,23 @@ func TestBuildDetectCandidatesUsesEnvOverrides(t *testing.T) {
 	}
 }
 
+func TestResolveQuickFormAPIKey(t *testing.T) {
+	direct, env := resolveQuickFormAPIKey("sk-test-direct")
+	if direct != "sk-test-direct" || env != "" {
+		t.Fatalf("expected direct key, got direct=%q env=%q", direct, env)
+	}
+
+	direct, env = resolveQuickFormAPIKey("OPENAI_API_KEY")
+	if direct != "" || env != "OPENAI_API_KEY" {
+		t.Fatalf("expected env var name, got direct=%q env=%q", direct, env)
+	}
+
+	direct, env = resolveQuickFormAPIKey("   ")
+	if direct != "" || env != "" {
+		t.Fatalf("expected empty key config, got direct=%q env=%q", direct, env)
+	}
+}
+
 func TestResolveSuggestTimeout_Default(t *testing.T) {
 	t.Setenv("LLMFLOW_WEB_SUGGEST_TIMEOUT", "")
 
@@ -122,5 +143,76 @@ func TestResolveSuggestTimeout_ClampsAndValidates(t *testing.T) {
 	t.Setenv("LLMFLOW_WEB_SUGGEST_TIMEOUT", "nope")
 	if _, err := resolveSuggestTimeout(""); err == nil {
 		t.Fatal("expected invalid env timeout to fail")
+	}
+}
+
+func TestParseConfigAcceptsJSON(t *testing.T) {
+	jsonConfig := `{
+		"api": {"model": "gpt-test", "api_key": "sk-test-direct"},
+		"prompt": {"input_template": "{{ .record }}"},
+		"input": {"type": "csv"},
+		"output": {"type": "jsonl"}
+	}`
+
+	cfg, err := parseConfig(jsonConfig)
+	if err != nil {
+		t.Fatalf("parseConfig rejected json: %v", err)
+	}
+	if cfg.API.Model != "gpt-test" {
+		t.Fatalf("model = %q, want gpt-test", cfg.API.Model)
+	}
+	if cfg.API.APIKeyDirect != "sk-test-direct" {
+		t.Fatalf("api key direct = %q, want direct key", cfg.API.APIKeyDirect)
+	}
+}
+
+func TestHandleModelsOpenAICompatible(t *testing.T) {
+	providerServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/models" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer sk-test-direct" {
+			t.Fatalf("unexpected auth header: %q", got)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"data": []map[string]string{
+				{"id": "gpt-4o"},
+				{"id": "gpt-4o-mini"},
+			},
+		})
+	}))
+	t.Cleanup(providerServer.Close)
+
+	reqBody := map[string]string{
+		"provider":  config.ProviderOpenAI,
+		"base_url":  providerServer.URL,
+		"api_key":   "sk-test-direct",
+	}
+	body, err := json.Marshal(reqBody)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/models", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	(&Server{}).handleModels(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+
+	var resp apiResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if !resp.OK {
+		t.Fatalf("expected ok response, got %#v", resp)
+	}
+	models, ok := resp.Data.([]any)
+	if !ok {
+		t.Fatalf("expected models array, got %#v", resp.Data)
+	}
+	if len(models) != 2 {
+		t.Fatalf("expected 2 models, got %#v", models)
 	}
 }

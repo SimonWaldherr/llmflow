@@ -96,6 +96,8 @@ textarea { font-family: var(--font-mono); resize: vertical; }
 .btn-warning:hover { background: rgba(227,113,42,0.1); }
 .btn-sm { padding: 4px 12px; font-size: 12px; }
 .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.model-controls { display: flex; gap: 8px; align-items: center; }
+.model-controls select { flex: 1; }
 
 .status-bar {
   margin-top: 12px; padding: 10px 14px; border-radius: 6px; font-size: 13px;
@@ -312,17 +314,6 @@ textarea { font-family: var(--font-mono); resize: vertical; }
 .suggest-status { font-size: 12px; margin-top: 8px; min-height: 16px; }
 .suggest-status.ok    { color: var(--green); }
 .suggest-status.error { color: var(--red); }
-
-/* Files panel */
-.files-section { margin-bottom: 24px; }
-.files-section h3 { font-size: 15px; font-weight: 600; margin-bottom: 10px; color: var(--text); }
-.file-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-.file-table th { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); color: var(--text-muted); font-weight: 500; }
-.file-table td { padding: 8px 10px; border-bottom: 1px solid var(--border); color: var(--text); }
-.file-table tr:last-child td { border-bottom: none; }
-.file-table tr:hover td { background: rgba(88,166,255,0.04); }
-.file-size { color: var(--text-muted); white-space: nowrap; }
-.file-date { color: var(--text-muted); white-space: nowrap; font-size: 12px; }
 </style>
 </head>
 <body>
@@ -338,7 +329,6 @@ textarea { font-family: var(--font-mono); resize: vertical; }
   <button class="tab active" data-panel="quick">Quick Start</button>
   <button class="tab" data-panel="editor">YAML Editor</button>
   <button class="tab" data-panel="jobs">Jobs</button>
-  <button class="tab" data-panel="files">Files</button>
 </div>
 
 <!-- Detection banner -->
@@ -411,19 +401,17 @@ textarea { font-family: var(--font-mono); resize: vertical; }
     </div>
     <div class="form-group">
       <label>Model</label>
-      <div style="display:flex;gap:6px;align-items:flex-start">
-        <div style="flex:1">
-          <select id="q-model" onchange="onModelSelectChange()"></select>
-          <input id="q-model-custom" type="text" placeholder="your-model-name" style="display:none; margin-top:6px">
-        </div>
-        <button class="btn btn-secondary btn-sm" onclick="fetchModels()" title="Fetch available models from the provider API" style="white-space:nowrap;margin-top:1px">↻ Fetch</button>
+      <div class="model-controls">
+        <select id="q-model" onchange="onModelSelectChange()"></select>
+        <button id="model-refresh" class="btn btn-secondary btn-sm" type="button">Modelle laden</button>
       </div>
+      <input id="q-model-custom" type="text" placeholder="your-model-name" style="display:none; margin-top:6px">
       <div class="hint" id="q-model-hint"></div>
     </div>
     <div class="form-group q-cloud-only">
       <label>API Key Environment Variable</label>
-      <input id="q-apikey" type="text" placeholder="OPENAI_API_KEY">
-      <div class="hint">Name of the env var that holds the API key. Not required for local providers.</div>
+      <input id="q-apikey" type="text" placeholder="OPENAI_API_KEY or sk-...">
+      <div class="hint">Name of the env var that holds the API key, or paste a raw key starting with <code>sk</code>. Not required for local providers.</div>
     </div>
     <div class="form-group">
       <label>Base URL <span style="font-weight:400">(optional)</span></label>
@@ -462,7 +450,7 @@ textarea { font-family: var(--font-mono); resize: vertical; }
     <!-- I/O -->
     <div class="form-group">
       <label>Input Type</label>
-      <select id="q-input-type" onchange="onInputTypeChange()">
+      <select id="q-input-type">
         <option value="csv">CSV</option>
         <option value="json">JSON (array)</option>
         <option value="jsonl">JSONL (JSON Lines)</option>
@@ -476,17 +464,6 @@ textarea { font-family: var(--font-mono); resize: vertical; }
         <option value="csv">CSV</option>
       </select>
     </div>
-    <div id="q-csv-options" class="form-group quick-full" style="display:none">
-      <label>CSV Delimiter</label>
-      <select id="q-csv-delimiter">
-        <option value=",">, (comma)</option>
-        <option value=";">; (semicolon)</option>
-        <option value="\t">⇥ (tab)</option>
-        <option value="|">| (pipe)</option>
-        <option value="__custom__">— Custom —</option>
-      </select>
-      <input id="q-csv-delimiter-custom" type="text" placeholder="single character" maxlength="1" style="display:none; margin-top:6px; width:120px">
-    </div>
     <div class="form-group">
       <label>⑤ Response Field Name</label>
       <input id="q-response-field" type="text" value="llm_response">
@@ -499,26 +476,12 @@ textarea { font-family: var(--font-mono); resize: vertical; }
         <option value="false">No — output only the response field</option>
       </select>
     </div>
-    <div class="form-group">
-      <label>Parse LLM Response as JSON</label>
-      <select id="q-parse-json-response">
-        <option value="false">No — store response as plain text</option>
-        <option value="true">Yes — expand JSON response into multiple output columns</option>
-      </select>
-      <div class="hint">Enable when the LLM returns a JSON object and you want each key as a separate output column (e.g. 5 input columns → 9 output columns).</div>
-    </div>
     <div class="form-group quick-full">
       <label>Input File</label>
       <div id="upload-zone" class="upload-zone">
         Drop a file here or click to upload
         <input type="file" id="file-input" style="display:none" accept=".csv,.json,.jsonl,.xml">
         <div id="upload-path" class="upload-path" style="display:none"></div>
-      </div>
-      <div style="margin-top:8px;display:flex;gap:8px;align-items:center">
-        <select id="q-existing-file" style="flex:1;font-size:13px">
-          <option value="">— or select a previously uploaded file —</option>
-        </select>
-        <button class="btn btn-secondary btn-sm" onclick="useSelectedFile()" style="white-space:nowrap">Use File</button>
       </div>
     </div>
 
@@ -688,22 +651,20 @@ prompt:
 
 input:
   type: csv
-  path: ./data/input/input.csv
+  path: ./input.csv
   csv:
     delimiter: ","
     has_header: true
 
 output:
   type: jsonl
-  path: ./data/output/output.jsonl
+  path: ./output.jsonl
 
 processing:
   mode: per_record
   include_input_in_output: true
   # response_field: key in each output row that holds the LLM answer
   response_field: llm_response
-  # parse_json_response: when true, parse the LLM response as JSON and expand keys into output columns
-  # parse_json_response: true
   continue_on_error: true
   workers: 2
   max_retries: 3
@@ -778,28 +739,6 @@ processing:
   </div>
 </div>
 
-<!-- ═══════════════════════ Files ═══════════════════════ -->
-<div id="panel-files" class="panel">
-  <div class="btn-row" style="margin-bottom:16px;margin-top:0">
-    <button class="btn btn-secondary" onclick="refreshFiles()">↻ Refresh</button>
-    <span id="files-status" style="font-size:13px;color:var(--text-muted);margin-left:8px"></span>
-  </div>
-
-  <div class="files-section">
-    <h3>📥 Input Files <span style="font-weight:400;font-size:13px;color:var(--text-muted)">(data/input)</span></h3>
-    <div id="input-files-list">
-      <div class="empty-state">No input files yet. Upload a file from the Quick Start tab.</div>
-    </div>
-  </div>
-
-  <div class="files-section">
-    <h3>📤 Output Files <span style="font-weight:400;font-size:13px;color:var(--text-muted)">(data/output)</span></h3>
-    <div id="output-files-list">
-      <div class="empty-state">No output files yet. Completed jobs will write here when the output path is set to data/output/…</div>
-    </div>
-  </div>
-</div>
-
 </div><!-- .container -->
 
 <script>
@@ -812,7 +751,6 @@ function activatePanel(panelName) {
   const panel = document.getElementById('panel-' + panelName);
   if (panel) panel.classList.add('active');
   if (panelName === 'jobs') refreshJobs();
-  if (panelName === 'files') refreshFiles();
 }
 
 document.querySelectorAll('.tab').forEach(tab => {
@@ -845,14 +783,10 @@ async function uploadFile(file) {
       uploadedPath = d.data.path;
       const ext = file.name.split('.').pop().toLowerCase();
       const typeMap = { csv:'csv', json:'json', jsonl:'jsonl', xml:'xml' };
-      if (typeMap[ext]) {
-        document.getElementById('q-input-type').value = typeMap[ext];
-        onInputTypeChange();
-      }
+      if (typeMap[ext]) document.getElementById('q-input-type').value = typeMap[ext];
       const el = document.getElementById('upload-path');
       el.textContent = '✓ ' + uploadedPath;
       el.style.display = 'block';
-      await refreshExistingFilesDropdown();
     } else {
       showStatus('quick-status', 'error', 'Upload failed: ' + d.error);
     }
@@ -872,18 +806,23 @@ function escHtml(s) {
   return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
-// ── YAML builder ──────────────────────────────────────────────────
-function getCsvDelimiter() {
-  const sel = document.getElementById('q-csv-delimiter').value;
-  if (sel === '__custom__') return document.getElementById('q-csv-delimiter-custom').value || ',';
-  if (sel === '\\t') return '\t';
-  return sel;
+function syncAPIKeyFieldMode() {
+  const input = document.getElementById('q-apikey');
+  const raw = (input.value || '').trim();
+  input.type = raw.startsWith('sk') ? 'password' : 'text';
 }
 
+function getAPIKeyConfigEntry() {
+  const raw = (document.getElementById('q-apikey').value || '').trim();
+  if (!raw) return { field: 'api_key_env', value: 'OPENAI_API_KEY' };
+  if (raw.startsWith('sk')) return { field: 'api_key', value: raw };
+  return { field: 'api_key_env', value: raw };
+}
+
+// ── YAML builder ──────────────────────────────────────────────────
 function buildYAMLFromForm() {
   const provider      = document.getElementById('q-provider').value;
   const model         = getModelValue();
-  const apikey        = document.getElementById('q-apikey').value || 'OPENAI_API_KEY';
   const baseurl       = document.getElementById('q-baseurl').value;
   const system        = document.getElementById('q-system').value || 'You are a helpful data-processing assistant.';
   const pre           = document.getElementById('q-pre').value;
@@ -891,7 +830,6 @@ function buildYAMLFromForm() {
   const post          = document.getElementById('q-post').value;
   const inputType     = document.getElementById('q-input-type').value;
   const outputType    = document.getElementById('q-output-type').value;
-  const csvDelimiter  = getCsvDelimiter();
   const workers       = document.getElementById('q-workers').value || '2';
   const rpm           = document.getElementById('q-rpm').value || '60';
   const timeout       = document.getElementById('q-timeout').value || '300s';
@@ -899,14 +837,14 @@ function buildYAMLFromForm() {
   const continueErr   = document.getElementById('q-continue-on-error').value;
   const responseField = document.getElementById('q-response-field').value || 'llm_response';
   const includeInput  = document.getElementById('q-include-input').value;
-  const parseJSON     = document.getElementById('q-parse-json-response').value;
-  const inputPath     = uploadedPath || './data/input/input.' + (inputType === 'jsonl' ? 'jsonl' : inputType);
-  const outputPath    = './data/output/output.' + outputType;
+  const inputPath     = uploadedPath || './input.' + (inputType === 'jsonl' ? 'jsonl' : inputType);
+  const outputPath    = './output.' + outputType;
 
   const promptCaching = document.getElementById('q-prompt-caching').value;
   const ind4 = s => s.split('\n').join('\n    ');
+  const apiKeyEntry = getAPIKeyConfigEntry();
 
-  let yaml = `api:\n  provider: ${provider}\n  api_key_env: ${apikey}\n  model: ${model}\n  timeout: ${timeout}\n  rate_limit_rpm: ${rpm}`;
+  let yaml = `api:\n  provider: ${provider}\n  ${apiKeyEntry.field}: ${apiKeyEntry.value}\n  model: ${model}\n  timeout: ${timeout}\n  rate_limit_rpm: ${rpm}`;
   if (promptCaching === 'true') yaml += `\n  prompt_caching: true`;
   if (baseurl) yaml += `\n  base_url: ${baseurl}`;
 
@@ -915,16 +853,13 @@ function buildYAMLFromForm() {
   yaml += `\n  input_template: |\n    ${ind4(template)}`;
   if (post.trim()) yaml += `\n  post_prompt: |\n    ${ind4(post)}`;
 
-  const escapedDelim = csvDelimiter === '\t' ? '\\t' : csvDelimiter === '"' ? '\\"' : csvDelimiter;
   yaml += `\n\ninput:\n  type: ${inputType}\n  path: ${inputPath}`;
-  if (inputType === 'csv') yaml += `\n  csv:\n    delimiter: "${escapedDelim}"\n    has_header: true`;
+  if (inputType === 'csv') yaml += `\n  csv:\n    delimiter: ","\n    has_header: true`;
 
   yaml += `\n\noutput:\n  type: ${outputType}\n  path: ${outputPath}`;
-  if (outputType === 'csv') yaml += `\n  csv:\n    delimiter: "${escapedDelim}"\n    has_header: true`;
+  if (outputType === 'csv') yaml += `\n  csv:\n    delimiter: ","\n    has_header: true`;
 
-  yaml += `\n\nprocessing:\n  mode: per_record\n  include_input_in_output: ${includeInput}\n  response_field: ${responseField}`;
-  if (parseJSON === 'true') yaml += `\n  parse_json_response: true`;
-  yaml += `\n  continue_on_error: ${continueErr}\n  workers: ${workers}\n  max_retries: ${retries}\n  dry_run: false`;
+  yaml += `\n\nprocessing:\n  mode: per_record\n  include_input_in_output: ${includeInput}\n  response_field: ${responseField}\n  continue_on_error: ${continueErr}\n  workers: ${workers}\n  max_retries: ${retries}\n  dry_run: false`;
 
   if (document.getElementById('t-enabled').checked) {
     const webFetch  = document.getElementById('t-web-fetch').checked;
@@ -1239,12 +1174,49 @@ function setModelSuggestions(models) {
   hint.textContent = '';
   onModelSelectChange();
 }
+
+async function loadModels() {
+  const btn = document.getElementById('model-refresh');
+  const hint = document.getElementById('q-model-hint');
+  const apiKeyEntry = getAPIKeyConfigEntry();
+  const body = {
+    provider: document.getElementById('q-provider').value,
+    base_url: document.getElementById('q-baseurl').value,
+    [apiKeyEntry.field]: apiKeyEntry.value,
+  };
+
+  btn.disabled = true;
+  const originalLabel = btn.textContent;
+  btn.textContent = 'Lade...';
+  hint.textContent = 'Lade Modelle...';
+  try {
+    const r = await fetch('/api/models', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const d = await r.json();
+    if (!d.ok) {
+      hint.textContent = 'Error: ' + d.error;
+      return;
+    }
+    const models = Array.isArray(d.data) ? d.data : [];
+    setModelSuggestions(models);
+    hint.textContent = models.length ? `Geladene Modelle: ${models.length}` : 'Keine Modelle gefunden';
+  } catch (e) {
+    hint.textContent = 'Request failed: ' + e.message;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = originalLabel;
+  }
+}
 function applyDetected(info, { markTouched=true } = {}) {
   if (!info) return;
   if (markTouched) quickFormTouched = true;
   document.getElementById('q-provider').value = info.provider;
   document.getElementById('q-baseurl').value  = info.base_url || '';
   document.getElementById('q-apikey').value   = '';
+  syncAPIKeyFieldMode();
   setModelSuggestions(info.models || []);
   updateProviderUI(info.provider);
 }
@@ -1301,13 +1273,14 @@ async function suggestConfig() {
     statusEl.textContent = `Analyzing your task… ${sec}s`;
   }, 1000);
   try {
+    const apiKeyEntry = getAPIKeyConfigEntry();
     const body = {
       task,
       provider:    document.getElementById('q-provider').value,
       model:       getModelValue(),
-      api_key_env: document.getElementById('q-apikey').value,
       base_url:    document.getElementById('q-baseurl').value,
       timeout:     suggestTimeout,
+      [apiKeyEntry.field]: apiKeyEntry.value,
     };
     const r   = await fetch('/api/suggest', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
     const d   = await r.json();
@@ -1333,6 +1306,7 @@ async function suggestConfig() {
 }
 
 document.getElementById('detect-refresh').addEventListener('click', () => detectLocalProviders({ autoApply: false }));
+document.getElementById('model-refresh').addEventListener('click', () => loadModels());
 
 document.getElementById('q-provider').addEventListener('change', e => {
   quickFormTouched = true;
@@ -1346,6 +1320,7 @@ document.getElementById('q-provider').addEventListener('change', e => {
   };
   const d = D[e.target.value] || D.openai;
   document.getElementById('q-apikey').value = d.key;
+  syncAPIKeyFieldMode();
   const det = detectedProviders.get(e.target.value);
   document.getElementById('q-baseurl').value = det ? det.base_url : d.url;
   setModelSuggestions(det ? (det.models||[]) : []);
@@ -1353,7 +1328,10 @@ document.getElementById('q-provider').addEventListener('change', e => {
 });
 
 ['q-model-custom','q-baseurl','q-apikey'].forEach(id =>
-  document.getElementById(id).addEventListener('input', () => { quickFormTouched = true; })
+  document.getElementById(id).addEventListener('input', () => {
+    quickFormTouched = true;
+    if (id === 'q-apikey') syncAPIKeyFieldMode();
+  })
 );
 
 document.getElementById('t-sql-query').addEventListener('change', e =>
@@ -1364,145 +1342,11 @@ document.getElementById('t-code-exec').addEventListener('change', e =>
   document.getElementById('t-code-extra').classList.toggle('show', e.target.checked)
 );
 
-// ── CSV delimiter ────────────────────────────────────────────────
-document.getElementById('q-csv-delimiter').addEventListener('change', e => {
-  const isCustom = e.target.value === '__custom__';
-  document.getElementById('q-csv-delimiter-custom').style.display = isCustom ? 'inline-block' : 'none';
-});
-
-function onInputTypeChange() {
-  const t = document.getElementById('q-input-type').value;
-  document.getElementById('q-csv-options').style.display = t === 'csv' ? '' : 'none';
-}
-
-// ── Fetch models from provider API ───────────────────────────────
-async function fetchModels() {
-  const provider  = document.getElementById('q-provider').value;
-  const baseurl   = document.getElementById('q-baseurl').value;
-  const apiKeyEnv = document.getElementById('q-apikey').value;
-  const hint      = document.getElementById('q-model-hint');
-  hint.textContent = 'Fetching models…';
-  try {
-    const params = new URLSearchParams({ provider });
-    if (baseurl)   params.set('base_url', baseurl);
-    if (apiKeyEnv) params.set('api_key_env', apiKeyEnv);
-    const r = await fetch('/api/models?' + params);
-    const d = await r.json();
-    if (d.ok && Array.isArray(d.data) && d.data.length > 0) {
-      setModelSuggestions(d.data);
-      hint.textContent = `✓ ${d.data.length} model(s) loaded from API`;
-    } else {
-      hint.textContent = d.error ? 'Error: ' + d.error : 'No models returned';
-    }
-  } catch(e) {
-    hint.textContent = 'Request failed: ' + e.message;
-  }
-}
-
-// ── Files panel ───────────────────────────────────────────────────
-function formatBytes(b) {
-  if (b < 1024) return b + ' B';
-  if (b < 1024*1024) return (b/1024).toFixed(1) + ' KB';
-  return (b/(1024*1024)).toFixed(1) + ' MB';
-}
-
-function renderFileTable(containerId, files, dir) {
-  const el = document.getElementById(containerId);
-  if (!files || files.length === 0) {
-    el.innerHTML = `<div class="empty-state">${dir === 'input' ? 'No input files yet. Upload a file from the Quick Start tab.' : 'No output files yet.'}</div>`;
-    return;
-  }
-  const rows = files.map(f => `
-    <tr>
-      <td><span style="font-family:var(--font-mono)">${escHtml(f.name)}</span></td>
-      <td class="file-size">${formatBytes(f.size)}</td>
-      <td class="file-date">${new Date(f.mod_time).toLocaleString()}</td>
-      <td style="white-space:nowrap">
-        ${dir === 'input' ? `<button class="btn btn-sm btn-secondary" onclick="useFileAsInput(${JSON.stringify(f.path)},${JSON.stringify(f.name)})">Use as Input</button> ` : ''}
-        <a class="btn btn-sm btn-secondary" href="/api/files/download/${encodeURIComponent(dir)}/${encodeURIComponent(f.name)}" download="${escHtml(f.name)}">Download</a>
-        <button class="btn btn-sm btn-danger" onclick="deleteFile(${JSON.stringify(dir)},${JSON.stringify(f.name)})">Delete</button>
-      </td>
-    </tr>`).join('');
-  el.innerHTML = `<table class="file-table"><thead><tr><th>Name</th><th>Size</th><th>Modified</th><th>Actions</th></tr></thead><tbody>${rows}</tbody></table>`;
-}
-
-async function refreshFiles() {
-  document.getElementById('files-status').textContent = 'Loading…';
-  try {
-    const r = await fetch('/api/files');
-    const d = await r.json();
-    if (!d.ok) { document.getElementById('files-status').textContent = 'Error: ' + d.error; return; }
-    const files = Array.isArray(d.data) ? d.data : [];
-    const inputFiles  = files.filter(f => f.dir === 'input');
-    const outputFiles = files.filter(f => f.dir === 'output');
-    renderFileTable('input-files-list', inputFiles, 'input');
-    renderFileTable('output-files-list', outputFiles, 'output');
-    document.getElementById('files-status').textContent = `${files.length} file(s)`;
-  } catch(e) {
-    document.getElementById('files-status').textContent = 'Error: ' + e.message;
-  }
-}
-
-async function refreshExistingFilesDropdown() {
-  try {
-    const r = await fetch('/api/files');
-    const d = await r.json();
-    if (!d.ok) return;
-    const files = (d.data || []).filter(f => f.dir === 'input');
-    const sel = document.getElementById('q-existing-file');
-    const prev = sel.value;
-    sel.innerHTML = '<option value="">— or select a previously uploaded file —</option>';
-    files.forEach(f => {
-      const o = document.createElement('option');
-      o.value = f.path;
-      o.textContent = f.name + ' (' + formatBytes(f.size) + ')';
-      sel.appendChild(o);
-    });
-    if (prev) sel.value = prev;
-  } catch(e) { /* best-effort */ }
-}
-
-function useSelectedFile() {
-  const sel = document.getElementById('q-existing-file');
-  if (!sel.value) return;
-  const opt = sel.options[sel.selectedIndex];
-  useFileAsInput(sel.value, opt.textContent.split(' (')[0]);
-}
-
-function useFileAsInput(path, name) {
-  uploadedPath = path;
-  const ext = name.split('.').pop().toLowerCase();
-  const typeMap = { csv:'csv', json:'json', jsonl:'jsonl', xml:'xml' };
-  if (typeMap[ext]) {
-    document.getElementById('q-input-type').value = typeMap[ext];
-    onInputTypeChange();
-  }
-  const el = document.getElementById('upload-path');
-  el.textContent = '✓ ' + name;
-  el.style.display = 'block';
-  showStatus('quick-status', 'ok', 'Input file set to: ' + name);
-}
-
-async function deleteFile(dir, name) {
-  if (!confirm(`Delete ${dir}/` + name + '?')) return;
-  try {
-    const r = await fetch('/api/files/' + encodeURIComponent(dir) + '/' + encodeURIComponent(name), { method: 'DELETE' });
-    const d = await r.json();
-    if (d.ok) {
-      await refreshFiles();
-      await refreshExistingFilesDropdown();
-    } else {
-      alert('Delete failed: ' + d.error);
-    }
-  } catch(e) { alert('Error: ' + e.message); }
-}
-
 // ── Init ──────────────────────────────────────────────────────────
 setModelSuggestions([]);  // populate select for default provider (openai)
 updateProviderUI(document.getElementById('q-provider').value);
-onInputTypeChange();
+syncAPIKeyFieldMode();
 detectLocalProviders({ autoApply: true });
-refreshExistingFilesDropdown();
 </script>
 </body>
 </html>

@@ -71,6 +71,7 @@ api:
   provider: openai          # openai | gemini | ollama | lmstudio | anthropic | generic
   base_url: https://api.openai.com/v1
   api_key_env: OPENAI_API_KEY   # name of the env var holding the API key
+  api_key: sk-...           # optional direct key; overrides api_key_env when set
   model: gpt-4o-mini
   timeout: 60s
   max_output_tokens: 1000

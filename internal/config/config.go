@@ -92,6 +92,8 @@ type APIConfig struct {
 	// Defaults to "openai" when empty.
 	Provider string `json:"provider" yaml:"provider"`
 	BaseURL  string `json:"base_url" yaml:"base_url"`
+	// APIKeyDirect stores a direct provider key when the user supplies one.
+	APIKeyDirect string `json:"api_key" yaml:"api_key"`
 	// APIKeyEnv is the name of the environment variable that holds the API key.
 	APIKeyEnv       string        `json:"api_key_env" yaml:"api_key_env"`
 	Model           string        `json:"model" yaml:"model"`
@@ -137,13 +139,11 @@ type ProcessingConfig struct {
 	Mode                 string `json:"mode" yaml:"mode"`
 	IncludeInputInOutput bool   `json:"include_input_in_output" yaml:"include_input_in_output"`
 	ResponseField        string `json:"response_field" yaml:"response_field"`
-	// ParseJSONResponse instructs the app to attempt JSON-parsing the LLM response
-	// and merging the resulting keys into the output record, enabling multi-column output.
-	ParseJSONResponse bool `json:"parse_json_response" yaml:"parse_json_response"`
-	ContinueOnError   bool `json:"continue_on_error" yaml:"continue_on_error"`
-	Workers           int  `json:"workers" yaml:"workers"`
-	MaxRetries        int  `json:"max_retries" yaml:"max_retries"`
-	DryRun            bool `json:"dry_run" yaml:"dry_run"`
+	ParseJSONResponse    bool   `json:"parse_json_response" yaml:"parse_json_response"`
+	ContinueOnError      bool   `json:"continue_on_error" yaml:"continue_on_error"`
+	Workers              int    `json:"workers" yaml:"workers"`
+	MaxRetries           int    `json:"max_retries" yaml:"max_retries"`
+	DryRun               bool   `json:"dry_run" yaml:"dry_run"`
 }
 
 type CSVConfig struct {
@@ -280,10 +280,16 @@ func (c Config) Validate() error {
 	if c.API.Model == "" {
 		problems = append(problems, errors.New("api.model is required"))
 	}
-	// Providers that work without an API key do not require api_key_env.
+	// Providers that work without an API key do not require api_key_env or api_key.
 	nokeyProviders := map[string]bool{ProviderOllama: true, ProviderLMStudio: true}
-	if !nokeyProviders[strings.ToLower(c.API.Provider)] && c.API.APIKeyEnv == "" {
-		problems = append(problems, errors.New("api.api_key_env is required for this provider"))
+	hasDirectKey := strings.TrimSpace(c.API.APIKeyDirect) != ""
+	if !nokeyProviders[strings.ToLower(c.API.Provider)] && !hasDirectKey && c.API.APIKeyEnv == "" {
+		problems = append(problems, errors.New("api.api_key_env or api.api_key is required for this provider"))
+	}
+	if !hasDirectKey && c.API.APIKeyEnv != "" {
+		if strings.TrimSpace(os.Getenv(c.API.APIKeyEnv)) == "" {
+			problems = append(problems, fmt.Errorf("environment variable %s is empty", c.API.APIKeyEnv))
+		}
 	}
 	if c.Input.Type == "" {
 		problems = append(problems, errors.New("input.type is required"))
@@ -314,6 +320,9 @@ func (c Config) Validate() error {
 // APIKey resolves the API key. Returns empty string without error for providers that don't need a key.
 func (c Config) APIKey() (string, error) {
 	nokeyProviders := map[string]bool{ProviderOllama: true, ProviderLMStudio: true}
+	if v := strings.TrimSpace(c.API.APIKeyDirect); v != "" {
+		return v, nil
+	}
 	if nokeyProviders[strings.ToLower(c.API.Provider)] {
 		// Still honour the env var if the user sets one (e.g. secured Ollama deployment).
 		if c.API.APIKeyEnv != "" {

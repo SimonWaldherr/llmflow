@@ -41,6 +41,7 @@ processing:
 `
 
 func TestLoadYAML(t *testing.T) {
+	t.Setenv("TEST_KEY", "secret")
 	p := writeTempFile(t, "cfg.yaml", validYAML)
 	cfg, err := Load(p)
 	if err != nil {
@@ -55,6 +56,7 @@ func TestLoadYAML(t *testing.T) {
 }
 
 func TestLoadJSON(t *testing.T) {
+	t.Setenv("K", "secret")
 	content := `{
 		"api": {"base_url": "https://api.example.com/v1", "api_key_env": "K", "model": "m"},
 		"prompt": {"input_template": "{{ .record }}"},
@@ -140,10 +142,34 @@ func TestAPIKeyPresent(t *testing.T) {
 	}
 }
 
+func TestAPIKeyDirect(t *testing.T) {
+	t.Setenv("TEST_LLMFLOW_KEY", "secret-from-env")
+	c := Config{API: APIConfig{APIKeyDirect: "sk-test-direct", APIKeyEnv: "TEST_LLMFLOW_KEY"}}
+	k, err := c.APIKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if k != "sk-test-direct" {
+		t.Fatalf("got %q, want direct key", k)
+	}
+}
+
 func TestAPIKeyMissing(t *testing.T) {
 	c := Config{API: APIConfig{APIKeyEnv: "LLMFLOW_NONEXISTENT_KEY_12345"}}
 	if _, err := c.APIKey(); err == nil {
 		t.Fatal("expected error for missing env var")
+	}
+}
+
+func TestAPIKeyDirectValidation(t *testing.T) {
+	c := Config{
+		API:    APIConfig{APIKeyDirect: "sk-test-direct", Model: "m"},
+		Input:  InputConfig{Type: "csv"},
+		Output: OutputConfig{Type: "jsonl"},
+		Prompt: PromptConfig{InputTemplate: "x"},
+	}
+	if err := c.Validate(); err != nil {
+		t.Fatalf("expected direct key to satisfy validation: %v", err)
 	}
 }
 

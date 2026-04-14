@@ -2,6 +2,7 @@
 package web
 
 import (
+	"bytes"
 	"context"
 	"crypto/subtle"
 	"embed"
@@ -33,7 +34,6 @@ var staticFS embed.FS
 type Server struct {
 	logger    *slog.Logger
 	addr      string
-	dataDir   string
 	mu        sync.Mutex
 	jobs      []*JobStatus
 	jobIDSeq  int
@@ -73,13 +73,8 @@ type JobStatus struct {
 
 // NewServer creates a new web UI server.
 func NewServer(addr string, logger *slog.Logger) *Server {
-	dataDir := strings.TrimSpace(os.Getenv("LLMFLOW_DATA_DIR"))
-	if dataDir == "" {
-		dataDir = "data"
-	}
 	return &Server{
 		addr:      addr,
-		dataDir:   dataDir,
 		logger:    logger,
 		serverCtx: context.Background(), // replaced by Run(); guards against nil if handleRun is called early
 	}
@@ -113,14 +108,6 @@ func (s *Server) Run(ctx context.Context) error {
 	s.serverCtx = ctx
 	s.mu.Unlock()
 
-	// Ensure the data directories exist.
-	for _, sub := range []string{"input", "output"} {
-		dir := filepath.Join(s.dataDir, sub)
-		if err := os.MkdirAll(dir, 0o750); err != nil {
-			return fmt.Errorf("create data dir %s: %w", dir, err)
-		}
-	}
-
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /health", s.handleHealth)
@@ -132,12 +119,9 @@ func (s *Server) Run(ctx context.Context) error {
 	mux.HandleFunc("POST /api/jobs/{id}/archive", s.handleArchiveJob)
 	mux.HandleFunc("DELETE /api/jobs/{id}", s.handleDeleteJob)
 	mux.HandleFunc("POST /api/upload", s.handleUpload)
+	mux.HandleFunc("POST /api/models", s.handleModels)
 	mux.HandleFunc("GET /api/detect", s.handleDetect)
 	mux.HandleFunc("POST /api/suggest", s.handleSuggest)
-	mux.HandleFunc("GET /api/files", s.handleListFiles)
-	mux.HandleFunc("DELETE /api/files/{dir}/{name}", s.handleDeleteFile)
-	mux.HandleFunc("GET /api/files/download/{dir}/{name}", s.handleDownloadFile)
-	mux.HandleFunc("GET /api/models", s.handleListModels)
 
 	sub, err := fs.Sub(staticFS, "static")
 	if err != nil {
@@ -197,6 +181,13 @@ type validateRequest struct {
 	Config string `json:"config"`
 }
 
+type modelsRequest struct {
+	Provider  string `json:"provider"`
+	APIKey    string `json:"api_key"`
+	APIKeyEnv string `json:"api_key_env"`
+	BaseURL   string `json:"base_url"`
+}
+
 type apiResponse struct {
 	OK    bool   `json:"ok"`
 	Error string `json:"error,omitempty"`
@@ -221,6 +212,50 @@ func (s *Server) handleValidate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, apiResponse{OK: true})
+}
+
+func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
+	var req modelsRequest
+	if err := json.NewDecoder(io.LimitReader(r.Body, 32*1024)).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, apiResponse{Error: "invalid JSON body"})
+		return
+	}
+
+	provider := strings.TrimSpace(req.Provider)
+	if provider == "" {
+		provider = config.ProviderOpenAI
+	}
+
+	apiCfg := config.APIConfig{
+		Provider:  provider,
+		BaseURL:   req.BaseURL,
+		Timeout:   15 * time.Second,
+	}
+	apiKeyDirect, apiKeyEnv := resolveQuickFormAPIKey(firstNonEmpty(req.APIKey, req.APIKeyEnv))
+	apiCfg.APIKeyDirect = apiKeyDirect
+	apiCfg.APIKeyEnv = apiKeyEnv
+	apiCfg.ApplyProviderDefaults()
+
+	apiKey := apiCfg.APIKeyDirect
+	if apiKey == "" && apiCfg.APIKeyEnv != "" {
+		apiKey = strings.TrimSpace(os.Getenv(apiCfg.APIKeyEnv))
+	}
+	if apiKey == "" {
+		if apiCfg.APIKeyEnv != "" {
+			writeJSON(w, http.StatusBadRequest, apiResponse{Error: fmt.Sprintf("API key env var %q is not set; set it on the server before loading models", apiCfg.APIKeyEnv)})
+		} else {
+			writeJSON(w, http.StatusBadRequest, apiResponse{Error: "API key is required"})
+		}
+		return
+	}
+
+	models, err := fetchProviderModels(r.Context(), apiCfg, apiKey)
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, apiResponse{Error: err.Error()})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, apiResponse{OK: true, Data: models})
 }
 
 type runRequest struct {
@@ -308,7 +343,7 @@ func (s *Server) handleRun(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	writeJSON(w, http.StatusAccepted, apiResponse{OK: true, Data: job})
+	writeJSON(w, http.StatusAccepted, apiResponse{OK: true, Data: cloneJobStatus(job)})
 }
 
 func (s *Server) handleListJobs(w http.ResponseWriter, r *http.Request) {
@@ -327,7 +362,7 @@ func (s *Server) handleListJobs(w http.ResponseWriter, r *http.Request) {
 		if !showArchived && j.Archived {
 			continue
 		}
-		result = append(result, j)
+		result = append(result, cloneJobStatus(j))
 	}
 	writeJSON(w, http.StatusOK, apiResponse{OK: true, Data: result})
 }
@@ -349,7 +384,7 @@ func (s *Server) handleGetJob(w http.ResponseWriter, r *http.Request) {
 	defer s.mu.Unlock()
 	for _, j := range s.jobs {
 		if j.ID == id {
-			writeJSON(w, http.StatusOK, apiResponse{OK: true, Data: j})
+			writeJSON(w, http.StatusOK, apiResponse{OK: true, Data: cloneJobStatus(j)})
 			return
 		}
 	}
@@ -429,6 +464,73 @@ func (s *Server) handleDeleteJob(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusNotFound, apiResponse{Error: "job not found"})
 }
 
+func cloneJobStatus(src *JobStatus) *JobStatus {
+	if src == nil {
+		return nil
+	}
+	clone := *src
+	if src.Logs != nil {
+		clone.Logs = append([]string(nil), src.Logs...)
+	}
+	if src.Preview != nil {
+		clone.Preview = append([]JobPreviewItem(nil), src.Preview...)
+	}
+	clone.cancelFn = nil
+	return &clone
+}
+
+func fetchProviderModels(ctx context.Context, cfg config.APIConfig, apiKey string) ([]string, error) {
+	modelsURL := strings.TrimRight(cfg.BaseURL, "/")
+	if modelsURL == "" {
+		return nil, fmt.Errorf("base url is required")
+	}
+
+	var req *http.Request
+	var err error
+	switch strings.ToLower(cfg.Provider) {
+	case config.ProviderOllama:
+		req, err = http.NewRequestWithContext(ctx, http.MethodGet, modelsURL+"/api/tags", nil)
+	case config.ProviderOpenAI, config.ProviderGeneric, config.ProviderLMStudio:
+		req, err = http.NewRequestWithContext(ctx, http.MethodGet, modelsURL+"/models", nil)
+	case config.ProviderGemini:
+		endpoint := modelsURL + "/models"
+		if apiKey != "" {
+			endpoint += "?key=" + url.QueryEscape(apiKey)
+		}
+		req, err = http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	default:
+		return nil, fmt.Errorf("model listing is not supported for provider %q", cfg.Provider)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+	if apiKey != "" {
+		switch strings.ToLower(cfg.Provider) {
+		case config.ProviderGemini:
+			// Key is passed in the query string for Gemini.
+		default:
+			req.Header.Set("Authorization", "Bearer "+apiKey)
+		}
+	}
+
+	client := &http.Client{Timeout: cfg.Timeout}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("http request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 256*1024))
+	if err != nil {
+		return nil, fmt.Errorf("read response body: %w", err)
+	}
+	if resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("model list status %d: %s", resp.StatusCode, string(body))
+	}
+
+	return parseModelNames(body), nil
+}
+
 func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseMultipartForm(32 << 20); err != nil {
 		writeJSON(w, http.StatusBadRequest, apiResponse{Error: "parse form: " + err.Error()})
@@ -450,18 +552,15 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	uploadDir := filepath.Join(s.dataDir, "input")
+	uploadDir := filepath.Join(os.TempDir(), "llmflow-uploads")
 	if err := os.MkdirAll(uploadDir, 0o750); err != nil {
 		writeJSON(w, http.StatusInternalServerError, apiResponse{Error: "create upload dir"})
 		return
 	}
 
-	// If the file already exists, prefix with a nanosecond timestamp so uploads never overwrite each other.
-	dst := filepath.Join(uploadDir, name)
-	if _, statErr := os.Stat(dst); statErr == nil {
-		name = fmt.Sprintf("%d-%s", time.Now().UnixNano(), name)
-		dst = filepath.Join(uploadDir, name)
-	}
+	// Prefix with a nanosecond timestamp so uploads never overwrite each other.
+	uniqueName := fmt.Sprintf("%d-%s", time.Now().UnixNano(), name)
+	dst := filepath.Join(uploadDir, uniqueName)
 	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0o640)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, apiResponse{Error: "create file"})
@@ -474,7 +573,7 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, apiResponse{OK: true, Data: map[string]string{"path": dst, "name": name}})
+	writeJSON(w, http.StatusOK, apiResponse{OK: true, Data: map[string]string{"path": dst}})
 }
 
 // ─── /api/suggest ─────────────────────────────────────────────────────────────
@@ -491,6 +590,7 @@ type suggestRequest struct {
 	// only for this suggestion call, without having to run a full job.
 	Provider  string `json:"provider"`
 	Model     string `json:"model"`
+	APIKey    string `json:"api_key"`
 	APIKeyEnv string `json:"api_key_env"`
 	BaseURL   string `json:"base_url"`
 	Timeout   string `json:"timeout"`
@@ -566,23 +666,24 @@ func (s *Server) handleSuggest(w http.ResponseWriter, r *http.Request) {
 	apiCfg := config.APIConfig{
 		Provider:  provider,
 		Model:     req.Model,
-		APIKeyEnv: req.APIKeyEnv,
 		BaseURL:   req.BaseURL,
 		Timeout:   suggestTimeout,
 	}
+	apiKeyDirect, apiKeyEnv := resolveQuickFormAPIKey(firstNonEmpty(req.APIKey, req.APIKeyEnv))
+	apiCfg.APIKeyDirect = apiKeyDirect
+	apiCfg.APIKeyEnv = apiKeyEnv
 	apiCfg.ApplyProviderDefaults()
 
-	apiKey, err := func() (string, error) {
-		if apiCfg.APIKeyEnv == "" {
-			return "", nil
+	apiKey := apiCfg.APIKeyDirect
+	if apiKey == "" && apiCfg.APIKeyEnv != "" {
+		apiKey = strings.TrimSpace(os.Getenv(apiCfg.APIKeyEnv))
+	}
+	if apiKey == "" {
+		if apiCfg.APIKeyEnv != "" {
+			writeJSON(w, http.StatusBadRequest, apiResponse{Error: fmt.Sprintf("API key env var %q is not set; set it on the server before using AI suggestions", apiCfg.APIKeyEnv)})
+		} else {
+			writeJSON(w, http.StatusBadRequest, apiResponse{Error: "API key is required"})
 		}
-		v := strings.TrimSpace(os.Getenv(apiCfg.APIKeyEnv))
-		return v, nil
-	}()
-	if err != nil || (apiCfg.APIKeyEnv != "" && apiKey == "") {
-		writeJSON(w, http.StatusBadRequest, apiResponse{
-			Error: fmt.Sprintf("API key env var %q is not set; set it on the server before using AI suggestions", apiCfg.APIKeyEnv),
-		})
 		return
 	}
 
@@ -633,6 +734,26 @@ func (s *Server) handleSuggest(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, apiResponse{OK: true, Data: sr})
 }
 
+func resolveQuickFormAPIKey(raw string) (direct string, env string) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", ""
+	}
+	if strings.HasPrefix(raw, "sk") {
+		return raw, ""
+	}
+	return "", raw
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
+}
+
 func resolveSuggestTimeout(raw string) (time.Duration, error) {
 	// Default timeout for quick suggestions. Can be overridden server-side.
 	timeout := 120 * time.Second
@@ -664,8 +785,18 @@ func resolveSuggestTimeout(raw string) (time.Duration, error) {
 
 func parseConfig(yamlText string) (config.Config, error) {
 	var cfg config.Config
-	if err := yaml.Unmarshal([]byte(yamlText), &cfg); err != nil {
-		return cfg, fmt.Errorf("parse yaml: %w", err)
+	trimmed := bytes.TrimSpace([]byte(yamlText))
+	if len(trimmed) == 0 {
+		return cfg, fmt.Errorf("parse config: empty input")
+	}
+	if trimmed[0] == '{' || trimmed[0] == '[' {
+		if err := json.Unmarshal(trimmed, &cfg); err != nil {
+			return cfg, fmt.Errorf("parse json: %w", err)
+		}
+	} else {
+		if err := yaml.Unmarshal(trimmed, &cfg); err != nil {
+			return cfg, fmt.Errorf("parse yaml: %w", err)
+		}
 	}
 	cfg.ApplyDefaults()
 	if err := cfg.Validate(); err != nil {
@@ -874,18 +1005,42 @@ func parseOllamaRunningModels(body []byte) []string {
 }
 
 func parseOpenAICompatibleModels(body []byte) []string {
+	return parseModelNames(body)
+}
+
+func parseModelNames(body []byte) []string {
 	var resp struct {
 		Data []struct {
-			ID string `json:"id"`
+			ID   string `json:"id"`
+			Name string `json:"name"`
 		} `json:"data"`
+		Models []struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		} `json:"models"`
 	}
 	if err := json.Unmarshal(body, &resp); err != nil {
 		return nil
 	}
 
-	out := make([]string, 0, len(resp.Data))
+	out := make([]string, 0, len(resp.Data)+len(resp.Models))
 	for _, model := range resp.Data {
-		out = append(out, model.ID)
+		if model.ID != "" {
+			out = append(out, model.ID)
+			continue
+		}
+		if model.Name != "" {
+			out = append(out, model.Name)
+		}
+	}
+	for _, model := range resp.Models {
+		if model.Name != "" {
+			out = append(out, model.Name)
+			continue
+		}
+		if model.ID != "" {
+			out = append(out, model.ID)
+		}
 	}
 	return out
 }
@@ -964,195 +1119,4 @@ func normalizeLMStudioBaseURL(raw string) string {
 		return base
 	}
 	return strings.TrimRight(base, "/") + "/v1"
-}
-
-// ─── /api/files ───────────────────────────────────────────────────────────────
-
-// FileInfo describes a file in the data directory.
-type FileInfo struct {
-	Name    string `json:"name"`
-	Dir     string `json:"dir"` // "input" or "output"
-	Size    int64  `json:"size"`
-	ModTime string `json:"mod_time"`
-	Path    string `json:"path"`
-}
-
-// allowedFileDir validates and returns the absolute path for "input" or "output".
-func (s *Server) allowedFileDir(dir string) (string, bool) {
-	if dir != "input" && dir != "output" {
-		return "", false
-	}
-	return filepath.Join(s.dataDir, dir), true
-}
-
-// handleListFiles lists files in data/input and data/output.
-func (s *Server) handleListFiles(w http.ResponseWriter, r *http.Request) {
-	var files []FileInfo
-	for _, dir := range []string{"input", "output"} {
-		dirPath := filepath.Join(s.dataDir, dir)
-		if err := os.MkdirAll(dirPath, 0o750); err != nil {
-			continue
-		}
-		entries, err := os.ReadDir(dirPath)
-		if err != nil {
-			continue
-		}
-		for _, e := range entries {
-			if e.IsDir() {
-				continue
-			}
-			info, err := e.Info()
-			if err != nil {
-				continue
-			}
-			files = append(files, FileInfo{
-				Name:    e.Name(),
-				Dir:     dir,
-				Size:    info.Size(),
-				ModTime: info.ModTime().UTC().Format(time.RFC3339),
-				Path:    filepath.Join(dirPath, e.Name()),
-			})
-		}
-	}
-	if files == nil {
-		files = []FileInfo{}
-	}
-	writeJSON(w, http.StatusOK, apiResponse{OK: true, Data: files})
-}
-
-// safeInDir verifies that dst is a direct child of dirPath (no traversal).
-func safeInDir(dirPath, dst string) bool {
-	rel, err := filepath.Rel(filepath.Clean(dirPath), filepath.Clean(dst))
-	if err != nil {
-		return false
-	}
-	// rel must be a plain filename (no ".." components, no path separator).
-	return rel != ".." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator)) && !strings.ContainsRune(rel, os.PathSeparator)
-}
-
-// handleDeleteFile deletes a file from data/input or data/output.
-func (s *Server) handleDeleteFile(w http.ResponseWriter, r *http.Request) {
-	dir := r.PathValue("dir")
-	name := r.PathValue("name")
-
-	dirPath, ok := s.allowedFileDir(dir)
-	if !ok {
-		writeJSON(w, http.StatusBadRequest, apiResponse{Error: "invalid dir; must be 'input' or 'output'"})
-		return
-	}
-
-	// Sanitize name to prevent path traversal.
-	name = filepath.Base(name)
-	if name == "." || name == string(filepath.Separator) {
-		writeJSON(w, http.StatusBadRequest, apiResponse{Error: "invalid filename"})
-		return
-	}
-
-	dst := filepath.Join(dirPath, name)
-	if !safeInDir(dirPath, dst) {
-		writeJSON(w, http.StatusBadRequest, apiResponse{Error: "invalid filename"})
-		return
-	}
-
-	if err := os.Remove(dst); err != nil {
-		if os.IsNotExist(err) {
-			writeJSON(w, http.StatusNotFound, apiResponse{Error: "file not found"})
-		} else {
-			writeJSON(w, http.StatusInternalServerError, apiResponse{Error: "delete file: " + err.Error()})
-		}
-		return
-	}
-	writeJSON(w, http.StatusOK, apiResponse{OK: true})
-}
-
-// handleDownloadFile serves a file from data/input or data/output for download.
-func (s *Server) handleDownloadFile(w http.ResponseWriter, r *http.Request) {
-	dir := r.PathValue("dir")
-	name := r.PathValue("name")
-
-	dirPath, ok := s.allowedFileDir(dir)
-	if !ok {
-		http.Error(w, "invalid dir", http.StatusBadRequest)
-		return
-	}
-
-	name = filepath.Base(name)
-	if name == "." || name == string(filepath.Separator) {
-		http.Error(w, "invalid filename", http.StatusBadRequest)
-		return
-	}
-
-	dst := filepath.Join(dirPath, name)
-	if !safeInDir(dirPath, dst) {
-		http.Error(w, "invalid filename", http.StatusBadRequest)
-		return
-	}
-
-	w.Header().Set("Content-Disposition", `attachment; filename="`+name+`"`)
-	http.ServeFile(w, r, dst)
-}
-
-// ─── /api/models ──────────────────────────────────────────────────────────────
-
-// handleListModels fetches the available models from the provider API and returns them.
-// Query params: provider, base_url, api_key_env.
-func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
-	provider := r.URL.Query().Get("provider")
-	if provider == "" {
-		provider = config.ProviderOpenAI
-	}
-	baseURL := strings.TrimSpace(r.URL.Query().Get("base_url"))
-	apiKeyEnv := strings.TrimSpace(r.URL.Query().Get("api_key_env"))
-
-	apiCfg := config.APIConfig{
-		Provider:  provider,
-		BaseURL:   baseURL,
-		APIKeyEnv: apiKeyEnv,
-	}
-	apiCfg.ApplyProviderDefaults()
-
-	// Validate the resolved base URL is a well-formed http(s) URL to prevent SSRF.
-	parsedURL, err := url.Parse(strings.TrimRight(apiCfg.BaseURL, "/"))
-	if err != nil || (parsedURL.Scheme != "http" && parsedURL.Scheme != "https") || parsedURL.Host == "" {
-		writeJSON(w, http.StatusBadRequest, apiResponse{Error: "invalid or unsupported base_url"})
-		return
-	}
-
-	apiKey := ""
-	if apiKeyEnv != "" {
-		apiKey = strings.TrimSpace(os.Getenv(apiKeyEnv))
-	}
-
-	modelsURL := parsedURL.String() + "/models"
-
-	client := &http.Client{Timeout: 10 * time.Second}
-	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, modelsURL, nil)
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, apiResponse{Error: "build request: " + err.Error()})
-		return
-	}
-	if apiKey != "" {
-		req.Header.Set("Authorization", "Bearer "+apiKey)
-	}
-
-	resp, err := client.Do(req)
-	if err != nil {
-		writeJSON(w, http.StatusBadGateway, apiResponse{Error: "fetch models: " + err.Error()})
-		return
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 256*1024))
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, apiResponse{Error: "read response: " + err.Error()})
-		return
-	}
-	if resp.StatusCode != http.StatusOK {
-		writeJSON(w, http.StatusBadGateway, apiResponse{Error: fmt.Sprintf("provider returned %d: %s", resp.StatusCode, string(body))})
-		return
-	}
-
-	models := parseOpenAICompatibleModels(body)
-	sort.Strings(models)
-	writeJSON(w, http.StatusOK, apiResponse{OK: true, Data: models})
 }
