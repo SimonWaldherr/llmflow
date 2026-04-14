@@ -184,9 +184,9 @@ func TestHandleModelsOpenAICompatible(t *testing.T) {
 	t.Cleanup(providerServer.Close)
 
 	reqBody := map[string]string{
-		"provider":  config.ProviderOpenAI,
-		"base_url":  providerServer.URL,
-		"api_key":   "sk-test-direct",
+		"provider": config.ProviderOpenAI,
+		"base_url": providerServer.URL,
+		"api_key":  "sk-test-direct",
 	}
 	body, err := json.Marshal(reqBody)
 	if err != nil {

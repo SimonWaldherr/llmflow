@@ -227,9 +227,9 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 	}
 
 	apiCfg := config.APIConfig{
-		Provider:  provider,
-		BaseURL:   req.BaseURL,
-		Timeout:   15 * time.Second,
+		Provider: provider,
+		BaseURL:  req.BaseURL,
+		Timeout:  15 * time.Second,
 	}
 	apiKeyDirect, apiKeyEnv := resolveQuickFormAPIKey(firstNonEmpty(req.APIKey, req.APIKeyEnv))
 	apiCfg.APIKeyDirect = apiKeyDirect
@@ -664,10 +664,10 @@ func (s *Server) handleSuggest(w http.ResponseWriter, r *http.Request) {
 		provider = config.ProviderOpenAI
 	}
 	apiCfg := config.APIConfig{
-		Provider:  provider,
-		Model:     req.Model,
-		BaseURL:   req.BaseURL,
-		Timeout:   suggestTimeout,
+		Provider: provider,
+		Model:    req.Model,
+		BaseURL:  req.BaseURL,
+		Timeout:  suggestTimeout,
 	}
 	apiKeyDirect, apiKeyEnv := resolveQuickFormAPIKey(firstNonEmpty(req.APIKey, req.APIKeyEnv))
 	apiCfg.APIKeyDirect = apiKeyDirect
