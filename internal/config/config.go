@@ -137,10 +137,13 @@ type ProcessingConfig struct {
 	Mode                 string `json:"mode" yaml:"mode"`
 	IncludeInputInOutput bool   `json:"include_input_in_output" yaml:"include_input_in_output"`
 	ResponseField        string `json:"response_field" yaml:"response_field"`
-	ContinueOnError      bool   `json:"continue_on_error" yaml:"continue_on_error"`
-	Workers              int    `json:"workers" yaml:"workers"`
-	MaxRetries           int    `json:"max_retries" yaml:"max_retries"`
-	DryRun               bool   `json:"dry_run" yaml:"dry_run"`
+	// ParseJSONResponse instructs the app to attempt JSON-parsing the LLM response
+	// and merging the resulting keys into the output record, enabling multi-column output.
+	ParseJSONResponse bool `json:"parse_json_response" yaml:"parse_json_response"`
+	ContinueOnError   bool `json:"continue_on_error" yaml:"continue_on_error"`
+	Workers           int  `json:"workers" yaml:"workers"`
+	MaxRetries        int  `json:"max_retries" yaml:"max_retries"`
+	DryRun            bool `json:"dry_run" yaml:"dry_run"`
 }
 
 type CSVConfig struct {
