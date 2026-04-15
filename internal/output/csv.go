@@ -5,6 +5,7 @@ import (
 	"encoding/csv"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"unicode/utf8"
 
@@ -20,6 +21,9 @@ type CSVWriter struct {
 }
 
 func NewCSVWriter(cfg config.OutputConfig) (*CSVWriter, error) {
+	if err := os.MkdirAll(filepath.Dir(cfg.Path), 0o750); err != nil {
+		return nil, fmt.Errorf("create csv output dir: %w", err)
+	}
 	f, err := os.Create(cfg.Path)
 	if err != nil {
 		return nil, fmt.Errorf("create csv output: %w", err)

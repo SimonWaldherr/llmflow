@@ -336,27 +336,21 @@ func (a *App) processRecordsWithSink(
 						outRec[k] = v
 					}
 				}
+				// Always preserve the raw LLM response so reasoning text is never lost.
+				outRec[a.cfg.Processing.ResponseField] = responseText
 				if a.cfg.Processing.ParseJSONResponse {
-					var parsed map[string]any
-					trimmed := strings.TrimSpace(responseText)
-					if idx := strings.Index(trimmed, "{"); idx >= 0 {
-						trimmed = trimmed[idx:]
-					}
-					if idx := strings.LastIndex(trimmed, "}"); idx >= 0 && idx < len(trimmed)-1 {
-						trimmed = trimmed[:idx+1]
-					}
-					if err := json.Unmarshal([]byte(trimmed), &parsed); err == nil {
+					// Additionally extract the last JSON object from the response and
+					// spread its keys into the output record. This supports the
+					// "reasoning + structured output" pattern where the LLM first
+					// reasons in free text and then appends a JSON object.
+					if parsed, ok := extractLastJSON(responseText); ok {
 						for k, v := range parsed {
-							if _, exists := outRec[k]; exists {
+							if _, exists := outRec[k]; exists && k != a.cfg.Processing.ResponseField {
 								a.logger.Warn("parse_json_response: JSON key conflicts with existing field, overwriting", "key", k, "index", j.idx)
 							}
 							outRec[k] = v
 						}
-					} else {
-						outRec[a.cfg.Processing.ResponseField] = responseText
 					}
-				} else {
-					outRec[a.cfg.Processing.ResponseField] = responseText
 				}
 				resultCh <- indexedResult{idx: j.idx, rec: outRec}
 				cur := int(atomic.AddInt64(&processed, 1))
@@ -425,6 +419,26 @@ func (a *App) processRecordsWithSink(
 		}
 	}
 	return results, nil
+}
+
+// extractLastJSON finds and parses the last JSON object {...} in s.
+// This is used for the "reasoning + structured output" pattern where the LLM
+// first reasons in free text and then appends a JSON object at the end.
+func extractLastJSON(s string) (map[string]any, bool) {
+	end := strings.LastIndex(s, "}")
+	if end < 0 {
+		return nil, false
+	}
+	for start := end - 1; start >= 0; start-- {
+		if s[start] != '{' {
+			continue
+		}
+		var out map[string]any
+		if json.Unmarshal([]byte(s[start:end+1]), &out) == nil {
+			return out, true
+		}
+	}
+	return nil, false
 }
 
 func (a *App) processRecordStream(
@@ -760,12 +774,12 @@ func (a *App) processBatch(
 			} else {
 				var obj map[string]any
 				if err := json.Unmarshal(responses[i], &obj); err == nil {
+					// Always preserve the raw JSON so the reasoning text is not lost.
+					o[a.cfg.Processing.ResponseField] = string(responses[i])
 					if a.cfg.Processing.ParseJSONResponse {
 						for k, v := range obj {
 							o[k] = v
 						}
-					} else {
-						o[a.cfg.Processing.ResponseField] = string(responses[i])
 					}
 				} else {
 					o[a.cfg.Processing.ResponseField] = string(responses[i])
@@ -865,27 +879,19 @@ func (a *App) processJobs(
 						outRec[k] = v
 					}
 				}
+				// Always preserve the raw LLM response so reasoning text is never lost.
+				outRec[a.cfg.Processing.ResponseField] = responseText
 				if a.cfg.Processing.ParseJSONResponse {
-					var parsed map[string]any
-					trimmed := strings.TrimSpace(responseText)
-					if idx := strings.Index(trimmed, "{"); idx >= 0 {
-						trimmed = trimmed[idx:]
-					}
-					if idx := strings.LastIndex(trimmed, "}"); idx >= 0 && idx < len(trimmed)-1 {
-						trimmed = trimmed[:idx+1]
-					}
-					if err := json.Unmarshal([]byte(trimmed), &parsed); err == nil {
+					// Additionally extract the last JSON object from the response and
+					// spread its keys into the output record.
+					if parsed, ok := extractLastJSON(responseText); ok {
 						for k, v := range parsed {
-							if _, exists := outRec[k]; exists {
+							if _, exists := outRec[k]; exists && k != a.cfg.Processing.ResponseField {
 								a.logger.Warn("parse_json_response: JSON key conflicts with existing field, overwriting", "key", k, "index", j.idx)
 							}
 							outRec[k] = v
 						}
-					} else {
-						outRec[a.cfg.Processing.ResponseField] = responseText
 					}
-				} else {
-					outRec[a.cfg.Processing.ResponseField] = responseText
 				}
 				resultCh <- indexedResult{idx: j.idx, rec: outRec}
 				cur := int(atomic.AddInt64(&processed, 1))

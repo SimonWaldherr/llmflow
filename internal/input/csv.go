@@ -31,17 +31,11 @@ func NewCSVReader(cfg config.InputConfig) (*CSVReader, error) {
 	return &CSVReader{f: f, cfg: cfg}, nil
 }
 
-// sniffDelimiter reads the first few lines of r and returns the most likely
-// field separator among comma, semicolon, tab, and pipe.
+// sniffDelimiter inspects buf (the first bytes of a CSV file, already BOM-stripped)
+// and returns the most likely field separator among comma, semicolon, tab, and pipe.
 // It counts how evenly each candidate splits the first lines and picks the
 // one with the highest, most-consistent field count.
-func sniffDelimiter(r io.ReadSeeker) rune {
-	const sniffBytes = 8192
-	buf := make([]byte, sniffBytes)
-	n, _ := r.Read(buf)
-	buf = buf[:n]
-	r.Seek(0, io.SeekStart) // rewind for normal reading
-
+func sniffDelimiter(buf []byte) rune {
 	candidates := []rune{',', ';', '\t', '|'}
 	best := ','
 	bestScore := -1
@@ -94,6 +88,22 @@ func (r *CSVReader) init() {
 	if r.cr != nil {
 		return
 	}
+
+	// Read a chunk up front for BOM detection and delimiter sniffing.
+	const sniffSize = 8192
+	sniffBuf := make([]byte, sniffSize)
+	n, _ := r.f.Read(sniffBuf)
+	sniffBuf = sniffBuf[:n]
+
+	// Strip UTF-8 BOM (\xEF\xBB\xBF) if present so the first header field
+	// is not silently prefixed with the invisible BOM character.
+	startOffset := int64(0)
+	if len(sniffBuf) >= 3 && sniffBuf[0] == 0xEF && sniffBuf[1] == 0xBB && sniffBuf[2] == 0xBF {
+		startOffset = 3
+		sniffBuf = sniffBuf[3:]
+	}
+	r.f.Seek(startOffset, io.SeekStart)
+
 	r.cr = csv.NewReader(r.f)
 	r.cr.FieldsPerRecord = -1
 
@@ -102,7 +112,7 @@ func (r *CSVReader) init() {
 		r.cr.Comma = delim
 	} else {
 		// No delimiter configured — auto-detect from file content.
-		r.cr.Comma = sniffDelimiter(r.f)
+		r.cr.Comma = sniffDelimiter(sniffBuf)
 	}
 }
 

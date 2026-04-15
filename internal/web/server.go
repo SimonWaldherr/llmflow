@@ -182,10 +182,11 @@ func (s *Server) Run(ctx context.Context) error {
 	}
 	mux.Handle("GET /", http.FileServer(http.FS(sub)))
 
+	// Also raise the write-timeout so large uploads don't get cut off.
 	srv := &http.Server{
 		Addr:           s.addr,
 		Handler:        s.authMiddleware(mux),
-		ReadTimeout:    30 * time.Second,
+		ReadTimeout:    0,             // no hard cutoff for large file uploads
 		WriteTimeout:   5 * time.Minute,
 		IdleTimeout:    2 * time.Minute,
 		MaxHeaderBytes: 1 << 20, // 1 MiB
@@ -962,7 +963,9 @@ func fetchProviderModels(ctx context.Context, cfg config.APIConfig, apiKey strin
 }
 
 func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
-	if err := r.ParseMultipartForm(32 << 20); err != nil {
+	// Parse the multipart form, keeping up to 64 MiB in memory and streaming
+	// the rest to temporary files on disk — so arbitrarily large uploads work.
+	if err := r.ParseMultipartForm(64 << 20); err != nil {
 		writeJSON(w, http.StatusBadRequest, apiResponse{Error: "parse form: " + err.Error()})
 		return
 	}
@@ -1000,12 +1003,16 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 	}
 	defer out.Close()
 
-	if _, err := io.Copy(out, io.LimitReader(file, 32<<20)); err != nil {
+	// Stream the entire upload without a size cap; the OS/disk is the limit.
+	written, err := io.Copy(out, file)
+	if err != nil {
+		// Remove the partial file so we don't leave garbage.
+		_ = os.Remove(dst)
 		writeJSON(w, http.StatusInternalServerError, apiResponse{Error: "write file"})
 		return
 	}
 
-	writeJSON(w, http.StatusOK, apiResponse{OK: true, Data: map[string]string{"path": dst, "name": name}})
+	writeJSON(w, http.StatusOK, apiResponse{OK: true, Data: map[string]any{"path": dst, "name": name, "size": written}})
 }
 
 // ─── /api/suggest ─────────────────────────────────────────────────────────────

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/SimonWaldherr/llmflow/internal/config"
 )
@@ -15,6 +16,9 @@ type JSONLWriter struct {
 }
 
 func NewJSONLWriter(cfg config.OutputConfig) (*JSONLWriter, error) {
+	if err := os.MkdirAll(filepath.Dir(cfg.Path), 0o750); err != nil {
+		return nil, fmt.Errorf("create jsonl output dir: %w", err)
+	}
 	f, err := os.Create(cfg.Path)
 	if err != nil {
 		return nil, fmt.Errorf("create jsonl output: %w", err)

@@ -603,6 +603,14 @@ textarea { font-family: var(--font-mono); resize: vertical; }
           <div class="hint">Useful for long, repeated prompts. Supported by OpenAI (&ge;1024 tokens) and Anthropic.</div>
         </div>
         <div class="form-group">
+          <label>Parse JSON Response</label>
+          <select id="q-parse-json">
+            <option value="false">Disabled</option>
+            <option value="true">Enabled &mdash; extract structured fields from response</option>
+          </select>
+          <div class="hint">When enabled, the last JSON object found in the LLM response is parsed and its fields are added as separate columns alongside the full raw response. Ideal for the &ldquo;reasoning + structured output&rdquo; pattern: instruct the LLM to reason first, then append a <code>{"field": value}</code> summary at the end via <em>Post Prompt</em>.</div>
+        </div>
+        <div class="form-group">
           <label>Batch Size (records per LLM request)</label>
           <input id="q-batch-size" type="number" value="1" min="1" max="500">
           <div class="hint">1 = one record per request (default). Higher values bundle multiple records into one LLM call &mdash; useful to reduce overhead. The LLM must return a JSON array of responses.</div>
@@ -738,12 +746,11 @@ input:
   type: csv
   path: ./input.csv
   csv:
-    delimiter: ","
     has_header: true
 
 output:
   type: jsonl
-  path: ./output.jsonl
+  path: data/output/output.jsonl
 
 processing:
   mode: per_record
@@ -1163,7 +1170,8 @@ function buildYAMLFromForm() {
   const responseField = document.getElementById('q-response-field').value || 'llm_response';
   const includeInput  = document.getElementById('q-include-input').value;
   const inputPath     = uploadedPath || './input.' + (inputType === 'jsonl' ? 'jsonl' : inputType);
-  const outputPath    = './output.' + outputType;
+  const ts            = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+  const outputPath    = `data/output/output-${ts}.` + outputType;
 
   const promptCaching = document.getElementById('q-prompt-caching').value;
   const ind4 = s => s.split('\n').join('\n    ');
@@ -1180,16 +1188,18 @@ function buildYAMLFromForm() {
   if (post.trim()) yaml += `\n  post_prompt: |\n    ${ind4(post)}`;
 
   yaml += `\n\ninput:\n  type: ${inputType}\n  path: ${inputPath}`;
-  if (inputType === 'csv') yaml += `\n  csv:\n    delimiter: ","\n    has_header: true`;
+  if (inputType === 'csv') yaml += `\n  csv:\n    has_header: true`;
   if (excludedColumns.size > 0) {
     const cols = [...excludedColumns].map(c => `"${c.replace(/"/g, '\\"')}"`);
     yaml += `\n  excluded_columns: [${cols.join(', ')}]`;
   }
 
   yaml += `\n\noutput:\n  type: ${outputType}\n  path: ${outputPath}`;
-  if (outputType === 'csv') yaml += `\n  csv:\n    delimiter: ","\n    has_header: true`;
+  if (outputType === 'csv') yaml += `\n  csv:\n    has_header: true`;
 
   yaml += `\n\nprocessing:\n  mode: per_record\n  include_input_in_output: ${includeInput}\n  response_field: ${responseField}\n  continue_on_error: ${continueErr}\n  workers: ${workers}\n  max_retries: ${retries}\n  dry_run: false`;
+  const parseJSON = document.getElementById('q-parse-json').value;
+  if (parseJSON === 'true') yaml += `\n  parse_json_response: true`;
   const batchSize = parseInt(document.getElementById('q-batch-size').value || '1', 10);
   if (batchSize > 1) yaml += `\n  batch_size: ${batchSize}`;
   const debugMode = document.getElementById('q-debug').value;
