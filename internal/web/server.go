@@ -989,6 +989,7 @@ type suggestResponse struct {
 	PostPrompt    string `json:"post_prompt"`
 	JobName       string `json:"job_name"`
 	ResponseField string `json:"response_field"`
+	Notes         string `json:"notes,omitempty"`
 }
 
 const suggestSystemPrompt = `You are an expert llmflow configuration assistant.
@@ -1016,6 +1017,14 @@ short job_name. Rules:
 - response_field: a short snake_case key name describing the output (e.g. "sentiment",
   "summary", "classification").
 - job_name: ≤ 6 words describing what this job does.
+- notes: one short sentence explaining why the chosen fields fit the task.
+
+When a current config is supplied, treat it as the baseline and only change fields that
+improve the task. Be deliberate about every field: provider/model/base_url only when the
+selected runtime matters, input/output format when the file shape or downstream needs
+change, include_input_in_output when traceability matters, workers/rate limits/timeouts
+when throughput or reliability matter, prompt_caching when prompts are long/static, and
+tools only when the task truly needs web/search/code/SQL assistance.
 
 Respond with ONLY a JSON object — no markdown, no explanation — following this schema:
 {
@@ -1024,7 +1033,8 @@ Respond with ONLY a JSON object — no markdown, no explanation — following th
   "input_template": "...",
   "post_prompt": "...",
   "response_field": "...",
-  "job_name": "..."
+	"job_name": "...",
+	"notes": "..."
 }`
 
 func (s *Server) handleSuggest(w http.ResponseWriter, r *http.Request) {
@@ -1145,6 +1155,7 @@ func buildSuggestFallback(task, currentConfig string) suggestResponse {
 		PostPrompt:    "Return a concise result that matches the task.",
 		JobName:       jobName,
 		ResponseField: responseField,
+		Notes:         "Fallback configuration generated because the LLM request failed.",
 	}
 }
 

@@ -3,8 +3,12 @@ BUILD_DIR  := bin
 MODULE     := github.com/SimonWaldherr/llmflow
 VERSION    := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 LDFLAGS    := -ldflags "-X main.version=$(VERSION)"
+ACT        ?= act
+ACT_WORKFLOW ?= .github/workflows/ci.yml
+ACT_EVENT   ?= push
+ACT_ARGS    ?=
 
-.PHONY: all build test test-verbose test-cover lint clean tidy validate run
+.PHONY: all build test test-verbose test-cover lint clean tidy validate run ci act
 
 all: build
 
@@ -24,6 +28,11 @@ test-cover:
 
 lint:
 	golangci-lint run ./...
+
+ci: test build
+
+act:
+	$(ACT) $(ACT_EVENT) -W $(ACT_WORKFLOW) $(ACT_ARGS)
 
 tidy:
 	go mod tidy

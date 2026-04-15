@@ -4,6 +4,27 @@
 assembling prompts deterministically, sending requests to multiple AI APIs, and writing
 results to various output destinations.
 
+## What llmflow is, and what it is not
+
+`llmflow` is built for one specific job: take structured input files, run the same prompt
+pipeline over each record, and write the results back to files in a repeatable way.
+That makes it a batch processor for AI tasks, not a general automation platform and not a
+chat-first agent app.
+
+In practical terms:
+
+- `n8n` is a general workflow automation tool. It connects services, APIs, and triggers,
+  and is great when you want broad integrations and event-driven flows.
+- `OpenClaw` is closer to an AI assistant / agent workspace. It is useful when the main
+  interaction is conversational or agent-driven.
+- `llmflow` is for structured, file-based processing. It reads CSV, JSON, JSONL, XML, or
+  databases, applies a deterministic prompt pipeline per row, and writes durable output
+  files.
+
+The short version: use `n8n` to orchestrate systems, use `OpenClaw` for interactive AI
+workflows, and use `llmflow` when you want reproducible, repeatable AI processing over
+structured data.
+
 ## Features
 
 - Configuration via YAML or JSON
@@ -150,6 +171,8 @@ tools:
 ```bash
 make build        # produces bin/llmflow
 make test         # run tests
+make ci           # run the same checks as CI locally
+make act          # run the GitHub Actions workflow locally via act
 make test-cover   # run tests with coverage report
 make lint         # run golangci-lint
 ```
