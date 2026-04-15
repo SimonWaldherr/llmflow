@@ -539,6 +539,21 @@ textarea { font-family: var(--font-mono); resize: vertical; }
       </div>
       <div class="hint">Upload or select the source data file here. The file will be copied into <code>data/input</code>.</div>
     </div>
+    <!-- Data Preview + Column Exclusion -->
+    <div id="preview-section" class="quick-full" style="display:none">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+        <span class="section-title" style="margin-bottom:0">Data Preview <span id="preview-subtitle" style="font-weight:400;font-size:13px;color:var(--text-muted)"></span></span>
+        <button class="btn btn-secondary btn-sm" onclick="loadPreview()">↻ Refresh</button>
+      </div>
+      <p style="font-size:12px;color:var(--text-muted);margin-bottom:8px">Uncheck column headers to exclude them from every LLM request. Excluded columns are still written to the output when <em>Include Input in Output</em> is set to <em>No</em>.</p>
+      <div id="preview-table-wrap" style="overflow-x:auto;border:1px solid var(--border);border-radius:6px;">
+        <table id="preview-table" class="file-table" style="min-width:100%">
+          <thead id="preview-thead"></thead>
+          <tbody id="preview-tbody"></tbody>
+        </table>
+      </div>
+      <div id="preview-excluded-info" style="margin-top:6px;font-size:12px;color:var(--yellow)"></div>
+    </div>
 
     <hr class="section-sep quick-full">
 
@@ -586,6 +601,19 @@ textarea { font-family: var(--font-mono); resize: vertical; }
             <option value="true">Enabled</option>
           </select>
           <div class="hint">Useful for long, repeated prompts. Supported by OpenAI (&ge;1024 tokens) and Anthropic.</div>
+        </div>
+        <div class="form-group">
+          <label>Batch Size (records per LLM request)</label>
+          <input id="q-batch-size" type="number" value="1" min="1" max="500">
+          <div class="hint">1 = one record per request (default). Higher values bundle multiple records into one LLM call &mdash; useful to reduce overhead. The LLM must return a JSON array of responses.</div>
+        </div>
+        <div class="form-group">
+          <label>Debug Mode</label>
+          <select id="q-debug">
+            <option value="false">Disabled</option>
+            <option value="true">Enabled &mdash; log all prompts &amp; responses</option>
+          </select>
+          <div class="hint">When enabled, every LLM request (system prompt, user prompt) and the full raw response are written to the job logs. Useful for troubleshooting prompts. Automatically sets log level to DEBUG.</div>
         </div>
       </div>
     </details>
@@ -726,6 +754,7 @@ processing:
   workers: 2
   max_retries: 3
   dry_run: false
+  # debug: true   # log every prompt sent to and response from the LLM
 
 # Optional: enable agentic tools so the LLM can search, fetch pages, or query a DB.
 # tools:
@@ -891,11 +920,106 @@ async function uploadFile(file) {
         el.style.display = 'block';
       });
       await refreshFiles();
+      await loadPreview();
     } else {
       showStatus('quick-status', 'error', 'Upload failed: ' + d.error);
     }
   } catch(e) {
     showStatus('quick-status', 'error', 'Upload error: ' + e.message);
+  }
+}
+
+// ── Data Preview ──────────────────────────────────────────────────
+let previewColumns = [];
+let excludedColumns = new Set();
+
+async function loadPreview() {
+  if (!uploadedPath) return;
+  const inputType = document.getElementById('q-input-type').value;
+  const body = { type: inputType, path: uploadedPath, n: 10 };
+  if (inputType === 'csv') body.csv = { has_header: true };
+  try {
+    const r = await fetch('/api/preview', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const d = await r.json();
+    if (!d.ok) {
+      document.getElementById('preview-section').style.display = 'none';
+      return;
+    }
+    const { columns, records } = d.data;
+    previewColumns = columns || [];
+    renderPreviewTable(columns, records);
+    document.getElementById('preview-section').style.display = '';
+    document.getElementById('preview-subtitle').textContent = `(first ${records.length} of ${records.length < 10 ? records.length : '10+'} records)`;
+  } catch(e) {
+    document.getElementById('preview-section').style.display = 'none';
+  }
+}
+
+function renderPreviewTable(columns, records) {
+  const thead = document.getElementById('preview-thead');
+  const tbody = document.getElementById('preview-tbody');
+  excludedColumns = new Set(); // reset on reload
+
+  // Header row with checkboxes
+  const thCells = columns.map(col => {
+    const id = 'col-chk-' + col.replace(/[^a-zA-Z0-9]/g, '_');
+    return `<th style="white-space:nowrap;padding:6px 10px">
+      <label style="display:flex;align-items:center;gap:4px;cursor:pointer;color:var(--accent);font-weight:600;font-size:12px">
+        <input type="checkbox" id="${id}" data-col="${escHtml(col)}" checked style="width:auto;margin:0"
+          onchange="togglePreviewColumn(this)">
+        ${escHtml(col)}
+      </label>
+    </th>`;
+  }).join('');
+  thead.innerHTML = `<tr style="border-bottom:1px solid var(--border)">${thCells}</tr>`;
+
+  // Data rows
+  const trRows = records.map(rec => {
+    const tds = columns.map(col => {
+      const val = rec[col];
+      const text = val === undefined || val === null ? '' : String(val);
+      return `<td id="prevcell-${escHtml(col).replace(/[^a-zA-Z0-9]/g,'_')}-${Math.random().toString(36).slice(2)}" style="white-space:nowrap;max-width:200px;overflow:hidden;text-overflow:ellipsis;font-size:12px" title="${escHtml(text)}">${escHtml(text.length > 60 ? text.slice(0,60)+'…' : text)}</td>`;
+    }).join('');
+    return `<tr>${tds}</tr>`;
+  }).join('');
+  tbody.innerHTML = trRows;
+  updateExcludedInfo();
+}
+
+function togglePreviewColumn(chk) {
+  const col = chk.dataset.col;
+  if (chk.checked) {
+    excludedColumns.delete(col);
+  } else {
+    excludedColumns.add(col);
+  }
+  // Grey out the corresponding column cells
+  const idx = previewColumns.indexOf(col);
+  if (idx >= 0) {
+    const rows = document.getElementById('preview-tbody').rows;
+    for (const row of rows) {
+      if (row.cells[idx]) {
+        row.cells[idx].style.opacity = chk.checked ? '' : '0.3';
+      }
+    }
+    const thRow = document.getElementById('preview-thead').rows[0];
+    if (thRow && thRow.cells[idx]) {
+      thRow.cells[idx].style.opacity = chk.checked ? '' : '0.5';
+    }
+  }
+  updateExcludedInfo();
+}
+
+function updateExcludedInfo() {
+  const el = document.getElementById('preview-excluded-info');
+  if (excludedColumns.size === 0) {
+    el.textContent = '';
+  } else {
+    el.textContent = `${excludedColumns.size} column(s) excluded: ${[...excludedColumns].join(', ')}`;
   }
 }
 
@@ -980,6 +1104,7 @@ function useFileAsInput(path, name) {
   el.textContent = '✓ ' + path;
   el.style.display = 'block';
   showStatus('quick-status', 'ok', 'Input file set to: ' + name);
+  loadPreview();
 }
 
 async function deleteFile(dir, name) {
@@ -1056,11 +1181,19 @@ function buildYAMLFromForm() {
 
   yaml += `\n\ninput:\n  type: ${inputType}\n  path: ${inputPath}`;
   if (inputType === 'csv') yaml += `\n  csv:\n    delimiter: ","\n    has_header: true`;
+  if (excludedColumns.size > 0) {
+    const cols = [...excludedColumns].map(c => `"${c.replace(/"/g, '\\"')}"`);
+    yaml += `\n  excluded_columns: [${cols.join(', ')}]`;
+  }
 
   yaml += `\n\noutput:\n  type: ${outputType}\n  path: ${outputPath}`;
   if (outputType === 'csv') yaml += `\n  csv:\n    delimiter: ","\n    has_header: true`;
 
   yaml += `\n\nprocessing:\n  mode: per_record\n  include_input_in_output: ${includeInput}\n  response_field: ${responseField}\n  continue_on_error: ${continueErr}\n  workers: ${workers}\n  max_retries: ${retries}\n  dry_run: false`;
+  const batchSize = parseInt(document.getElementById('q-batch-size').value || '1', 10);
+  if (batchSize > 1) yaml += `\n  batch_size: ${batchSize}`;
+  const debugMode = document.getElementById('q-debug').value;
+  if (debugMode === 'true') yaml += `\n  debug: true`;
 
   if (document.getElementById('t-enabled').checked) {
     const webFetch  = document.getElementById('t-web-fetch').checked;
@@ -1206,6 +1339,7 @@ async function refreshJobs() {
         </span>
         <div class="job-actions" onclick="event.stopPropagation()">
           ${j.status==='running'?`<button class="btn btn-sm btn-warning" onclick="cancelJob(${j.id})">■ Stop</button>`:''}
+          ${j.status!=='running'?`<button class="btn btn-sm btn-secondary" onclick="rerunJob(${j.id})">↻ Re-run</button>`:''}
           ${j.status!=='running'&&!j.archived?`<button class="btn btn-sm btn-secondary" onclick="archiveJob(${j.id})">Archive</button>`:''}
           ${j.status!=='running'?`<button class="btn btn-sm btn-danger" onclick="deleteJob(${j.id})">Delete</button>`:''}
         </div>
@@ -1265,6 +1399,8 @@ async function loadJobDetail(id) {
     actEl.innerHTML = '';
     if (j.status === 'running')
       actEl.innerHTML += `<button class="btn btn-sm btn-warning" onclick="cancelJob(${j.id})">■ Stop job</button>`;
+    if (j.status !== 'running')
+      actEl.innerHTML += `<button class="btn btn-sm btn-secondary" onclick="rerunJob(${j.id})">↻ Re-run</button>`;
     if (j.status !== 'running' && !j.archived)
       actEl.innerHTML += `<button class="btn btn-sm btn-secondary" onclick="archiveJob(${j.id})">Archive</button>`;
     if (j.status !== 'running')
@@ -1312,6 +1448,19 @@ async function archiveJob(id) {
   else alert('Error: ' + d.error);
 }
 
+async function rerunJob(id) {
+  if (!confirm('Re-run job #' + id + ' with the saved configuration?')) return;
+  const d = await apiAction('/api/jobs/' + id + '/rerun', 'POST');
+  if (d.ok) {
+    await refreshJobs();
+    if (d.data && d.data.id) {
+      await selectJob(d.data.id);
+    }
+  } else {
+    alert('Error: ' + d.error);
+  }
+}
+
 async function deleteJob(id) {
   if (!confirm('Permanently delete job #' + id + '?')) return;
   const d = await apiAction('/api/jobs/' + id, 'DELETE');
@@ -1352,6 +1501,44 @@ function onModelSelectChange() {
 function updateProviderUI(provider) {
   const isLocal = provider === 'ollama' || provider === 'lmstudio';
   document.querySelectorAll('.q-cloud-only').forEach(el => { el.style.display = isLocal ? 'none' : ''; });
+}
+
+function applyProviderDefaults(provider) {
+  const defaults = {
+    openai:    { key:'OPENAI_API_KEY',    url:'' },
+    gemini:    { key:'GEMINI_API_KEY',    url:'' },
+    anthropic: { key:'ANTHROPIC_API_KEY', url:'' },
+    ollama:    { key:'',                  url:'http://localhost:11434' },
+    lmstudio:  { key:'',                  url:'http://localhost:1234/v1' },
+    generic:   { key:'API_KEY',           url:'' },
+  };
+  const selected = defaults[provider] || defaults.openai;
+  const det = detectedProviders.get(provider);
+  const isLocal = provider === 'ollama' || provider === 'lmstudio';
+
+  document.getElementById('q-apikey').value = selected.key;
+  syncAPIKeyFieldMode();
+  document.getElementById('q-baseurl').value = det ? det.base_url : selected.url;
+  updateProviderUI(provider);
+
+  if (isLocal) {
+    if (det && Array.isArray(det.models) && det.models.length > 0) {
+      setModelSuggestions(det.models);
+      const currentModel = getModelValue();
+      if (!det.models.includes(currentModel)) {
+        document.getElementById('q-model').value = det.models[0];
+        onModelSelectChange();
+      }
+      document.getElementById('q-model-hint').textContent = `Loaded ${det.models.length} local model(s) from ${providerLabel(provider)}.`;
+    } else {
+      setModelSuggestions(PROVIDER_MODELS[provider] || []);
+      document.getElementById('q-model-hint').textContent = 'Loading local models…';
+      void loadModels();
+    }
+    return;
+  }
+
+  setModelSuggestions(det ? (det.models || []) : []);
 }
 function setModelSuggestions(models) {
   const sel      = document.getElementById('q-model');
@@ -1524,21 +1711,7 @@ document.getElementById('model-refresh').addEventListener('click', () => loadMod
 
 document.getElementById('q-provider').addEventListener('change', e => {
   quickFormTouched = true;
-  const D = {
-    openai:    { key:'OPENAI_API_KEY',    url:'' },
-    gemini:    { key:'GEMINI_API_KEY',    url:'' },
-    anthropic: { key:'ANTHROPIC_API_KEY', url:'' },
-    ollama:    { key:'',                  url:'http://localhost:11434' },
-    lmstudio:  { key:'',                  url:'http://localhost:1234/v1' },
-    generic:   { key:'API_KEY',           url:'' },
-  };
-  const d = D[e.target.value] || D.openai;
-  document.getElementById('q-apikey').value = d.key;
-  syncAPIKeyFieldMode();
-  const det = detectedProviders.get(e.target.value);
-  document.getElementById('q-baseurl').value = det ? det.base_url : d.url;
-  setModelSuggestions(det ? (det.models||[]) : []);
-  updateProviderUI(e.target.value);
+  applyProviderDefaults(e.target.value);
 });
 
 ['q-model-custom','q-baseurl','q-apikey'].forEach(id =>

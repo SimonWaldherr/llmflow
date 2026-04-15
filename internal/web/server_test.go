@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 
@@ -287,4 +288,104 @@ func TestFilesAPI(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(outputDir, "result.jsonl")); !os.IsNotExist(err) {
 		t.Fatalf("expected output file to be deleted, stat err = %v", err)
 	}
+}
+
+func TestHandleRerunJob(t *testing.T) {
+	root := t.TempDir()
+	inputPath := filepath.Join(root, "input.csv")
+	outputPath := filepath.Join(root, "output.jsonl")
+	if err := os.WriteFile(inputPath, []byte("name\nAlice\n"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+
+	srv := &Server{dataDir: root}
+	runConfig := `api:
+  provider: ollama
+  model: llama3
+prompt:
+  input_template: "{{ .name }}"
+input:
+  type: csv
+  path: ` + inputPath + `
+  csv:
+    delimiter: ","
+    has_header: true
+output:
+  type: jsonl
+  path: ` + outputPath + `
+processing:
+  include_input_in_output: true
+  response_field: result
+  dry_run: true
+`
+
+	req := httptest.NewRequest(http.MethodPost, "/api/run", bytes.NewReader([]byte(`{"config":`+strconv.Quote(runConfig)+`,"dry_run":true}`)))
+	rec := httptest.NewRecorder()
+	srv.handleRun(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("run status = %d, want %d", rec.Code, http.StatusAccepted)
+	}
+
+	firstJob := decodeJobFromResponse(t, rec.Body.Bytes())
+	waitForJobStatus(t, srv, firstJob.ID, "completed")
+
+	rerunReq := httptest.NewRequest(http.MethodPost, "/api/jobs/1/rerun", nil)
+	rerunReq.SetPathValue("id", "1")
+	rerunRec := httptest.NewRecorder()
+	srv.handleRerunJob(rerunRec, rerunReq)
+	if rerunRec.Code != http.StatusAccepted {
+		t.Fatalf("rerun status = %d, want %d", rerunRec.Code, http.StatusAccepted)
+	}
+
+	secondJob := decodeJobFromResponse(t, rerunRec.Body.Bytes())
+	if secondJob.ID == firstJob.ID {
+		t.Fatal("expected rerun to create a new job")
+	}
+	if secondJob.Name == firstJob.Name {
+		t.Fatalf("expected rerun job name to change, got %q", secondJob.Name)
+	}
+	if !secondJob.DryRun {
+		t.Fatal("expected rerun to preserve dry_run state")
+	}
+	waitForJobStatus(t, srv, secondJob.ID, "completed")
+}
+
+func decodeJobFromResponse(t *testing.T, body []byte) JobStatus {
+	t.Helper()
+	var resp apiResponse
+	if err := json.Unmarshal(body, &resp); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(resp.Data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var job JobStatus
+	if err := json.Unmarshal(raw, &job); err != nil {
+		t.Fatal(err)
+	}
+	return job
+}
+
+func waitForJobStatus(t *testing.T, srv *Server, id int, want string) JobStatus {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		req := httptest.NewRequest(http.MethodGet, "/api/jobs/"+strconv.Itoa(id), nil)
+		req.SetPathValue("id", strconv.Itoa(id))
+		rec := httptest.NewRecorder()
+		srv.handleGetJob(rec, req)
+		if rec.Code == http.StatusOK {
+			job := decodeJobFromResponse(t, rec.Body.Bytes())
+			if job.Status == want {
+				return job
+			}
+			if job.Status == "failed" || job.Status == "cancelled" {
+				t.Fatalf("job #%d ended with status %q: %s", id, job.Status, job.Error)
+			}
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatalf("job #%d did not reach status %q in time", id, want)
+	return JobStatus{}
 }

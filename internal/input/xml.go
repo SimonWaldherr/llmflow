@@ -11,10 +11,10 @@ import (
 )
 
 type XMLReader struct {
-	f       *os.File
-	cfg     config.InputConfig
-	dec     *xml.Decoder
-	ended   bool
+	f     *os.File
+	cfg   config.InputConfig
+	dec   *xml.Decoder
+	ended bool
 }
 
 func NewXMLReader(cfg config.InputConfig) (*XMLReader, error) {

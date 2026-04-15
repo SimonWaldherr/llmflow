@@ -49,6 +49,9 @@ func New(cfg config.Config, logger *slog.Logger) *App {
 // WithDryRun overrides the dry-run flag set in the config (useful for CLI flag).
 func (a *App) WithDryRun(v bool) *App { a.dryRun = v; return a }
 
+// WithDebug overrides the debug flag set in the config (useful for CLI flag).
+func (a *App) WithDebug(v bool) *App { a.cfg.Processing.Debug = v; return a }
+
 func (a *App) Run(ctx context.Context) error {
 	var gen Generator
 
@@ -62,6 +65,12 @@ func (a *App) Run(ctx context.Context) error {
 		}
 		gen = llm.New(a.cfg.API, apiKey)
 	}
+
+	if a.cfg.Processing.Debug {
+		a.logger.Info("debug mode enabled — all LLM prompts and responses will be logged")
+		gen = llm.NewDebuggingGenerator(gen, a.logger)
+	}
+
 	reader, err := input.New(a.cfg.Input)
 	if err != nil {
 		return err
@@ -112,6 +121,27 @@ func (a *App) Run(ctx context.Context) error {
 	}
 	a.logger.Info("wrote output records", "count", len(results))
 	return nil
+}
+
+// PreviewRecords reads up to n records from the given reader without any LLM
+// interaction. Used by the web UI to show a data preview before starting a job.
+func PreviewRecords(r input.Reader, n int) ([]input.Record, error) {
+	if n <= 0 {
+		n = 10
+	}
+	ctx := context.Background()
+	var out []input.Record
+	for i := 0; i < n; i++ {
+		rec, err := r.Next(ctx)
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			return nil, err
+		}
+		out = append(out, rec)
+	}
+	return out, nil
 }
 
 func buildOutputColumns(records []input.Record, responseField string, includeInput bool) []string {
@@ -407,6 +437,11 @@ func (a *App) processRecordStream(
 	rateLimiter <-chan time.Time,
 	emit func(index int, record map[string]any) error,
 ) ([]map[string]any, error) {
+	batchSize := a.cfg.Processing.BatchSize
+	if batchSize > 1 {
+		return a.processRecordStreamBatch(ctx, gen, pb, activeTools, reader, workers, batchSize, rateLimiter, emit)
+	}
+
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -447,6 +482,305 @@ func (a *App) processRecordStream(
 		return nil, err
 	}
 	return results, nil
+}
+
+// processRecordStreamBatch handles the batch-mode variant of processRecordStream.
+// Records are grouped into slices of batchSize, serialised as a JSON array, and
+// sent to the LLM in a single request. The LLM is asked to return a JSON array
+// of responses in the same order. Responses are mapped back to the originating
+// records.
+func (a *App) processRecordStreamBatch(
+	ctx context.Context,
+	gen Generator,
+	pb *prompt.Builder,
+	_ []tools.Tool, // tool-calling is not supported in batch mode
+	reader input.Reader,
+	workers int,
+	batchSize int,
+	rateLimiter <-chan time.Time,
+	emit func(index int, record map[string]any) error,
+) ([]map[string]any, error) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	type batchJob struct {
+		startIdx int
+		recs     []input.Record
+	}
+
+	jobs := make(chan batchJob, workers*2)
+	producerErr := make(chan error, 1)
+	producerDone := make(chan struct{})
+
+	go func() {
+		defer close(producerDone)
+		defer close(jobs)
+		idx := 0
+		for {
+			batch := make([]input.Record, 0, batchSize)
+			for len(batch) < batchSize {
+				rec, err := reader.Next(ctx)
+				if err != nil {
+					if err != io.EOF {
+						producerErr <- err
+					}
+					break
+				}
+				batch = append(batch, rec)
+			}
+			if len(batch) == 0 {
+				return
+			}
+			select {
+			case jobs <- batchJob{startIdx: idx, recs: batch}:
+				idx += len(batch)
+			case <-ctx.Done():
+				return
+			}
+			if len(batch) < batchSize {
+				return // last partial batch was sent
+			}
+		}
+	}()
+
+	type batchResult struct {
+		startIdx int
+		recs     []input.Record
+		outRecs  []map[string]any
+	}
+
+	resultCh := make(chan batchResult, workers*2)
+
+	var mu sync.Mutex
+	var firstErr error
+	var processed int64
+
+	var wg sync.WaitGroup
+	for w := 0; w < workers; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for bj := range jobs {
+				select {
+				case <-ctx.Done():
+					return
+				default:
+				}
+				if rateLimiter != nil {
+					select {
+					case <-ctx.Done():
+						return
+					case <-rateLimiter:
+					}
+				}
+
+				outRecs, err := a.processBatch(ctx, gen, pb, bj.startIdx, bj.recs)
+				if err != nil {
+					if !a.cfg.Processing.ContinueOnError {
+						mu.Lock()
+						if firstErr == nil {
+							firstErr = fmt.Errorf("llm batch call for records %d-%d: %w", bj.startIdx, bj.startIdx+len(bj.recs)-1, err)
+							cancel()
+						}
+						mu.Unlock()
+						return
+					}
+					a.logger.Error("llm batch call failed", "startIndex", bj.startIdx, "count", len(bj.recs), "error", err)
+					// emit empty responses for failed batch records
+					out := make([]map[string]any, len(bj.recs))
+					for i, rec := range bj.recs {
+						o := map[string]any{}
+						if a.cfg.Processing.IncludeInputInOutput {
+							for k, v := range rec {
+								o[k] = v
+							}
+						}
+						o[a.cfg.Processing.ResponseField] = ""
+						out[i] = o
+					}
+					outRecs = out
+				}
+				resultCh <- batchResult{startIdx: bj.startIdx, recs: bj.recs, outRecs: outRecs}
+				cur := int(atomic.AddInt64(&processed, int64(len(bj.recs))))
+				if a.progressFunc != nil {
+					a.progressFunc(cur, 0)
+				}
+			}
+		}()
+	}
+	go func() {
+		wg.Wait()
+		close(resultCh)
+	}()
+
+	ordered := map[int]map[string]any{}
+	nextEmit := 0
+	var deliverErr error
+	var results []map[string]any
+
+	emitReady := func() error {
+		for {
+			rec, ok := ordered[nextEmit]
+			if !ok {
+				return nil
+			}
+			if emit != nil {
+				if err := emit(nextEmit, rec); err != nil {
+					return err
+				}
+			}
+			results = append(results, rec)
+			if a.resultFunc != nil {
+				preview := make(map[string]any, len(rec))
+				for k, v := range rec {
+					preview[k] = v
+				}
+				a.resultFunc(nextEmit, 0, preview)
+			}
+			delete(ordered, nextEmit)
+			nextEmit++
+		}
+	}
+
+	for br := range resultCh {
+		for i, outRec := range br.outRecs {
+			ordered[br.startIdx+i] = outRec
+		}
+		if deliverErr == nil {
+			if err := emitReady(); err != nil {
+				deliverErr = err
+				cancel()
+			}
+		}
+	}
+
+	<-producerDone
+	select {
+	case readErr := <-producerErr:
+		if readErr != nil {
+			return nil, readErr
+		}
+	default:
+	}
+	if deliverErr != nil {
+		return nil, deliverErr
+	}
+	mu.Lock()
+	err := firstErr
+	mu.Unlock()
+	if err != nil {
+		return nil, err
+	}
+	return results, nil
+}
+
+// processBatch sends a slice of records to the LLM as JSON and parses the JSON
+// array response back into individual output records.
+func (a *App) processBatch(
+	ctx context.Context,
+	gen Generator,
+	pb *prompt.Builder,
+	startIdx int,
+	recs []input.Record,
+) ([]map[string]any, error) {
+	// Build per-record prompt fragments.
+	rendered := make([]string, len(recs))
+	for i, rec := range recs {
+		r, err := pb.BuildRaw(rec)
+		if err != nil {
+			return nil, fmt.Errorf("build prompt for record %d: %w", startIdx+i, err)
+		}
+		rendered[i] = r
+	}
+
+	// Serialise records for the LLM.
+	recsJSON, err := json.MarshalIndent(recs, "", "  ")
+	if err != nil {
+		return nil, fmt.Errorf("marshal batch records: %w", err)
+	}
+
+	var userPrompt strings.Builder
+	userPrompt.WriteString(fmt.Sprintf(
+		"Process the following %d records. "+
+			"Return ONLY a valid JSON array containing exactly %d string responses, one per record, in the same order.\n\n",
+		len(recs), len(recs),
+	))
+	userPrompt.Write(recsJSON)
+	if post := pb.PostPrompt(); post != "" {
+		userPrompt.WriteString("\n\n")
+		userPrompt.WriteString(post)
+	}
+
+	a.logger.Info("sending batch to LLM", "startIndex", startIdx, "count", len(recs))
+	responseText, err := a.generateWithRetry(ctx, gen, pb.SystemPrompt(), userPrompt.String())
+	if err != nil {
+		return nil, err
+	}
+
+	// Parse JSON array response.
+	trimmed := strings.TrimSpace(responseText)
+	if idx := strings.Index(trimmed, "["); idx >= 0 {
+		trimmed = trimmed[idx:]
+	}
+	if idx := strings.LastIndex(trimmed, "]"); idx >= 0 {
+		trimmed = trimmed[:idx+1]
+	}
+
+	var responses []json.RawMessage
+	if err := json.Unmarshal([]byte(trimmed), &responses); err != nil {
+		a.logger.Warn("batch response is not a JSON array; assigning raw text to all records", "startIndex", startIdx, "error", err)
+		// Fallback: assign entire response to every record.
+		outRecs := make([]map[string]any, len(recs))
+		for i, rec := range recs {
+			o := map[string]any{}
+			if a.cfg.Processing.IncludeInputInOutput {
+				for k, v := range rec {
+					o[k] = v
+				}
+			}
+			o[a.cfg.Processing.ResponseField] = responseText
+			outRecs[i] = o
+		}
+		return outRecs, nil
+	}
+
+	outRecs := make([]map[string]any, len(recs))
+	for i, rec := range recs {
+		o := map[string]any{}
+		if a.cfg.Processing.IncludeInputInOutput {
+			for k, v := range rec {
+				o[k] = v
+			}
+		}
+		if i < len(responses) {
+			// Try to unmarshal as string first, then as object.
+			var s string
+			if err := json.Unmarshal(responses[i], &s); err == nil {
+				o[a.cfg.Processing.ResponseField] = s
+			} else {
+				var obj map[string]any
+				if err := json.Unmarshal(responses[i], &obj); err == nil {
+					if a.cfg.Processing.ParseJSONResponse {
+						for k, v := range obj {
+							o[k] = v
+						}
+					} else {
+						o[a.cfg.Processing.ResponseField] = string(responses[i])
+					}
+				} else {
+					o[a.cfg.Processing.ResponseField] = string(responses[i])
+				}
+			}
+		} else {
+			o[a.cfg.Processing.ResponseField] = ""
+		}
+		outRecs[i] = o
+	}
+
+	// Log individual rendered prompts for diagnostics but don't fail on them.
+	_ = rendered
+
+	return outRecs, nil
 }
 
 func (a *App) processJobs(

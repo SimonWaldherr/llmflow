@@ -29,6 +29,26 @@ func (b *Builder) SystemPrompt() string {
 	return b.cfg.System
 }
 
+// PostPrompt returns the configured post-prompt text (used by batch mode).
+func (b *Builder) PostPrompt() string {
+	return b.cfg.PostPrompt
+}
+
+// BuildRaw renders only the input_template for the given record, without
+// pre/post prompts. Used by batch mode to render each record individually
+// before combining them.
+func (b *Builder) BuildRaw(record map[string]any) (string, error) {
+	var body bytes.Buffer
+	data := map[string]any{"record": record}
+	for k, v := range record {
+		data[k] = v
+	}
+	if err := b.tpl.Execute(&body, data); err != nil {
+		return "", fmt.Errorf("render input template: %w", err)
+	}
+	return body.String(), nil
+}
+
 func (b *Builder) Build(record map[string]any) (string, error) {
 	var body bytes.Buffer
 	data := map[string]any{"record": record}

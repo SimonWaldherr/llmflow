@@ -36,7 +36,7 @@ structured data.
 - Structured JSON logs via `log/slog`
 - Configurable concurrency, rate limiting, and retry count
 - Web UI with optional Bearer-token authentication and graceful shutdown
-- Live job monitoring with progress, logs, and intermediate result previews
+- Live job monitoring with progress, logs, intermediate result previews, and re-run support for completed jobs
 - Optional sandboxed code execution tool via nanoGo
 - Health endpoint (`GET /health`) for container orchestrators
 

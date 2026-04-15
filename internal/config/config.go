@@ -123,6 +123,9 @@ type InputConfig struct {
 	SQLite SQLiteConfig  `json:"sqlite" yaml:"sqlite"`
 	MSSQL  MSSQLConfig   `json:"mssql" yaml:"mssql"`
 	Auth   SQLAuthConfig `json:"auth" yaml:"auth"`
+	// ExcludedColumns lists column/field names that should be stripped from every
+	// record before it is passed to the prompt builder or the LLM.
+	ExcludedColumns []string `json:"excluded_columns" yaml:"excluded_columns"`
 }
 
 type OutputConfig struct {
@@ -144,6 +147,15 @@ type ProcessingConfig struct {
 	Workers              int    `json:"workers" yaml:"workers"`
 	MaxRetries           int    `json:"max_retries" yaml:"max_retries"`
 	DryRun               bool   `json:"dry_run" yaml:"dry_run"`
+	// BatchSize controls how many input records are sent to the LLM in a single
+	// request. 0 or 1 means one record per request (default). When > 1 the
+	// records are serialised as a JSON array and the LLM is expected to return
+	// a JSON array of responses in the same order.
+	BatchSize int `json:"batch_size" yaml:"batch_size"`
+	// Debug enables verbose logging of every LLM request and response.
+	// All prompts sent, raw responses, and timing information are written to the
+	// logger at DEBUG level. Set log-level to "debug" or use --debug to enable.
+	Debug bool `json:"debug" yaml:"debug"`
 }
 
 type CSVConfig struct {

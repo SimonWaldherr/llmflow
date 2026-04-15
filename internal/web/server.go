@@ -24,6 +24,7 @@ import (
 
 	"github.com/SimonWaldherr/llmflow/internal/app"
 	"github.com/SimonWaldherr/llmflow/internal/config"
+	"github.com/SimonWaldherr/llmflow/internal/input"
 	"github.com/SimonWaldherr/llmflow/internal/llm"
 	"gopkg.in/yaml.v3"
 )
@@ -65,6 +66,7 @@ type JobStatus struct {
 	EndedAt      time.Time        `json:"ended_at,omitempty"`
 	Error        string           `json:"error,omitempty"`
 	Config       string           `json:"config"`
+	DryRun       bool             `json:"dry_run,omitempty"`
 	Logs         []string         `json:"logs"`
 	Preview      []JobPreviewItem `json:"preview,omitempty"`
 	PreviewCount int              `json:"preview_count"`
@@ -159,17 +161,20 @@ func (s *Server) Run(ctx context.Context) error {
 	mux.HandleFunc("GET /api/jobs", s.handleListJobs)
 	mux.HandleFunc("GET /api/jobs/", s.handleGetJob)
 	mux.HandleFunc("POST /api/jobs/{id}/cancel", s.handleCancelJob)
+	mux.HandleFunc("POST /api/jobs/{id}/rerun", s.handleRerunJob)
 	mux.HandleFunc("POST /api/jobs/{id}/archive", s.handleArchiveJob)
 	mux.HandleFunc("DELETE /api/jobs/{id}", s.handleDeleteJob)
 	mux.HandleFunc("POST /api/upload", s.handleUpload)
 	mux.HandleFunc("GET /api/files", s.handleListFiles)
 	mux.HandleFunc("DELETE /api/files/{dir}/{name}", s.handleDeleteFile)
 	mux.HandleFunc("GET /api/files/download/{dir}/{name}", s.handleDownloadFile)
+	mux.HandleFunc("GET /api/openapi.json", s.handleOpenAPI)
 	mux.HandleFunc("GET /openapi.json", s.handleOpenAPI)
 	mux.HandleFunc("GET /docs", s.handleSwaggerUI)
 	mux.HandleFunc("POST /api/models", s.handleModels)
 	mux.HandleFunc("GET /api/detect", s.handleDetect)
 	mux.HandleFunc("POST /api/suggest", s.handleSuggest)
+	mux.HandleFunc("POST /api/preview", s.handlePreview)
 
 	sub, err := fs.Sub(staticFS, "static")
 	if err != nil {
@@ -417,82 +422,87 @@ func (s *Server) handleRun(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, apiResponse{Error: err.Error()})
 		return
 	}
+	job := s.enqueueJob(req.Name, req.Config, req.DryRun, cfg)
 
+	writeJSON(w, http.StatusAccepted, apiResponse{OK: true, Data: cloneJobStatus(job)})
+}
+
+func (s *Server) enqueueJob(name, rawConfig string, dryRun bool, cfg config.Config) *JobStatus {
 	s.mu.Lock()
 	s.jobIDSeq++
 	job := &JobStatus{
 		ID:        s.jobIDSeq,
-		Name:      req.Name,
+		Name:      name,
 		Status:    "running",
 		StartedAt: time.Now(),
-		Config:    req.Config,
+		Config:    rawConfig,
+		DryRun:    dryRun,
 	}
 	s.jobs = append(s.jobs, job)
 	s.mu.Unlock()
 	s.persistJobs()
 
-	// Use the server context so jobs are cancelled during graceful shutdown,
-	// not when the HTTP response is sent.
 	s.mu.Lock()
-	jobCtx, jobCancel := context.WithCancel(s.serverCtx)
+	serverCtx := s.serverCtx
+	if serverCtx == nil {
+		serverCtx = context.Background()
+	}
+	jobCtx, jobCancel := context.WithCancel(serverCtx)
 	job.cancelFn = jobCancel
 	s.mu.Unlock()
 
 	s.wg.Add(1)
-	go func() {
-		defer s.wg.Done()
-		defer jobCancel() // ensure context is always released
-		lc := &logCollector{job: job, mu: &s.mu, persist: s.persistJobs}
-		logger := slog.New(slog.NewJSONHandler(lc, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	go s.runJob(job, cfg, jobCtx, jobCancel)
+	return job
+}
 
-		const maxPreviewItems = 20
+func (s *Server) runJob(job *JobStatus, cfg config.Config, jobCtx context.Context, jobCancel context.CancelFunc) {
+	defer s.wg.Done()
+	defer jobCancel()
+	lc := &logCollector{job: job, mu: &s.mu, persist: s.persistJobs}
+	logger := slog.New(slog.NewJSONHandler(lc, &slog.HandlerOptions{Level: slog.LevelDebug}))
 
-		// Progress callback – updates the job in a goroutine-safe way.
-		progress := func(current, total int) {
-			s.mu.Lock()
-			job.Progress.Current = current
-			job.Progress.Total = total
-			s.mu.Unlock()
-			s.persistJobs()
-		}
-
-		resultPreview := func(index, total int, record map[string]any) {
-			s.mu.Lock()
-			job.PreviewCount++
-			item := JobPreviewItem{Index: index, Record: record}
-			if len(job.Preview) >= maxPreviewItems {
-				job.Preview = append(job.Preview[1:], item)
-				s.mu.Unlock()
-				s.persistJobs()
-				return
-			}
-			job.Preview = append(job.Preview, item)
-			s.mu.Unlock()
-			s.persistJobs()
-		}
-
-		a := app.New(cfg, logger).WithDryRun(req.DryRun).WithProgressFunc(progress).WithResultFunc(resultPreview)
-		runErr := a.Run(jobCtx)
-
+	const maxPreviewItems = 20
+	progress := func(current, total int) {
 		s.mu.Lock()
-		job.EndedAt = time.Now()
-		// Respect an explicit cancellation – don't overwrite the status set by handleCancelJob.
-		if job.Status == "cancelled" {
+		job.Progress.Current = current
+		job.Progress.Total = total
+		s.mu.Unlock()
+		s.persistJobs()
+	}
+	resultPreview := func(index, total int, record map[string]any) {
+		s.mu.Lock()
+		job.PreviewCount++
+		item := JobPreviewItem{Index: index, Record: record}
+		if len(job.Preview) >= maxPreviewItems {
+			job.Preview = append(job.Preview[1:], item)
 			s.mu.Unlock()
 			s.persistJobs()
 			return
 		}
-		if runErr != nil {
-			job.Status = "failed"
-			job.Error = runErr.Error()
-		} else {
-			job.Status = "completed"
-		}
+		job.Preview = append(job.Preview, item)
 		s.mu.Unlock()
 		s.persistJobs()
-	}()
+	}
 
-	writeJSON(w, http.StatusAccepted, apiResponse{OK: true, Data: cloneJobStatus(job)})
+	a := app.New(cfg, logger).WithDryRun(job.DryRun).WithProgressFunc(progress).WithResultFunc(resultPreview)
+	runErr := a.Run(jobCtx)
+
+	s.mu.Lock()
+	job.EndedAt = time.Now()
+	if job.Status == "cancelled" {
+		s.mu.Unlock()
+		s.persistJobs()
+		return
+	}
+	if runErr != nil {
+		job.Status = "failed"
+		job.Error = runErr.Error()
+	} else {
+		job.Status = "completed"
+	}
+	s.mu.Unlock()
+	s.persistJobs()
 }
 
 // allowedFileDir validates and returns the absolute path for "input" or "output".
@@ -665,6 +675,7 @@ func (s *Server) handleOpenAPI(w http.ResponseWriter, _ *http.Request) {
 				"get":    map[string]any{"summary": "Get job details", "responses": map[string]any{"200": map[string]any{"description": "Job"}}},
 				"delete": map[string]any{"summary": "Delete a job", "responses": map[string]any{"200": map[string]any{"description": "Deleted"}}},
 			},
+			"/api/jobs/{id}/rerun":   map[string]any{"post": map[string]any{"summary": "Re-run an old job", "responses": map[string]any{"202": map[string]any{"description": "Job accepted"}}}},
 			"/api/jobs/{id}/cancel":  map[string]any{"post": map[string]any{"summary": "Cancel a running job", "responses": map[string]any{"200": map[string]any{"description": "Cancelled"}}}},
 			"/api/jobs/{id}/archive": map[string]any{"post": map[string]any{"summary": "Archive a job", "responses": map[string]any{"200": map[string]any{"description": "Archived"}}}},
 			"/api/upload": map[string]any{
@@ -821,6 +832,41 @@ func (s *Server) handleArchiveJob(w http.ResponseWriter, r *http.Request) {
 	}
 	s.mu.Unlock()
 	writeJSON(w, http.StatusNotFound, apiResponse{Error: "job not found"})
+}
+
+func (s *Server) handleRerunJob(w http.ResponseWriter, r *http.Request) {
+	id, ok := parsePatternID(r)
+	if !ok {
+		writeJSON(w, http.StatusBadRequest, apiResponse{Error: "invalid job id"})
+		return
+	}
+
+	s.mu.Lock()
+	var source *JobStatus
+	for _, j := range s.jobs {
+		if j.ID == id {
+			source = cloneJobStatus(j)
+			break
+		}
+	}
+	s.mu.Unlock()
+	if source == nil {
+		writeJSON(w, http.StatusNotFound, apiResponse{Error: "job not found"})
+		return
+	}
+
+	cfg, err := parseConfig(source.Config)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, apiResponse{Error: "cannot rerun job: " + err.Error()})
+		return
+	}
+
+	name := strings.TrimSpace(source.Name)
+	if name == "" {
+		name = fmt.Sprintf("job #%d", source.ID)
+	}
+	job := s.enqueueJob(name+" (re-run)", source.Config, source.DryRun, cfg)
+	writeJSON(w, http.StatusAccepted, apiResponse{OK: true, Data: cloneJobStatus(job)})
 }
 
 func (s *Server) handleDeleteJob(w http.ResponseWriter, r *http.Request) {
@@ -1222,6 +1268,105 @@ func resolveSuggestTimeout(raw string) (time.Duration, error) {
 	}
 
 	return timeout, nil
+}
+
+// ─── /api/preview ─────────────────────────────────────────────────────────────
+// handlePreview reads the first N records from an input file and returns them
+// along with the detected column names. This lets the web UI render a preview
+// table and let the user deselect columns before running a job.
+
+type previewRequest struct {
+	// Type is the input type: csv, json, jsonl, xml.
+	Type string `json:"type"`
+	// Path is the file path on the server (e.g. data/input/file.csv).
+	Path string `json:"path"`
+	// N is how many records to read (default 10, capped at 100).
+	N int `json:"n"`
+	// CSV holds optional CSV config overrides (delimiter, has_header).
+	CSV config.CSVConfig `json:"csv"`
+	// JSON holds optional JSON/JSONL config.
+	JSON config.JSONConfig `json:"json"`
+	// XML holds optional XML config.
+	XML config.XMLConfig `json:"xml"`
+}
+
+type previewResponse struct {
+	Columns []string         `json:"columns"`
+	Records []map[string]any `json:"records"`
+}
+
+func (s *Server) handlePreview(w http.ResponseWriter, r *http.Request) {
+	var req previewRequest
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, apiResponse{Error: "invalid JSON body"})
+		return
+	}
+
+	reqType := strings.TrimSpace(strings.ToLower(req.Type))
+	if reqType == "" {
+		writeJSON(w, http.StatusBadRequest, apiResponse{Error: "type is required"})
+		return
+	}
+
+	// Sanitise the path: only allow files inside the data root.
+	cleanPath := filepath.Clean(req.Path)
+	dataRoot := filepath.Clean(s.dataRoot())
+	if !strings.HasPrefix(cleanPath, dataRoot+string(os.PathSeparator)) && cleanPath != dataRoot {
+		writeJSON(w, http.StatusBadRequest, apiResponse{Error: "path must be inside the data directory"})
+		return
+	}
+
+	n := req.N
+	if n <= 0 {
+		n = 10
+	}
+	if n > 100 {
+		n = 100
+	}
+
+	cfg := config.InputConfig{
+		Type: reqType,
+		Path: cleanPath,
+		CSV:  req.CSV,
+		JSON: req.JSON,
+		XML:  req.XML,
+	}
+
+	reader, err := input.New(cfg)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, apiResponse{Error: "open input: " + err.Error()})
+		return
+	}
+	defer reader.Close()
+
+	records, err := app.PreviewRecords(reader, n)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, apiResponse{Error: "read records: " + err.Error()})
+		return
+	}
+
+	// Collect column names in stable order.
+	colSet := map[string]struct{}{}
+	var columns []string
+	for _, rec := range records {
+		for k := range rec {
+			if _, seen := colSet[k]; !seen {
+				colSet[k] = struct{}{}
+				columns = append(columns, k)
+			}
+		}
+	}
+	sort.Strings(columns)
+
+	recs := make([]map[string]any, len(records))
+	for i, rec := range records {
+		recs[i] = rec
+	}
+
+	writeJSON(w, http.StatusOK, apiResponse{OK: true, Data: previewResponse{
+		Columns: columns,
+		Records: recs,
+	}})
 }
 
 func parseConfig(yamlText string) (config.Config, error) {

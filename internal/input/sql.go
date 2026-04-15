@@ -3,8 +3,8 @@ package input
 import (
 	"context"
 	"database/sql"
-	"io"
 	"fmt"
+	"io"
 
 	_ "github.com/microsoft/go-mssqldb"
 	_ "modernc.org/sqlite"

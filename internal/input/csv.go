@@ -1,11 +1,14 @@
 package input
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"encoding/csv"
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"unicode/utf8"
 
 	"github.com/SimonWaldherr/llmflow/internal/config"
@@ -28,14 +31,78 @@ func NewCSVReader(cfg config.InputConfig) (*CSVReader, error) {
 	return &CSVReader{f: f, cfg: cfg}, nil
 }
 
+// sniffDelimiter reads the first few lines of r and returns the most likely
+// field separator among comma, semicolon, tab, and pipe.
+// It counts how evenly each candidate splits the first lines and picks the
+// one with the highest, most-consistent field count.
+func sniffDelimiter(r io.ReadSeeker) rune {
+	const sniffBytes = 8192
+	buf := make([]byte, sniffBytes)
+	n, _ := r.Read(buf)
+	buf = buf[:n]
+	r.Seek(0, io.SeekStart) // rewind for normal reading
+
+	candidates := []rune{',', ';', '\t', '|'}
+	best := ','
+	bestScore := -1
+
+	scanner := bufio.NewScanner(bytes.NewReader(buf))
+	var lines []string
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		lines = append(lines, line)
+		if len(lines) >= 10 {
+			break
+		}
+	}
+	if len(lines) == 0 {
+		return best
+	}
+
+	for _, delim := range candidates {
+		counts := make([]int, len(lines))
+		for i, line := range lines {
+			counts[i] = strings.Count(line, string(delim))
+		}
+		if counts[0] == 0 {
+			continue // delimiter not present
+		}
+		// Prefer delimiters where the count is consistent across lines.
+		allSame := true
+		for _, c := range counts[1:] {
+			if c != counts[0] {
+				allSame = false
+				break
+			}
+		}
+		score := counts[0] * 10
+		if allSame {
+			score += 100
+		}
+		if score > bestScore {
+			bestScore = score
+			best = delim
+		}
+	}
+	return best
+}
+
 func (r *CSVReader) init() {
 	if r.cr != nil {
 		return
 	}
 	r.cr = csv.NewReader(r.f)
+	r.cr.FieldsPerRecord = -1
+
 	delim, _ := utf8.DecodeRuneInString(r.cfg.CSV.Delimiter)
 	if delim != utf8.RuneError {
 		r.cr.Comma = delim
+	} else {
+		// No delimiter configured — auto-detect from file content.
+		r.cr.Comma = sniffDelimiter(r.f)
 	}
 }
 

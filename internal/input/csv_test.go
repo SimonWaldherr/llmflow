@@ -112,6 +112,33 @@ func TestCSVReaderCustomDelimiter(t *testing.T) {
 	}
 }
 
+func TestCSVReaderVariableFieldCounts(t *testing.T) {
+	p := writeTempCSV(t, "data.csv", "name,age,city\nAlice,30\nBob,25,Berlin,extra\n")
+	r, err := NewCSVReader(config.InputConfig{
+		Type: "csv",
+		Path: p,
+		CSV:  config.CSVConfig{Delimiter: ",", HasHeader: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+
+	recs, err := r.ReadAll(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error for variable field counts: %v", err)
+	}
+	if len(recs) != 2 {
+		t.Fatalf("expected 2 records, got %d", len(recs))
+	}
+	if recs[0]["city"] != "" {
+		t.Fatalf("expected missing city to be empty, got %#v", recs[0]["city"])
+	}
+	if recs[1]["city"] != "Berlin" {
+		t.Fatalf("expected city Berlin, got %#v", recs[1]["city"])
+	}
+}
+
 func TestCSVReaderEmpty(t *testing.T) {
 	p := writeTempCSV(t, "data.csv", "")
 	r, err := NewCSVReader(config.InputConfig{

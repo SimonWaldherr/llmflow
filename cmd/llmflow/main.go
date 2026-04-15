@@ -25,6 +25,7 @@ type cliOptions struct {
 	cfgPath  string
 	logLevel string
 	dryRun   bool
+	debug    bool
 	showVer  bool
 	webAddr  string
 }
@@ -48,6 +49,10 @@ func main() {
 	}
 
 	level := parseLogLevel(opts.logLevel)
+	// --debug implies slog.LevelDebug even when --log-level was not explicitly set.
+	if opts.debug && level > slog.LevelDebug {
+		level = slog.LevelDebug
+	}
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: level}))
 
 	switch cmd {
@@ -75,7 +80,7 @@ func main() {
 	case "run":
 		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 		defer stop()
-		a := app.New(cfg, logger).WithDryRun(opts.dryRun)
+		a := app.New(cfg, logger).WithDryRun(opts.dryRun).WithDebug(opts.debug)
 		if err := a.Run(ctx); err != nil {
 			logger.Error("run failed", "error", err)
 			os.Exit(1)
@@ -98,6 +103,7 @@ func parseCLIArgs(args []string) (cliOptions, string, error) {
 	fs.StringVar(&opts.cfgPath, "config", opts.cfgPath, "path to YAML/JSON configuration file")
 	fs.StringVar(&opts.logLevel, "log-level", opts.logLevel, "log level: debug, info, warn, error")
 	fs.BoolVar(&opts.dryRun, "dry-run", false, "skip LLM calls and write placeholder responses")
+	fs.BoolVar(&opts.debug, "debug", false, "enable debug mode: log all LLM prompts and responses (implies --log-level debug)")
 	fs.BoolVar(&opts.showVer, "version", false, "print version and exit")
 	fs.StringVar(&opts.webAddr, "addr", opts.webAddr, "listen address for the web UI (used with 'web' command)")
 
