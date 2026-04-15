@@ -69,6 +69,35 @@ func TestXMLReader_RecordPath(t *testing.T) {
 	}
 }
 
+func TestXMLReader_RecordPathNext(t *testing.T) {
+	p := writeTempXML(t, sampleXML)
+	cfg := config.InputConfig{
+		Type: "xml",
+		Path: p,
+		XML:  config.XMLConfig{RecordPath: "record"},
+	}
+	r, err := NewXMLReader(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+
+	first, err := r.Next(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := r.Next(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first["name"].(map[string]any)["name"] != "Alice" {
+		t.Fatalf("unexpected first streamed record: %#v", first)
+	}
+	if second["name"].(map[string]any)["name"] != "Bob" {
+		t.Fatalf("unexpected second streamed record: %#v", second)
+	}
+}
+
 func TestXMLReader_FileNotFound(t *testing.T) {
 	cfg := config.InputConfig{Type: "xml", Path: "/nonexistent/file.xml"}
 	_, err := NewXMLReader(cfg)

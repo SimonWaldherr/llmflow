@@ -16,6 +16,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -34,6 +35,8 @@ var staticFS embed.FS
 type Server struct {
 	logger    *slog.Logger
 	addr      string
+	dataDir   string
+	jobsFile  string
 	mu        sync.Mutex
 	jobs      []*JobStatus
 	jobIDSeq  int
@@ -73,11 +76,38 @@ type JobStatus struct {
 
 // NewServer creates a new web UI server.
 func NewServer(addr string, logger *slog.Logger) *Server {
+	dataDir := strings.TrimSpace(os.Getenv("LLMFLOW_DATA_DIR"))
+	if dataDir == "" {
+		dataDir = "data"
+	}
+	jobsFile := filepath.Join(dataDir, "jobs", "jobs.json")
 	return &Server{
 		addr:      addr,
+		dataDir:   dataDir,
+		jobsFile:  jobsFile,
 		logger:    logger,
 		serverCtx: context.Background(), // replaced by Run(); guards against nil if handleRun is called early
 	}
+}
+
+func (s *Server) dataRoot() string {
+	if s == nil {
+		return "data"
+	}
+	if dataDir := strings.TrimSpace(s.dataDir); dataDir != "" {
+		return dataDir
+	}
+	return "data"
+}
+
+func (s *Server) jobStatePath() string {
+	if s == nil {
+		return filepath.Join("data", "jobs", "jobs.json")
+	}
+	if jobsFile := strings.TrimSpace(s.jobsFile); jobsFile != "" {
+		return jobsFile
+	}
+	return filepath.Join(s.dataRoot(), "jobs", "jobs.json")
 }
 
 // authMiddleware enforces Bearer token authentication when LLMFLOW_WEB_TOKEN is set.
@@ -108,6 +138,19 @@ func (s *Server) Run(ctx context.Context) error {
 	s.serverCtx = ctx
 	s.mu.Unlock()
 
+	for _, subdir := range []string{"input", "output"} {
+		dir := filepath.Join(s.dataRoot(), subdir)
+		if err := os.MkdirAll(dir, 0o750); err != nil {
+			return fmt.Errorf("create data dir %s: %w", dir, err)
+		}
+	}
+	if err := os.MkdirAll(filepath.Join(s.dataRoot(), "jobs"), 0o750); err != nil {
+		return fmt.Errorf("create jobs dir: %w", err)
+	}
+	if err := s.loadJobs(); err != nil {
+		return err
+	}
+
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /health", s.handleHealth)
@@ -119,6 +162,11 @@ func (s *Server) Run(ctx context.Context) error {
 	mux.HandleFunc("POST /api/jobs/{id}/archive", s.handleArchiveJob)
 	mux.HandleFunc("DELETE /api/jobs/{id}", s.handleDeleteJob)
 	mux.HandleFunc("POST /api/upload", s.handleUpload)
+	mux.HandleFunc("GET /api/files", s.handleListFiles)
+	mux.HandleFunc("DELETE /api/files/{dir}/{name}", s.handleDeleteFile)
+	mux.HandleFunc("GET /api/files/download/{dir}/{name}", s.handleDownloadFile)
+	mux.HandleFunc("GET /openapi.json", s.handleOpenAPI)
+	mux.HandleFunc("GET /docs", s.handleSwaggerUI)
 	mux.HandleFunc("POST /api/models", s.handleModels)
 	mux.HandleFunc("GET /api/detect", s.handleDetect)
 	mux.HandleFunc("POST /api/suggest", s.handleSuggest)
@@ -194,10 +242,103 @@ type apiResponse struct {
 	Data  any    `json:"data,omitempty"`
 }
 
+// FileInfo describes a file in the data directory.
+type FileInfo struct {
+	Name    string `json:"name"`
+	Dir     string `json:"dir"`
+	Size    int64  `json:"size"`
+	ModTime string `json:"mod_time"`
+	Path    string `json:"path"`
+}
+
+type jobState struct {
+	Jobs []*JobStatus `json:"jobs"`
+}
+
 func writeJSON(w http.ResponseWriter, status int, resp apiResponse) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(resp)
+}
+
+func (s *Server) persistJobs() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	state := jobState{Jobs: make([]*JobStatus, 0, len(s.jobs))}
+	for _, job := range s.jobs {
+		state.Jobs = append(state.Jobs, cloneJobStatus(job))
+	}
+	path := s.jobStatePath()
+	s.mu.Unlock()
+
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+		if s.logger != nil {
+			s.logger.Warn("persist jobs mkdir", "error", err)
+		}
+		return
+	}
+	data, err := json.MarshalIndent(state, "", "  ")
+	if err != nil {
+		if s.logger != nil {
+			s.logger.Warn("persist jobs marshal", "error", err)
+		}
+		return
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o640); err != nil {
+		if s.logger != nil {
+			s.logger.Warn("persist jobs write", "error", err)
+		}
+		return
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		if s.logger != nil {
+			s.logger.Warn("persist jobs rename", "error", err)
+		}
+	}
+}
+
+func (s *Server) loadJobs() error {
+	if s == nil {
+		return nil
+	}
+	path := s.jobStatePath()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("read job state: %w", err)
+	}
+	var state jobState
+	if err := json.Unmarshal(data, &state); err != nil {
+		return fmt.Errorf("parse job state: %w", err)
+	}
+	now := time.Now()
+	maxID := 0
+	for _, job := range state.Jobs {
+		if job == nil {
+			continue
+		}
+		if job.ID > maxID {
+			maxID = job.ID
+		}
+		if job.Status == "running" {
+			job.Status = "failed"
+			job.Error = "recovered after server restart"
+			job.EndedAt = now
+		}
+	}
+	s.mu.Lock()
+	s.jobs = state.Jobs
+	s.jobIDSeq = maxID
+	s.mu.Unlock()
+	if maxID > 0 {
+		s.persistJobs()
+	}
+	return nil
 }
 
 func (s *Server) handleValidate(w http.ResponseWriter, r *http.Request) {
@@ -288,6 +429,7 @@ func (s *Server) handleRun(w http.ResponseWriter, r *http.Request) {
 	}
 	s.jobs = append(s.jobs, job)
 	s.mu.Unlock()
+	s.persistJobs()
 
 	// Use the server context so jobs are cancelled during graceful shutdown,
 	// not when the HTTP response is sent.
@@ -300,7 +442,7 @@ func (s *Server) handleRun(w http.ResponseWriter, r *http.Request) {
 	go func() {
 		defer s.wg.Done()
 		defer jobCancel() // ensure context is always released
-		lc := &logCollector{job: job, mu: &s.mu}
+		lc := &logCollector{job: job, mu: &s.mu, persist: s.persistJobs}
 		logger := slog.New(slog.NewJSONHandler(lc, &slog.HandlerOptions{Level: slog.LevelDebug}))
 
 		const maxPreviewItems = 20
@@ -311,28 +453,33 @@ func (s *Server) handleRun(w http.ResponseWriter, r *http.Request) {
 			job.Progress.Current = current
 			job.Progress.Total = total
 			s.mu.Unlock()
+			s.persistJobs()
 		}
 
 		resultPreview := func(index, total int, record map[string]any) {
 			s.mu.Lock()
-			defer s.mu.Unlock()
 			job.PreviewCount++
 			item := JobPreviewItem{Index: index, Record: record}
 			if len(job.Preview) >= maxPreviewItems {
 				job.Preview = append(job.Preview[1:], item)
+				s.mu.Unlock()
+				s.persistJobs()
 				return
 			}
 			job.Preview = append(job.Preview, item)
+			s.mu.Unlock()
+			s.persistJobs()
 		}
 
 		a := app.New(cfg, logger).WithDryRun(req.DryRun).WithProgressFunc(progress).WithResultFunc(resultPreview)
 		runErr := a.Run(jobCtx)
 
 		s.mu.Lock()
-		defer s.mu.Unlock()
 		job.EndedAt = time.Now()
 		// Respect an explicit cancellation – don't overwrite the status set by handleCancelJob.
 		if job.Status == "cancelled" {
+			s.mu.Unlock()
+			s.persistJobs()
 			return
 		}
 		if runErr != nil {
@@ -341,9 +488,236 @@ func (s *Server) handleRun(w http.ResponseWriter, r *http.Request) {
 		} else {
 			job.Status = "completed"
 		}
+		s.mu.Unlock()
+		s.persistJobs()
 	}()
 
 	writeJSON(w, http.StatusAccepted, apiResponse{OK: true, Data: cloneJobStatus(job)})
+}
+
+// allowedFileDir validates and returns the absolute path for "input" or "output".
+func (s *Server) allowedFileDir(dir string) (string, bool) {
+	if dir != "input" && dir != "output" {
+		return "", false
+	}
+	return filepath.Join(s.dataRoot(), dir), true
+}
+
+// handleListFiles lists files in data/input and data/output.
+func (s *Server) handleListFiles(w http.ResponseWriter, r *http.Request) {
+	files := make([]FileInfo, 0)
+	for _, dir := range []string{"input", "output"} {
+		dirPath, ok := s.allowedFileDir(dir)
+		if !ok {
+			continue
+		}
+		if err := os.MkdirAll(dirPath, 0o750); err != nil {
+			continue
+		}
+		entries, err := os.ReadDir(dirPath)
+		if err != nil {
+			continue
+		}
+		for _, entry := range entries {
+			if entry.IsDir() {
+				continue
+			}
+			info, err := entry.Info()
+			if err != nil {
+				continue
+			}
+			files = append(files, FileInfo{
+				Name:    entry.Name(),
+				Dir:     dir,
+				Size:    info.Size(),
+				ModTime: info.ModTime().UTC().Format(time.RFC3339),
+				Path:    filepath.Join(dirPath, entry.Name()),
+			})
+		}
+	}
+	writeJSON(w, http.StatusOK, apiResponse{OK: true, Data: files})
+}
+
+// safeInDir verifies that dst is a direct child of dirPath (no traversal).
+func safeInDir(dirPath, dst string) bool {
+	rel, err := filepath.Rel(filepath.Clean(dirPath), filepath.Clean(dst))
+	if err != nil {
+		return false
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator)) && !strings.ContainsRune(rel, os.PathSeparator)
+}
+
+// handleDeleteFile deletes a file from data/input or data/output.
+func (s *Server) handleDeleteFile(w http.ResponseWriter, r *http.Request) {
+	dir := r.PathValue("dir")
+	name := r.PathValue("name")
+
+	dirPath, ok := s.allowedFileDir(dir)
+	if !ok {
+		writeJSON(w, http.StatusBadRequest, apiResponse{Error: "invalid dir; must be 'input' or 'output'"})
+		return
+	}
+
+	name = filepath.Base(name)
+	if name == "." || name == string(filepath.Separator) {
+		writeJSON(w, http.StatusBadRequest, apiResponse{Error: "invalid filename"})
+		return
+	}
+
+	dst := filepath.Join(dirPath, name)
+	if !safeInDir(dirPath, dst) {
+		writeJSON(w, http.StatusBadRequest, apiResponse{Error: "invalid filename"})
+		return
+	}
+
+	if err := os.Remove(dst); err != nil {
+		if os.IsNotExist(err) {
+			writeJSON(w, http.StatusNotFound, apiResponse{Error: "file not found"})
+		} else {
+			writeJSON(w, http.StatusInternalServerError, apiResponse{Error: "delete file: " + err.Error()})
+		}
+		return
+	}
+	writeJSON(w, http.StatusOK, apiResponse{OK: true})
+}
+
+// handleDownloadFile serves a file from data/input or data/output for download.
+func (s *Server) handleDownloadFile(w http.ResponseWriter, r *http.Request) {
+	dir := r.PathValue("dir")
+	name := r.PathValue("name")
+
+	dirPath, ok := s.allowedFileDir(dir)
+	if !ok {
+		http.Error(w, "invalid dir", http.StatusBadRequest)
+		return
+	}
+
+	name = filepath.Base(name)
+	if name == "." || name == string(filepath.Separator) {
+		http.Error(w, "invalid filename", http.StatusBadRequest)
+		return
+	}
+
+	dst := filepath.Join(dirPath, name)
+	if !safeInDir(dirPath, dst) {
+		http.Error(w, "invalid filename", http.StatusBadRequest)
+		return
+	}
+
+	w.Header().Set("Content-Disposition", `attachment; filename="`+name+`"`)
+	http.ServeFile(w, r, dst)
+}
+
+func (s *Server) handleOpenAPI(w http.ResponseWriter, _ *http.Request) {
+	spec := map[string]any{
+		"openapi": "3.0.3",
+		"info": map[string]any{
+			"title":   "llmflow Web API",
+			"version": "1.0.0",
+		},
+		"servers": []map[string]any{{"url": "/"}},
+		"paths": map[string]any{
+			"/health": map[string]any{
+				"get": map[string]any{
+					"summary":   "Health check",
+					"responses": map[string]any{"200": map[string]any{"description": "OK"}},
+				},
+			},
+			"/api/validate": map[string]any{
+				"post": map[string]any{
+					"summary": "Validate a config",
+					"requestBody": map[string]any{
+						"required": true,
+						"content": map[string]any{"application/json": map[string]any{"schema": map[string]any{
+							"type":       "object",
+							"properties": map[string]any{"config": map[string]any{"type": "string"}},
+							"required":   []string{"config"},
+						}}},
+					},
+					"responses": map[string]any{"200": map[string]any{"description": "Validation result"}},
+				},
+			},
+			"/api/run": map[string]any{
+				"post": map[string]any{
+					"summary": "Submit a job",
+					"requestBody": map[string]any{
+						"required": true,
+						"content": map[string]any{"application/json": map[string]any{"schema": map[string]any{
+							"type": "object",
+							"properties": map[string]any{
+								"config":  map[string]any{"type": "string"},
+								"dry_run": map[string]any{"type": "boolean"},
+								"name":    map[string]any{"type": "string"},
+							},
+							"required": []string{"config"},
+						}}},
+					},
+					"responses": map[string]any{"202": map[string]any{"description": "Job accepted"}},
+				},
+			},
+			"/api/jobs": map[string]any{
+				"get": map[string]any{
+					"summary":   "List jobs",
+					"responses": map[string]any{"200": map[string]any{"description": "Job list"}},
+				},
+			},
+			"/api/jobs/{id}": map[string]any{
+				"get":    map[string]any{"summary": "Get job details", "responses": map[string]any{"200": map[string]any{"description": "Job"}}},
+				"delete": map[string]any{"summary": "Delete a job", "responses": map[string]any{"200": map[string]any{"description": "Deleted"}}},
+			},
+			"/api/jobs/{id}/cancel":  map[string]any{"post": map[string]any{"summary": "Cancel a running job", "responses": map[string]any{"200": map[string]any{"description": "Cancelled"}}}},
+			"/api/jobs/{id}/archive": map[string]any{"post": map[string]any{"summary": "Archive a job", "responses": map[string]any{"200": map[string]any{"description": "Archived"}}}},
+			"/api/upload": map[string]any{
+				"post": map[string]any{
+					"summary": "Upload an input file",
+					"requestBody": map[string]any{
+						"required": true,
+						"content": map[string]any{"multipart/form-data": map[string]any{"schema": map[string]any{
+							"type":       "object",
+							"properties": map[string]any{"file": map[string]any{"type": "string", "format": "binary"}},
+							"required":   []string{"file"},
+						}}},
+					},
+					"responses": map[string]any{"200": map[string]any{"description": "Uploaded"}},
+				},
+			},
+			"/api/files":                       map[string]any{"get": map[string]any{"summary": "List input and output files", "responses": map[string]any{"200": map[string]any{"description": "Files"}}}},
+			"/api/files/download/{dir}/{name}": map[string]any{"get": map[string]any{"summary": "Download a file", "responses": map[string]any{"200": map[string]any{"description": "File download"}}}},
+			"/api/models":                      map[string]any{"post": map[string]any{"summary": "Fetch available models", "responses": map[string]any{"200": map[string]any{"description": "Models"}}}},
+			"/api/detect":                      map[string]any{"get": map[string]any{"summary": "Detect local providers", "responses": map[string]any{"200": map[string]any{"description": "Providers"}}}},
+			"/api/suggest":                     map[string]any{"post": map[string]any{"summary": "Generate quick setup suggestions", "responses": map[string]any{"200": map[string]any{"description": "Suggestion"}}}},
+		},
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(spec)
+}
+
+func (s *Server) handleSwaggerUI(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_, _ = io.WriteString(w, `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>llmflow API Docs</title>
+  <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css">
+  <style>body{margin:0;background:#0d1117}#swagger-ui{max-width:none}</style>
+</head>
+<body>
+  <div id="swagger-ui"></div>
+  <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
+  <script>
+    window.ui = SwaggerUIBundle({
+      url: '/openapi.json',
+      dom_id: '#swagger-ui',
+      deepLinking: true,
+      displayRequestDuration: true,
+      presets: [SwaggerUIBundle.presets.apis],
+      layout: 'BaseLayout'
+    });
+  </script>
+</body>
+</html>`)
 }
 
 func (s *Server) handleListJobs(w http.ResponseWriter, r *http.Request) {
@@ -405,10 +779,11 @@ func (s *Server) handleCancelJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	var resp apiResponse
 	for _, j := range s.jobs {
 		if j.ID == id {
 			if j.Status != "running" {
+				s.mu.Unlock()
 				writeJSON(w, http.StatusConflict, apiResponse{Error: "job is not running"})
 				return
 			}
@@ -417,10 +792,14 @@ func (s *Server) handleCancelJob(w http.ResponseWriter, r *http.Request) {
 			if j.cancelFn != nil {
 				j.cancelFn()
 			}
-			writeJSON(w, http.StatusOK, apiResponse{OK: true})
+			resp = apiResponse{OK: true}
+			s.mu.Unlock()
+			s.persistJobs()
+			writeJSON(w, http.StatusOK, resp)
 			return
 		}
 	}
+	s.mu.Unlock()
 	writeJSON(w, http.StatusNotFound, apiResponse{Error: "job not found"})
 }
 
@@ -431,14 +810,16 @@ func (s *Server) handleArchiveJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	for _, j := range s.jobs {
 		if j.ID == id {
 			j.Archived = true
+			s.mu.Unlock()
+			s.persistJobs()
 			writeJSON(w, http.StatusOK, apiResponse{OK: true})
 			return
 		}
 	}
+	s.mu.Unlock()
 	writeJSON(w, http.StatusNotFound, apiResponse{Error: "job not found"})
 }
 
@@ -449,18 +830,21 @@ func (s *Server) handleDeleteJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	for i, j := range s.jobs {
 		if j.ID == id {
 			if j.Status == "running" {
+				s.mu.Unlock()
 				writeJSON(w, http.StatusConflict, apiResponse{Error: "cannot delete a running job; cancel it first"})
 				return
 			}
 			s.jobs = append(s.jobs[:i], s.jobs[i+1:]...)
+			s.mu.Unlock()
+			s.persistJobs()
 			writeJSON(w, http.StatusOK, apiResponse{OK: true})
 			return
 		}
 	}
+	s.mu.Unlock()
 	writeJSON(w, http.StatusNotFound, apiResponse{Error: "job not found"})
 }
 
@@ -552,15 +936,17 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	uploadDir := filepath.Join(os.TempDir(), "llmflow-uploads")
+	uploadDir := filepath.Join(s.dataRoot(), "input")
 	if err := os.MkdirAll(uploadDir, 0o750); err != nil {
 		writeJSON(w, http.StatusInternalServerError, apiResponse{Error: "create upload dir"})
 		return
 	}
 
-	// Prefix with a nanosecond timestamp so uploads never overwrite each other.
-	uniqueName := fmt.Sprintf("%d-%s", time.Now().UnixNano(), name)
-	dst := filepath.Join(uploadDir, uniqueName)
+	dst := filepath.Join(uploadDir, name)
+	if _, statErr := os.Stat(dst); statErr == nil {
+		name = fmt.Sprintf("%d-%s", time.Now().UnixNano(), name)
+		dst = filepath.Join(uploadDir, name)
+	}
 	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0o640)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, apiResponse{Error: "create file"})
@@ -573,7 +959,7 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, apiResponse{OK: true, Data: map[string]string{"path": dst}})
+	writeJSON(w, http.StatusOK, apiResponse{OK: true, Data: map[string]string{"path": dst, "name": name}})
 }
 
 // ─── /api/suggest ─────────────────────────────────────────────────────────────
@@ -678,7 +1064,8 @@ func (s *Server) handleSuggest(w http.ResponseWriter, r *http.Request) {
 	if apiKey == "" && apiCfg.APIKeyEnv != "" {
 		apiKey = strings.TrimSpace(os.Getenv(apiCfg.APIKeyEnv))
 	}
-	if apiKey == "" {
+	nokeyProviders := map[string]bool{config.ProviderOllama: true, config.ProviderLMStudio: true}
+	if apiKey == "" && !nokeyProviders[strings.ToLower(apiCfg.Provider)] {
 		if apiCfg.APIKeyEnv != "" {
 			writeJSON(w, http.StatusBadRequest, apiResponse{Error: fmt.Sprintf("API key env var %q is not set; set it on the server before using AI suggestions", apiCfg.APIKeyEnv)})
 		} else {
@@ -712,7 +1099,8 @@ func (s *Server) handleSuggest(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if err != nil {
-		writeJSON(w, http.StatusBadGateway, apiResponse{Error: fmt.Sprintf("LLM call failed after %s timeout budget: %s", suggestTimeout.String(), err.Error())})
+		fallback := buildSuggestFallback(req.Task, req.Config)
+		writeJSON(w, http.StatusOK, apiResponse{OK: true, Data: fallback})
 		return
 	}
 
@@ -732,6 +1120,48 @@ func (s *Server) handleSuggest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, apiResponse{OK: true, Data: sr})
+}
+
+func buildSuggestFallback(task, currentConfig string) suggestResponse {
+	jobName := buildSuggestJobName(task)
+	responseField := "response"
+	if strings.Contains(strings.ToLower(task), "summary") {
+		responseField = "summary"
+	} else if strings.Contains(strings.ToLower(task), "classif") {
+		responseField = "classification"
+	}
+	prePrompt := strings.TrimSpace(task)
+	if prePrompt != "" {
+		prePrompt = "Follow this task: " + prePrompt
+	}
+	inputTemplate := "{{ toPrettyJSON .record }}"
+	if strings.TrimSpace(currentConfig) != "" {
+		inputTemplate = strings.TrimSpace(inputTemplate)
+	}
+	return suggestResponse{
+		SystemPrompt:  "You are a helpful data-processing assistant.",
+		PrePrompt:     prePrompt,
+		InputTemplate: inputTemplate,
+		PostPrompt:    "Return a concise result that matches the task.",
+		JobName:       jobName,
+		ResponseField: responseField,
+	}
+}
+
+func buildSuggestJobName(task string) string {
+	cleaned := strings.ToLower(strings.TrimSpace(task))
+	if cleaned == "" {
+		return "data job"
+	}
+	re := regexp.MustCompile(`[^a-z0-9]+`)
+	parts := strings.Fields(re.ReplaceAllString(cleaned, " "))
+	if len(parts) == 0 {
+		return "data job"
+	}
+	if len(parts) > 3 {
+		parts = parts[:3]
+	}
+	return strings.Join(parts, " ")
 }
 
 func resolveQuickFormAPIKey(raw string) (direct string, env string) {
@@ -806,16 +1236,20 @@ func parseConfig(yamlText string) (config.Config, error) {
 }
 
 type logCollector struct {
-	job *JobStatus
-	mu  *sync.Mutex
+	job     *JobStatus
+	mu      *sync.Mutex
+	persist func()
 }
 
 func (lc *logCollector) Write(p []byte) (int, error) {
 	lc.mu.Lock()
-	defer lc.mu.Unlock()
 	line := strings.TrimRight(string(p), "\n")
 	if line != "" {
 		lc.job.Logs = append(lc.job.Logs, line)
+	}
+	lc.mu.Unlock()
+	if lc.persist != nil {
+		lc.persist()
 	}
 	return len(p), nil
 }

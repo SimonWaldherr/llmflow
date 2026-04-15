@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -214,5 +216,75 @@ func TestHandleModelsOpenAICompatible(t *testing.T) {
 	}
 	if len(models) != 2 {
 		t.Fatalf("expected 2 models, got %#v", models)
+	}
+}
+
+func TestFilesAPI(t *testing.T) {
+	root := t.TempDir()
+	inputDir := filepath.Join(root, "input")
+	outputDir := filepath.Join(root, "output")
+	if err := os.MkdirAll(inputDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(outputDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(inputDir, "sample.csv"), []byte("a,b\n1,2\n"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(outputDir, "result.jsonl"), []byte("{\"ok\":true}\n"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+
+	srv := &Server{dataDir: root}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/files", nil)
+	rec := httptest.NewRecorder()
+	srv.handleListFiles(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("list status = %d, want %d", rec.Code, http.StatusOK)
+	}
+
+	var listResp apiResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &listResp); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(listResp.Data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var files []struct {
+		Name string `json:"name"`
+		Dir  string `json:"dir"`
+	}
+	if err := json.Unmarshal(raw, &files); err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 2 {
+		t.Fatalf("expected 2 files, got %#v", files)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/files/download/input/sample.csv", nil)
+	req.SetPathValue("dir", "input")
+	req.SetPathValue("name", "sample.csv")
+	rec = httptest.NewRecorder()
+	srv.handleDownloadFile(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("download status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	if got := rec.Body.String(); got != "a,b\n1,2\n" {
+		t.Fatalf("download body = %q, want %q", got, "a,b\n1,2\n")
+	}
+
+	req = httptest.NewRequest(http.MethodDelete, "/api/files/output/result.jsonl", nil)
+	req.SetPathValue("dir", "output")
+	req.SetPathValue("name", "result.jsonl")
+	rec = httptest.NewRecorder()
+	srv.handleDeleteFile(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("delete status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	if _, err := os.Stat(filepath.Join(outputDir, "result.jsonl")); !os.IsNotExist(err) {
+		t.Fatalf("expected output file to be deleted, stat err = %v", err)
 	}
 }

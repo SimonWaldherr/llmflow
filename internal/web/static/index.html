@@ -208,6 +208,17 @@ textarea { font-family: var(--font-mono); resize: vertical; }
 .upload-zone.dragover { border-color: var(--accent); background: rgba(88,166,255,0.05); }
 .upload-path { margin-top: 8px; font-family: var(--font-mono); font-size: 13px; color: var(--green); }
 
+.files-section { margin-bottom: 24px; }
+.files-section h3 { font-size: 15px; font-weight: 600; margin-bottom: 10px; color: var(--text); }
+.file-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.file-table th { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); color: var(--text-muted); font-weight: 500; }
+.file-table td { padding: 8px 10px; border-bottom: 1px solid var(--border); color: var(--text); vertical-align: top; }
+.file-table tr:last-child td { border-bottom: none; }
+.file-table tr:hover td { background: rgba(88,166,255,0.04); }
+.file-size { color: var(--text-muted); white-space: nowrap; }
+.file-date { color: var(--text-muted); white-space: nowrap; font-size: 12px; }
+.file-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+
 .empty-state {
   text-align: center; padding: 48px; color: var(--text-muted); font-size: 14px;
 }
@@ -329,6 +340,7 @@ textarea { font-family: var(--font-mono); resize: vertical; }
   <button class="tab active" data-panel="quick">Quick Start</button>
   <button class="tab" data-panel="editor">YAML Editor</button>
   <button class="tab" data-panel="jobs">Jobs</button>
+  <button class="tab" data-panel="files">Files</button>
 </div>
 
 <!-- Detection banner -->
@@ -739,6 +751,37 @@ processing:
   </div>
 </div>
 
+<!-- ═══════════════════════ Files ═══════════════════════ -->
+<div id="panel-files" class="panel">
+  <div class="btn-row" style="margin-bottom:16px;margin-top:0">
+    <button class="btn btn-secondary" onclick="refreshFiles()">↻ Refresh</button>
+    <span id="files-status" style="font-size:13px;color:var(--text-muted);margin-left:8px"></span>
+  </div>
+
+  <div class="form-group quick-full">
+    <label>Upload File</label>
+    <div id="files-upload-zone" class="upload-zone">
+      Drop a file here or click to upload
+      <input type="file" id="files-file-input" style="display:none" accept=".csv,.json,.jsonl,.xml">
+      <div id="files-upload-path" class="upload-path" style="display:none"></div>
+    </div>
+  </div>
+
+  <div class="files-section">
+    <h3>📥 Input Files <span style="font-weight:400;font-size:13px;color:var(--text-muted)">(data/input)</span></h3>
+    <div id="input-files-list">
+      <div class="empty-state">No input files yet. Upload a file from the Quick Start tab.</div>
+    </div>
+  </div>
+
+  <div class="files-section">
+    <h3>📤 Output Files <span style="font-weight:400;font-size:13px;color:var(--text-muted)">(data/output)</span></h3>
+    <div id="output-files-list">
+      <div class="empty-state">No output files yet. Completed jobs will write here when the output path is set to data/output/…</div>
+    </div>
+  </div>
+</div>
+
 </div><!-- .container -->
 
 <script>
@@ -751,6 +794,7 @@ function activatePanel(panelName) {
   const panel = document.getElementById('panel-' + panelName);
   if (panel) panel.classList.add('active');
   if (panelName === 'jobs') refreshJobs();
+  if (panelName === 'files') refreshFiles();
 }
 
 document.querySelectorAll('.tab').forEach(tab => {
@@ -762,6 +806,8 @@ document.querySelectorAll('.tab').forEach(tab => {
 // ── File upload ───────────────────────────────────────────────────
 const uploadZone = document.getElementById('upload-zone');
 const fileInput  = document.getElementById('file-input');
+const filesUploadZone = document.getElementById('files-upload-zone');
+const filesFileInput = document.getElementById('files-file-input');
 let uploadedPath = '';
 
 uploadZone.addEventListener('click', () => fileInput.click());
@@ -772,6 +818,16 @@ uploadZone.addEventListener('drop', e => {
   if (e.dataTransfer.files.length) uploadFile(e.dataTransfer.files[0]);
 });
 fileInput.addEventListener('change', () => { if (fileInput.files.length) uploadFile(fileInput.files[0]); });
+if (filesUploadZone && filesFileInput) {
+  filesUploadZone.addEventListener('click', () => filesFileInput.click());
+  filesUploadZone.addEventListener('dragover', e => { e.preventDefault(); filesUploadZone.classList.add('dragover'); });
+  filesUploadZone.addEventListener('dragleave', () => filesUploadZone.classList.remove('dragover'));
+  filesUploadZone.addEventListener('drop', e => {
+    e.preventDefault(); filesUploadZone.classList.remove('dragover');
+    if (e.dataTransfer.files.length) uploadFile(e.dataTransfer.files[0]);
+  });
+  filesFileInput.addEventListener('change', () => { if (filesFileInput.files.length) uploadFile(filesFileInput.files[0]); });
+}
 
 async function uploadFile(file) {
   const form = new FormData();
@@ -784,9 +840,12 @@ async function uploadFile(file) {
       const ext = file.name.split('.').pop().toLowerCase();
       const typeMap = { csv:'csv', json:'json', jsonl:'jsonl', xml:'xml' };
       if (typeMap[ext]) document.getElementById('q-input-type').value = typeMap[ext];
-      const el = document.getElementById('upload-path');
-      el.textContent = '✓ ' + uploadedPath;
-      el.style.display = 'block';
+      [document.getElementById('upload-path'), document.getElementById('files-upload-path')].forEach(el => {
+        if (!el) return;
+        el.textContent = '✓ ' + uploadedPath;
+        el.style.display = 'block';
+      });
+      await refreshFiles();
     } else {
       showStatus('quick-status', 'error', 'Upload failed: ' + d.error);
     }
@@ -806,6 +865,93 @@ function escHtml(s) {
   return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
+function formatBytes(bytes) {
+  if (!Number.isFinite(bytes) || bytes < 0) return '-';
+  if (bytes < 1024) return bytes + ' B';
+  const units = ['KiB', 'MiB', 'GiB', 'TiB'];
+  let value = bytes / 1024;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit++;
+  }
+  return value.toFixed(value >= 10 || unit === 0 ? 0 : 1) + ' ' + units[unit];
+}
+
+function renderFileTable(containerId, files, dir) {
+  const el = document.getElementById(containerId);
+  if (!el) return;
+  if (!files || files.length === 0) {
+    el.innerHTML = dir === 'input'
+      ? '<div class="empty-state">No input files yet. Upload a file from the Quick Start tab.</div>'
+      : '<div class="empty-state">No output files yet. Completed jobs will write here when the output path is set to data/output/…</div>';
+    return;
+  }
+
+  const rows = files.map(f => `
+    <tr>
+      <td>${escHtml(f.name || '')}</td>
+      <td class="file-size">${formatBytes(f.size || 0)}</td>
+      <td class="file-date">${f.mod_time ? new Date(f.mod_time).toLocaleString() : '-'}</td>
+      <td>
+        <div class="file-actions">
+          ${dir === 'input' ? `<button class="btn btn-sm btn-secondary js-use-file-input" data-path="${escHtml(f.path || '')}" data-name="${escHtml(f.name || '')}">Use as Input</button>` : ''}
+          <a class="btn btn-sm btn-secondary" href="/api/files/download/${encodeURIComponent(dir)}/${encodeURIComponent(f.name || '')}" download="${escHtml(f.name || '')}">Download</a>
+          <button class="btn btn-sm btn-danger js-delete-file" data-dir="${escHtml(dir)}" data-name="${escHtml(f.name || '')}">Delete</button>
+        </div>
+      </td>
+    </tr>`).join('');
+
+  el.innerHTML = `<table class="file-table"><thead><tr><th>Name</th><th>Size</th><th>Modified</th><th>Actions</th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+
+async function refreshFiles() {
+  const statusEl = document.getElementById('files-status');
+  if (statusEl) statusEl.textContent = 'Loading…';
+  try {
+    const r = await fetch('/api/files');
+    const d = await r.json();
+    if (!d.ok) {
+      if (statusEl) statusEl.textContent = 'Error: ' + d.error;
+      return;
+    }
+    const files = Array.isArray(d.data) ? d.data : [];
+    const inputFiles = files.filter(f => f.dir === 'input');
+    const outputFiles = files.filter(f => f.dir === 'output');
+    renderFileTable('input-files-list', inputFiles, 'input');
+    renderFileTable('output-files-list', outputFiles, 'output');
+    if (statusEl) statusEl.textContent = files.length + ' file(s)';
+  } catch(e) {
+    if (statusEl) statusEl.textContent = 'Error: ' + e.message;
+  }
+}
+
+function useFileAsInput(path, name) {
+  uploadedPath = path;
+  const ext = (name || '').split('.').pop().toLowerCase();
+  const typeMap = { csv:'csv', json:'json', jsonl:'jsonl', xml:'xml' };
+  if (typeMap[ext]) document.getElementById('q-input-type').value = typeMap[ext];
+  const el = document.getElementById('upload-path');
+  el.textContent = '✓ ' + path;
+  el.style.display = 'block';
+  showStatus('quick-status', 'ok', 'Input file set to: ' + name);
+}
+
+async function deleteFile(dir, name) {
+  if (!confirm(`Delete ${dir}/` + name + '?')) return;
+  try {
+    const r = await fetch('/api/files/' + encodeURIComponent(dir) + '/' + encodeURIComponent(name), { method: 'DELETE' });
+    const d = await r.json();
+    if (d.ok) {
+      await refreshFiles();
+    } else {
+      alert('Delete failed: ' + d.error);
+    }
+  } catch(e) {
+    alert('Error: ' + e.message);
+  }
+}
+
 function syncAPIKeyFieldMode() {
   const input = document.getElementById('q-apikey');
   const raw = (input.value || '').trim();
@@ -813,8 +959,17 @@ function syncAPIKeyFieldMode() {
 }
 
 function getAPIKeyConfigEntry() {
+  const provider = document.getElementById('q-provider').value;
+  const localProviders = new Set(['ollama', 'lmstudio']);
+  if (localProviders.has(provider)) return null;
+  const defaults = {
+    openai: 'OPENAI_API_KEY',
+    gemini: 'GEMINI_API_KEY',
+    anthropic: 'ANTHROPIC_API_KEY',
+    generic: 'API_KEY',
+  };
   const raw = (document.getElementById('q-apikey').value || '').trim();
-  if (!raw) return { field: 'api_key_env', value: 'OPENAI_API_KEY' };
+  if (!raw) return { field: 'api_key_env', value: defaults[provider] || defaults.openai };
   if (raw.startsWith('sk')) return { field: 'api_key', value: raw };
   return { field: 'api_key_env', value: raw };
 }
@@ -844,7 +999,8 @@ function buildYAMLFromForm() {
   const ind4 = s => s.split('\n').join('\n    ');
   const apiKeyEntry = getAPIKeyConfigEntry();
 
-  let yaml = `api:\n  provider: ${provider}\n  ${apiKeyEntry.field}: ${apiKeyEntry.value}\n  model: ${model}\n  timeout: ${timeout}\n  rate_limit_rpm: ${rpm}`;
+  let yaml = `api:\n  provider: ${provider}\n  model: ${model}\n  timeout: ${timeout}\n  rate_limit_rpm: ${rpm}`;
+  if (apiKeyEntry) yaml += `\n  ${apiKeyEntry.field}: ${apiKeyEntry.value}`;
   if (promptCaching === 'true') yaml += `\n  prompt_caching: true`;
   if (baseurl) yaml += `\n  base_url: ${baseurl}`;
 
@@ -1280,8 +1436,8 @@ async function suggestConfig() {
       model:       getModelValue(),
       base_url:    document.getElementById('q-baseurl').value,
       timeout:     suggestTimeout,
-      [apiKeyEntry.field]: apiKeyEntry.value,
     };
+    if (apiKeyEntry) body[apiKeyEntry.field] = apiKeyEntry.value;
     const r   = await fetch('/api/suggest', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
     const d   = await r.json();
     if (!d.ok) { statusEl.textContent = 'Error: ' + d.error; statusEl.className = 'suggest-status error'; return; }
@@ -1341,6 +1497,18 @@ document.getElementById('t-sql-query').addEventListener('change', e =>
 document.getElementById('t-code-exec').addEventListener('change', e =>
   document.getElementById('t-code-extra').classList.toggle('show', e.target.checked)
 );
+
+document.addEventListener('click', e => {
+  const inputBtn = e.target.closest('.js-use-file-input');
+  if (inputBtn) {
+    useFileAsInput(inputBtn.dataset.path || '', inputBtn.dataset.name || '');
+    return;
+  }
+  const deleteBtn = e.target.closest('.js-delete-file');
+  if (deleteBtn) {
+    deleteFile(deleteBtn.dataset.dir || '', deleteBtn.dataset.name || '');
+  }
+});
 
 // ── Init ──────────────────────────────────────────────────────────
 setModelSuggestions([]);  // populate select for default provider (openai)

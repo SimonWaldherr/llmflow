@@ -82,6 +82,37 @@ func TestCSVWriter_CustomDelimiter(t *testing.T) {
 	}
 }
 
+func TestCSVWriter_WriteRecordSyncs(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "out.csv")
+	cfg := config.OutputConfig{Type: "csv", Path: p}
+	w, err := NewCSVWriter(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Prepare(context.Background(), []string{"name", "city"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.WriteRecord(context.Background(), Record{"name": "Alice", "city": "Berlin"}); err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.Open(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	rows, err := csv.NewReader(f).ReadAll()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("expected header + 1 row, got %d", len(rows))
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func containsRune(s string, r rune) bool {
 	for _, c := range s {
 		if c == r {
@@ -129,6 +160,38 @@ func TestJSONLWriter_Basic(t *testing.T) {
 	}
 	if lines[0]["name"] != "Alice" {
 		t.Errorf("unexpected first record: %v", lines[0])
+	}
+}
+
+func TestJSONLWriter_WriteRecordSyncs(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "out.jsonl")
+	cfg := config.OutputConfig{Type: "jsonl", Path: p}
+	w, err := NewJSONLWriter(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.WriteRecord(context.Background(), Record{"name": "Alice"}); err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.Open(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	sc := bufio.NewScanner(f)
+	if !sc.Scan() {
+		t.Fatal("expected one JSONL line")
+	}
+	var got map[string]any
+	if err := json.Unmarshal(sc.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got["name"] != "Alice" {
+		t.Fatalf("unexpected record: %#v", got)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
 	}
 }
 

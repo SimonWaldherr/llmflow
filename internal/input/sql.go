@@ -3,6 +3,7 @@ package input
 import (
 	"context"
 	"database/sql"
+	"io"
 	"fmt"
 
 	_ "github.com/microsoft/go-mssqldb"
@@ -12,8 +13,12 @@ import (
 )
 
 type SQLReader struct {
-	db    *sql.DB
-	query string
+	db       *sql.DB
+	query    string
+	rows     *sql.Rows
+	cols     []string
+	started  bool
+	finished bool
 }
 
 func NewSQLReader(kind string, cfg config.InputConfig) (*SQLReader, error) {
@@ -43,37 +48,68 @@ func NewSQLReader(kind string, cfg config.InputConfig) (*SQLReader, error) {
 	return &SQLReader{db: db, query: cfg.Query}, nil
 }
 
-func (r *SQLReader) ReadAll(ctx context.Context) ([]Record, error) {
-	rows, err := r.db.QueryContext(ctx, r.query)
-	if err != nil {
-		return nil, fmt.Errorf("query sql input: %w", err)
+func (r *SQLReader) Next(ctx context.Context) (Record, error) {
+	if r.finished {
+		return nil, io.EOF
 	}
-	defer rows.Close()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if !r.started {
+		rows, err := r.db.QueryContext(ctx, r.query)
+		if err != nil {
+			return nil, fmt.Errorf("query sql input: %w", err)
+		}
+		cols, err := rows.Columns()
+		if err != nil {
+			_ = rows.Close()
+			return nil, fmt.Errorf("columns: %w", err)
+		}
+		r.rows = rows
+		r.cols = cols
+		r.started = true
+	}
+	if !r.rows.Next() {
+		if err := r.rows.Err(); err != nil {
+			r.finished = true
+			return nil, fmt.Errorf("iterate rows: %w", err)
+		}
+		r.finished = true
+		_ = r.rows.Close()
+		return nil, io.EOF
+	}
+	vals := make([]any, len(r.cols))
+	ptrs := make([]any, len(r.cols))
+	for i := range vals {
+		ptrs[i] = &vals[i]
+	}
+	if err := r.rows.Scan(ptrs...); err != nil {
+		return nil, fmt.Errorf("scan row: %w", err)
+	}
+	rec := Record{}
+	for i, c := range r.cols {
+		rec[c] = vals[i]
+	}
+	return rec, nil
+}
 
-	cols, err := rows.Columns()
-	if err != nil {
-		return nil, fmt.Errorf("columns: %w", err)
-	}
+func (r *SQLReader) ReadAll(ctx context.Context) ([]Record, error) {
 	var out []Record
-	for rows.Next() {
-		vals := make([]any, len(cols))
-		ptrs := make([]any, len(cols))
-		for i := range vals {
-			ptrs[i] = &vals[i]
-		}
-		if err := rows.Scan(ptrs...); err != nil {
-			return nil, fmt.Errorf("scan row: %w", err)
-		}
-		rec := Record{}
-		for i, c := range cols {
-			rec[c] = vals[i]
+	for {
+		rec, err := r.Next(ctx)
+		if err != nil {
+			if err == io.EOF {
+				return out, nil
+			}
+			return nil, err
 		}
 		out = append(out, rec)
 	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate rows: %w", err)
-	}
-	return out, nil
 }
 
-func (r *SQLReader) Close() error { return r.db.Close() }
+func (r *SQLReader) Close() error {
+	if r.rows != nil {
+		_ = r.rows.Close()
+	}
+	return r.db.Close()
+}

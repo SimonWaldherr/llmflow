@@ -38,6 +38,28 @@ func TestJSONReader_Array(t *testing.T) {
 	}
 }
 
+func TestJSONReader_ArrayNext(t *testing.T) {
+	p := writeTempJSON(t, "data.json", `[{"name":"Alice"},{"name":"Bob"}]`)
+	cfg := config.InputConfig{Type: "json", Path: p}
+	r, err := NewJSONReader(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+
+	first, err := r.Next(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := r.Next(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first["name"] != "Alice" || second["name"] != "Bob" {
+		t.Fatalf("unexpected streamed records: %#v %#v", first, second)
+	}
+}
+
 func TestJSONReader_Object(t *testing.T) {
 	p := writeTempJSON(t, "data.json", `{"id":"1","val":"x"}`)
 	cfg := config.InputConfig{Type: "json", Path: p}

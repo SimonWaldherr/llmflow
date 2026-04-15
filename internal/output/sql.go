@@ -15,9 +15,11 @@ import (
 )
 
 type SQLWriter struct {
-	db    *sql.DB
-	kind  string
-	table string
+	db       *sql.DB
+	kind     string
+	table    string
+	cols     []string
+	prepared bool
 }
 
 func NewSQLWriter(kind string, cfg config.OutputConfig) (*SQLWriter, error) {
@@ -49,13 +51,35 @@ func NewSQLWriter(kind string, cfg config.OutputConfig) (*SQLWriter, error) {
 	return &SQLWriter{db: db, kind: kind, table: table}, nil
 }
 
-func (w *SQLWriter) WriteAll(ctx context.Context, records []Record) error {
-	if len(records) == 0 {
+func (w *SQLWriter) Prepare(ctx context.Context, columns []string) error {
+	if w.prepared {
 		return nil
 	}
-	cols := unionColumns(records)
-	if err := w.ensureTable(ctx, cols); err != nil {
+	w.cols = append([]string(nil), columns...)
+	if len(w.cols) == 0 {
+		w.prepared = true
+		return nil
+	}
+	if err := w.ensureTable(ctx, w.cols); err != nil {
 		return err
+	}
+	w.prepared = true
+	return nil
+}
+
+func (w *SQLWriter) WriteRecord(ctx context.Context, record Record) error {
+	if !w.prepared {
+		cols := make([]string, 0, len(record))
+		for k := range record {
+			cols = append(cols, k)
+		}
+		sort.Strings(cols)
+		if err := w.Prepare(ctx, cols); err != nil {
+			return err
+		}
+	}
+	if len(w.cols) == 0 {
+		return nil
 	}
 
 	tx, err := w.db.BeginTx(ctx, nil)
@@ -64,16 +88,16 @@ func (w *SQLWriter) WriteAll(ctx context.Context, records []Record) error {
 	}
 	defer tx.Rollback()
 
-	placeholders := make([]string, len(cols))
-	for i := range cols {
+	placeholders := make([]string, len(w.cols))
+	for i := range w.cols {
 		if w.kind == "mssql" {
 			placeholders[i] = fmt.Sprintf("@p%d", i+1)
 		} else {
 			placeholders[i] = "?"
 		}
 	}
-	quotedCols := make([]string, len(cols))
-	for i, c := range cols {
+	quotedCols := make([]string, len(w.cols))
+	for i, c := range w.cols {
 		quotedCols[i] = quoteIdentifier(w.kind, c)
 	}
 	stmtText := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quoteIdentifier(w.kind, w.table), strings.Join(quotedCols, ", "), strings.Join(placeholders, ", "))
@@ -83,17 +107,31 @@ func (w *SQLWriter) WriteAll(ctx context.Context, records []Record) error {
 	}
 	defer stmt.Close()
 
-	for _, rec := range records {
-		args := make([]any, len(cols))
-		for i, c := range cols {
-			args[i] = normalizeSQLValue(rec[c])
-		}
-		if _, err := stmt.ExecContext(ctx, args...); err != nil {
-			return fmt.Errorf("insert row: %w", err)
-		}
+	args := make([]any, len(w.cols))
+	for i, c := range w.cols {
+		args[i] = normalizeSQLValue(record[c])
+	}
+	if _, err := stmt.ExecContext(ctx, args...); err != nil {
+		return fmt.Errorf("insert row: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit tx: %w", err)
+	}
+	return nil
+}
+
+func (w *SQLWriter) WriteAll(ctx context.Context, records []Record) error {
+	if len(records) == 0 {
+		return nil
+	}
+	cols := unionColumns(records)
+	if err := w.Prepare(ctx, cols); err != nil {
+		return err
+	}
+	for _, rec := range records {
+		if err := w.WriteRecord(ctx, rec); err != nil {
+			return err
+		}
 	}
 	return nil
 }

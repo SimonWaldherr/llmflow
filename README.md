@@ -45,6 +45,9 @@ The web UI exposes:
 | `GET`  | `/api/jobs` | List recent jobs |
 | `GET`  | `/api/jobs/{id}` | Get job status and logs |
 | `POST` | `/api/upload` | Upload an input file |
+| `GET`  | `/api/files` | List input and output files |
+| `GET`  | `/openapi.json` | OpenAPI 3 specification |
+| `GET`  | `/docs` | Swagger UI |
 | `GET`  | `/api/detect` | Detect local Ollama / LM Studio |
 
 Notes:

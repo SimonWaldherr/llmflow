@@ -42,6 +42,31 @@ func TestCSVReaderWithHeader(t *testing.T) {
 	}
 }
 
+func TestCSVReaderNextWithHeader(t *testing.T) {
+	p := writeTempCSV(t, "data.csv", "name,age\nAlice,30\nBob,25\n")
+	r, err := NewCSVReader(config.InputConfig{
+		Type: "csv",
+		Path: p,
+		CSV:  config.CSVConfig{Delimiter: ",", HasHeader: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+
+	first, err := r.Next(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := r.Next(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first["name"] != "Alice" || second["age"] != "25" {
+		t.Fatalf("unexpected streamed records: %#v %#v", first, second)
+	}
+}
+
 func TestCSVReaderWithoutHeader(t *testing.T) {
 	p := writeTempCSV(t, "data.csv", "Alice,30\nBob,25\n")
 	r, err := NewCSVReader(config.InputConfig{

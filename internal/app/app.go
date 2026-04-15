@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -77,12 +79,6 @@ func (a *App) Run(ctx context.Context) error {
 		return err
 	}
 
-	records, err := reader.ReadAll(ctx)
-	if err != nil {
-		return err
-	}
-	a.logger.Info("loaded input records", "count", len(records))
-
 	// Build the list of enabled tools (only relevant when tools.enabled = true).
 	activeTools := a.buildTools()
 
@@ -98,16 +94,49 @@ func (a *App) Run(ctx context.Context) error {
 		rateLimiter = ticker.C
 	}
 
-	results, err := a.processRecords(ctx, gen, pb, activeTools, records, workers, rateLimiter)
-	if err != nil {
-		return err
+	var writerPrepared bool
+	emit := func(_ int, record map[string]any) error {
+		if !writerPrepared {
+			columns := buildOutputColumns([]input.Record{record}, a.cfg.Processing.ResponseField, a.cfg.Processing.IncludeInputInOutput)
+			if err := writer.Prepare(ctx, columns); err != nil {
+				return err
+			}
+			writerPrepared = true
+		}
+		return writer.WriteRecord(ctx, record)
 	}
 
-	if err := writer.WriteAll(ctx, results); err != nil {
+	results, err := a.processRecordStream(ctx, gen, pb, activeTools, reader, workers, rateLimiter, emit)
+	if err != nil {
 		return err
 	}
 	a.logger.Info("wrote output records", "count", len(results))
 	return nil
+}
+
+func buildOutputColumns(records []input.Record, responseField string, includeInput bool) []string {
+	if !includeInput {
+		if strings.TrimSpace(responseField) == "" {
+			responseField = "response"
+		}
+		return []string{responseField}
+	}
+	set := map[string]struct{}{}
+	for _, rec := range records {
+		for key := range rec {
+			set[key] = struct{}{}
+		}
+	}
+	if responseField == "" {
+		responseField = "response"
+	}
+	set[responseField] = struct{}{}
+	columns := make([]string, 0, len(set))
+	for key := range set {
+		columns = append(columns, key)
+	}
+	sort.Strings(columns)
+	return columns
 }
 
 // buildTools constructs the slice of active Tool objects from the config.
@@ -168,6 +197,11 @@ type indexedResult struct {
 	rec map[string]any
 }
 
+type recordJob struct {
+	idx int
+	rec input.Record
+}
+
 func (a *App) processRecords(
 	ctx context.Context,
 	gen Generator,
@@ -177,10 +211,23 @@ func (a *App) processRecords(
 	workers int,
 	rateLimiter <-chan time.Time,
 ) ([]map[string]any, error) {
+	return a.processRecordsWithSink(ctx, gen, pb, activeTools, records, workers, rateLimiter, nil)
+}
+
+func (a *App) processRecordsWithSink(
+	ctx context.Context,
+	gen Generator,
+	pb *prompt.Builder,
+	activeTools []tools.Tool,
+	records []input.Record,
+	workers int,
+	rateLimiter <-chan time.Time,
+	emit func(index int, record map[string]any) error,
+) ([]map[string]any, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	var processed int64 // atomic counter for progress reporting
+	var processed int64
 
 	type job struct {
 		idx int
@@ -194,7 +241,6 @@ func (a *App) processRecords(
 	close(jobs)
 
 	resultCh := make(chan indexedResult, len(records))
-	errCh := make(chan error, 1)
 
 	var mu sync.Mutex
 	var firstErr error
@@ -260,12 +306,9 @@ func (a *App) processRecords(
 						outRec[k] = v
 					}
 				}
-				// Attempt to expand the LLM response as a JSON object into
-				// multiple output columns when parse_json_response is enabled.
 				if a.cfg.Processing.ParseJSONResponse {
 					var parsed map[string]any
 					trimmed := strings.TrimSpace(responseText)
-					// Strip markdown code fences if present (e.g. ```json ... ```).
 					if idx := strings.Index(trimmed, "{"); idx >= 0 {
 						trimmed = trimmed[idx:]
 					}
@@ -275,13 +318,11 @@ func (a *App) processRecords(
 					if err := json.Unmarshal([]byte(trimmed), &parsed); err == nil {
 						for k, v := range parsed {
 							if _, exists := outRec[k]; exists {
-								a.logger.Warn("parse_json_response: JSON key conflicts with existing field, overwriting",
-									"key", k, "index", j.idx)
+								a.logger.Warn("parse_json_response: JSON key conflicts with existing field, overwriting", "key", k, "index", j.idx)
 							}
 							outRec[k] = v
 						}
 					} else {
-						// Fallback: store as plain text under the response field.
 						outRec[a.cfg.Processing.ResponseField] = responseText
 					}
 				} else {
@@ -309,12 +350,35 @@ func (a *App) processRecords(
 	go func() {
 		wg.Wait()
 		close(resultCh)
-		close(errCh)
 	}()
 
 	ordered := make([]map[string]any, len(records))
+	nextEmit := 0
+	deliverErr := error(nil)
+	emitReady := func() error {
+		if emit == nil {
+			return nil
+		}
+		for nextEmit < len(ordered) && ordered[nextEmit] != nil {
+			if err := emit(nextEmit, ordered[nextEmit]); err != nil {
+				return err
+			}
+			nextEmit++
+		}
+		return nil
+	}
+
 	for ir := range resultCh {
 		ordered[ir.idx] = ir.rec
+		if deliverErr == nil {
+			if err := emitReady(); err != nil {
+				deliverErr = err
+				cancel()
+			}
+		}
+	}
+	if deliverErr != nil {
+		return nil, deliverErr
 	}
 
 	mu.Lock()
@@ -330,6 +394,236 @@ func (a *App) processRecords(
 			results = append(results, r)
 		}
 	}
+	return results, nil
+}
+
+func (a *App) processRecordStream(
+	ctx context.Context,
+	gen Generator,
+	pb *prompt.Builder,
+	activeTools []tools.Tool,
+	reader input.Reader,
+	workers int,
+	rateLimiter <-chan time.Time,
+	emit func(index int, record map[string]any) error,
+) ([]map[string]any, error) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	jobs := make(chan recordJob, workers*2)
+	producerErr := make(chan error, 1)
+	producerDone := make(chan struct{})
+	go func() {
+		defer close(producerDone)
+		defer close(jobs)
+		idx := 0
+		for {
+			rec, err := reader.Next(ctx)
+			if err != nil {
+				if err != io.EOF {
+					producerErr <- err
+				}
+				return
+			}
+			select {
+			case jobs <- recordJob{idx: idx, rec: rec}:
+				idx++
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
+	results, err := a.processJobs(ctx, gen, pb, activeTools, jobs, 0, workers, rateLimiter, false, emit)
+	<-producerDone
+	select {
+	case readErr := <-producerErr:
+		if readErr != nil {
+			return nil, readErr
+		}
+	default:
+	}
+	if err != nil {
+		return nil, err
+	}
+	return results, nil
+}
+
+func (a *App) processJobs(
+	ctx context.Context,
+	gen Generator,
+	pb *prompt.Builder,
+	activeTools []tools.Tool,
+	jobs <-chan recordJob,
+	total int,
+	workers int,
+	rateLimiter <-chan time.Time,
+	collect bool,
+	emit func(index int, record map[string]any) error,
+) ([]map[string]any, error) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	var processed int64
+	resultCh := make(chan indexedResult, workers*2)
+
+	var mu sync.Mutex
+	var firstErr error
+
+	var wg sync.WaitGroup
+	for w := 0; w < workers; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := range jobs {
+				select {
+				case <-ctx.Done():
+					return
+				default:
+				}
+
+				if rateLimiter != nil {
+					select {
+					case <-ctx.Done():
+						return
+					case <-rateLimiter:
+					}
+				}
+
+				userPrompt, err := pb.Build(j.rec)
+				if err != nil {
+					if !a.cfg.Processing.ContinueOnError {
+						mu.Lock()
+						if firstErr == nil {
+							firstErr = fmt.Errorf("build prompt for record %d: %w", j.idx, err)
+							cancel()
+						}
+						mu.Unlock()
+						return
+					}
+					a.logger.Error("build prompt failed", "index", j.idx, "error", err)
+					continue
+				}
+
+				var responseText string
+				if len(activeTools) > 0 {
+					responseText, err = a.runAgentic(ctx, gen, pb.SystemPrompt(), userPrompt, activeTools, j.idx)
+				} else {
+					responseText, err = a.generateWithRetry(ctx, gen, pb.SystemPrompt(), userPrompt)
+				}
+				if err != nil {
+					if !a.cfg.Processing.ContinueOnError {
+						mu.Lock()
+						if firstErr == nil {
+							firstErr = fmt.Errorf("llm call for record %d: %w", j.idx, err)
+							cancel()
+						}
+						mu.Unlock()
+						return
+					}
+					a.logger.Error("llm call failed", "index", j.idx, "error", err)
+					continue
+				}
+
+				outRec := map[string]any{}
+				if a.cfg.Processing.IncludeInputInOutput {
+					for k, v := range j.rec {
+						outRec[k] = v
+					}
+				}
+				if a.cfg.Processing.ParseJSONResponse {
+					var parsed map[string]any
+					trimmed := strings.TrimSpace(responseText)
+					if idx := strings.Index(trimmed, "{"); idx >= 0 {
+						trimmed = trimmed[idx:]
+					}
+					if idx := strings.LastIndex(trimmed, "}"); idx >= 0 && idx < len(trimmed)-1 {
+						trimmed = trimmed[:idx+1]
+					}
+					if err := json.Unmarshal([]byte(trimmed), &parsed); err == nil {
+						for k, v := range parsed {
+							if _, exists := outRec[k]; exists {
+								a.logger.Warn("parse_json_response: JSON key conflicts with existing field, overwriting", "key", k, "index", j.idx)
+							}
+							outRec[k] = v
+						}
+					} else {
+						outRec[a.cfg.Processing.ResponseField] = responseText
+					}
+				} else {
+					outRec[a.cfg.Processing.ResponseField] = responseText
+				}
+				resultCh <- indexedResult{idx: j.idx, rec: outRec}
+				cur := int(atomic.AddInt64(&processed, 1))
+				if a.progressFunc != nil {
+					a.progressFunc(cur, total)
+				}
+				if a.resultFunc != nil {
+					preview := make(map[string]any, len(outRec))
+					for k, v := range outRec {
+						preview[k] = v
+					}
+					a.resultFunc(j.idx, total, preview)
+				}
+				if total > 0 {
+					if cur == 1 || cur == total || cur%10 == 0 {
+						a.logger.Info("processing progress", "current", cur, "total", total)
+					}
+				} else if cur == 1 || cur%10 == 0 {
+					a.logger.Info("processing progress", "current", cur)
+				}
+			}
+		}()
+	}
+
+	go func() {
+		wg.Wait()
+		close(resultCh)
+	}()
+
+	ordered := map[int]map[string]any{}
+	nextEmit := 0
+	deliverErr := error(nil)
+	results := make([]map[string]any, 0)
+	emitReady := func() error {
+		for {
+			rec, ok := ordered[nextEmit]
+			if !ok {
+				return nil
+			}
+			if emit != nil {
+				if err := emit(nextEmit, rec); err != nil {
+					return err
+				}
+			}
+			if collect {
+				results = append(results, rec)
+			}
+			delete(ordered, nextEmit)
+			nextEmit++
+		}
+	}
+
+	for ir := range resultCh {
+		ordered[ir.idx] = ir.rec
+		if deliverErr == nil {
+			if err := emitReady(); err != nil {
+				deliverErr = err
+				cancel()
+			}
+		}
+	}
+	if deliverErr != nil {
+		return nil, deliverErr
+	}
+
+	mu.Lock()
+	err := firstErr
+	mu.Unlock()
+	if err != nil {
+		return nil, err
+	}
+
 	return results, nil
 }
 

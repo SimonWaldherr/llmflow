@@ -4,14 +4,17 @@ import (
 	"context"
 	"encoding/xml"
 	"fmt"
+	"io"
 	"os"
 
 	"github.com/SimonWaldherr/llmflow/internal/config"
 )
 
 type XMLReader struct {
-	f   *os.File
-	cfg config.InputConfig
+	f       *os.File
+	cfg     config.InputConfig
+	dec     *xml.Decoder
+	ended   bool
 }
 
 func NewXMLReader(cfg config.InputConfig) (*XMLReader, error) {
@@ -22,15 +25,27 @@ func NewXMLReader(cfg config.InputConfig) (*XMLReader, error) {
 	return &XMLReader{f: f, cfg: cfg}, nil
 }
 
-func (r *XMLReader) ReadAll(ctx context.Context) ([]Record, error) {
-	_ = ctx
-	dec := xml.NewDecoder(r.f)
-	var out []Record
+func (r *XMLReader) Next(ctx context.Context) (Record, error) {
+	if r.ended {
+		return nil, io.EOF
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if r.dec == nil {
+		r.dec = xml.NewDecoder(r.f)
+	}
 	for {
-		tok, err := dec.Token()
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+		}
+		tok, err := r.dec.Token()
 		if err != nil {
-			if err.Error() == "EOF" {
-				break
+			if err == io.EOF {
+				r.ended = true
+				return nil, io.EOF
 			}
 			return nil, fmt.Errorf("read xml token: %w", err)
 		}
@@ -42,12 +57,25 @@ func (r *XMLReader) ReadAll(ctx context.Context) ([]Record, error) {
 			continue
 		}
 		var node genericXMLNode
-		if err := dec.DecodeElement(&node, &se); err != nil {
+		if err := r.dec.DecodeElement(&node, &se); err != nil {
 			return nil, fmt.Errorf("decode xml element: %w", err)
 		}
-		out = append(out, node.ToMap())
+		return node.ToMap(), nil
 	}
-	return out, nil
+}
+
+func (r *XMLReader) ReadAll(ctx context.Context) ([]Record, error) {
+	var out []Record
+	for {
+		rec, err := r.Next(ctx)
+		if err != nil {
+			if err == io.EOF {
+				return out, nil
+			}
+			return nil, err
+		}
+		out = append(out, rec)
+	}
 }
 
 func (r *XMLReader) Close() error { return r.f.Close() }

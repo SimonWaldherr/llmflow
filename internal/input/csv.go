@@ -12,8 +12,12 @@ import (
 )
 
 type CSVReader struct {
-	f   *os.File
-	cfg config.InputConfig
+	f       *os.File
+	cfg     config.InputConfig
+	cr      *csv.Reader
+	headers []string
+	started bool
+	ended   bool
 }
 
 func NewCSVReader(cfg config.InputConfig) (*CSVReader, error) {
@@ -24,50 +28,90 @@ func NewCSVReader(cfg config.InputConfig) (*CSVReader, error) {
 	return &CSVReader{f: f, cfg: cfg}, nil
 }
 
-func (r *CSVReader) ReadAll(ctx context.Context) ([]Record, error) {
-	cr := csv.NewReader(r.f)
+func (r *CSVReader) init() {
+	if r.cr != nil {
+		return
+	}
+	r.cr = csv.NewReader(r.f)
 	delim, _ := utf8.DecodeRuneInString(r.cfg.CSV.Delimiter)
 	if delim != utf8.RuneError {
-		cr.Comma = delim
+		r.cr.Comma = delim
 	}
+}
 
-	rows, err := cr.ReadAll()
-	if err != nil && err != io.EOF {
-		return nil, fmt.Errorf("read csv: %w", err)
+func (r *CSVReader) Next(ctx context.Context) (Record, error) {
+	if r.ended {
+		return nil, io.EOF
 	}
-	if len(rows) == 0 {
-		return nil, nil
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
+	r.init()
 
-	var headers []string
-	start := 0
-	if r.cfg.CSV.HasHeader {
-		headers = rows[0]
-		start = 1
-	} else {
-		for i := range rows[0] {
-			headers = append(headers, fmt.Sprintf("col_%d", i+1))
-		}
-	}
-
-	result := make([]Record, 0, len(rows)-start)
-	for i := start; i < len(rows); i++ {
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		default:
-		}
-		rec := make(Record, len(headers))
-		for j, h := range headers {
-			if j < len(rows[i]) {
-				rec[h] = rows[i][j]
-			} else {
-				rec[h] = ""
+	if !r.started {
+		r.started = true
+		if r.cfg.CSV.HasHeader {
+			headers, err := r.cr.Read()
+			if err != nil {
+				if err == io.EOF {
+					r.ended = true
+					return nil, io.EOF
+				}
+				return nil, fmt.Errorf("read csv header: %w", err)
 			}
+			r.headers = append([]string(nil), headers...)
+		} else {
+			row, err := r.cr.Read()
+			if err != nil {
+				if err == io.EOF {
+					r.ended = true
+					return nil, io.EOF
+				}
+				return nil, fmt.Errorf("read csv row: %w", err)
+			}
+			r.headers = make([]string, len(row))
+			for i := range row {
+				r.headers[i] = fmt.Sprintf("col_%d", i+1)
+			}
+			rec := make(Record, len(r.headers))
+			for i, h := range r.headers {
+				rec[h] = row[i]
+			}
+			return rec, nil
 		}
-		result = append(result, rec)
 	}
-	return result, nil
+
+	row, err := r.cr.Read()
+	if err != nil {
+		if err == io.EOF {
+			r.ended = true
+			return nil, io.EOF
+		}
+		return nil, fmt.Errorf("read csv row: %w", err)
+	}
+	rec := make(Record, len(r.headers))
+	for i, h := range r.headers {
+		if i < len(row) {
+			rec[h] = row[i]
+		} else {
+			rec[h] = ""
+		}
+	}
+	return rec, nil
+}
+
+func (r *CSVReader) ReadAll(ctx context.Context) ([]Record, error) {
+	var out []Record
+	for {
+		rec, err := r.Next(ctx)
+		if err != nil {
+			if err == io.EOF {
+				return out, nil
+			}
+			return nil, err
+		}
+		out = append(out, rec)
+	}
 }
 
 func (r *CSVReader) Close() error { return r.f.Close() }
