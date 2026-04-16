@@ -150,32 +150,12 @@ func PreviewRecords(r input.Reader, n int) ([]input.Record, error) {
 }
 
 func buildOutputColumns(records []input.Record, responseField string, includeInput bool, keyColumn string) []string {
-	if !includeInput {
-		if strings.TrimSpace(responseField) == "" {
-			responseField = "response"
-		}
-		return []string{responseField}
-	}
-	if keyColumn != "" {
-		// Key-column-only mode: include only the key column + response field.
-		if responseField == "" {
-			responseField = "response"
-		}
-		if keyColumn == responseField {
-			return []string{keyColumn}
-		}
-		return []string{keyColumn, responseField}
-	}
 	set := map[string]struct{}{}
 	for _, rec := range records {
 		for key := range rec {
 			set[key] = struct{}{}
 		}
 	}
-	if responseField == "" {
-		responseField = "response"
-	}
-	set[responseField] = struct{}{}
 	columns := make([]string, 0, len(set))
 	for key := range set {
 		columns = append(columns, key)

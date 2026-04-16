@@ -2568,6 +2568,14 @@ async function suggestConfig() {
     if (s.input_template)   document.getElementById('q-template').value       = s.input_template;
     if (s.post_prompt)      document.getElementById('q-post').value           = s.post_prompt;
     if (s.response_field)   document.getElementById('q-response-field').value = s.response_field;
+    if (s.response_fields)  document.getElementById('q-response-fields').value = s.response_fields;
+    if (s.output_fields)    document.getElementById('q-output-fields').value   = s.output_fields;
+    if (s.parse_json_response !== undefined) document.getElementById('q-parse-json').value = s.parse_json_response ? 'true' : 'false';
+    if (s.include_input_in_output) {
+      document.getElementById('q-include-input').value = s.include_input_in_output;
+      onIncludeInputChange();
+    }
+    if (s.key_column && document.getElementById('q-key-column')) document.getElementById('q-key-column').value = s.key_column;
     if (s.job_name)         document.getElementById('q-name').value           = s.job_name;
     statusEl.textContent = s.notes ? `✓ ${s.notes}` : '✓ Fields configured — review and adjust as needed.';
     statusEl.className = 'suggest-status ok';

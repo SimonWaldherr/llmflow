@@ -219,7 +219,7 @@ func (s *Server) Run(ctx context.Context) error {
 	srv := &http.Server{
 		Addr:           s.addr,
 		Handler:        s.authMiddleware(mux),
-		ReadTimeout:    0,             // no hard cutoff for large file uploads
+		ReadTimeout:    0, // no hard cutoff for large file uploads
 		WriteTimeout:   5 * time.Minute,
 		IdleTimeout:    2 * time.Minute,
 		MaxHeaderBytes: 1 << 20, // 1 MiB
@@ -1069,13 +1069,18 @@ type suggestRequest struct {
 }
 
 type suggestResponse struct {
-	SystemPrompt  string `json:"system_prompt"`
-	PrePrompt     string `json:"pre_prompt"`
-	InputTemplate string `json:"input_template"`
-	PostPrompt    string `json:"post_prompt"`
-	JobName       string `json:"job_name"`
-	ResponseField string `json:"response_field"`
-	Notes         string `json:"notes,omitempty"`
+	SystemPrompt         string `json:"system_prompt"`
+	PrePrompt            string `json:"pre_prompt"`
+	InputTemplate        string `json:"input_template"`
+	PostPrompt           string `json:"post_prompt"`
+	JobName              string `json:"job_name"`
+	ResponseField        string `json:"response_field"`
+	ResponseFields       string `json:"response_fields,omitempty"`
+	OutputFields         string `json:"output_fields,omitempty"`
+	IncludeInputInOutput string `json:"include_input_in_output,omitempty"`
+	KeyColumn            string `json:"key_column,omitempty"`
+	ParseJSONResponse    bool   `json:"parse_json_response,omitempty"`
+	Notes                string `json:"notes,omitempty"`
 }
 
 const suggestSystemPrompt = `You are an expert llmflow configuration assistant.
@@ -1102,6 +1107,13 @@ short job_name. Rules:
   useful when structured output is needed.
 - response_field: a short snake_case key name describing the output (e.g. "sentiment",
   "summary", "classification").
+- response_fields: when the task produces structured values, return a comma-separated list
+	of JSON field names instead of a single response field.
+- output_fields: if the output should be a clean record, return the final comma-separated
+	column list that should be written to CSV/JSONL.
+- include_input_in_output: choose "all", "key", or "none".
+- key_column: when include_input_in_output is "key", specify the identifier column.
+- parse_json_response: use true when the response is structured JSON.
 - job_name: ≤ 6 words describing what this job does.
 - notes: one short sentence explaining why the chosen fields fit the task.
 
@@ -1119,6 +1131,11 @@ Respond with ONLY a JSON object — no markdown, no explanation — following th
   "input_template": "...",
   "post_prompt": "...",
   "response_field": "...",
+	"response_fields": "...",
+	"output_fields": "...",
+	"include_input_in_output": "key",
+	"key_column": "...",
+	"parse_json_response": true,
 	"job_name": "...",
 	"notes": "..."
 }`
@@ -1221,10 +1238,16 @@ func (s *Server) handleSuggest(w http.ResponseWriter, r *http.Request) {
 func buildSuggestFallback(task, currentConfig string) suggestResponse {
 	jobName := buildSuggestJobName(task)
 	responseField := "response"
+	responseFields := ""
+	outputFields := ""
+	parseJSONResponse := false
 	if strings.Contains(strings.ToLower(task), "summary") {
 		responseField = "summary"
 	} else if strings.Contains(strings.ToLower(task), "classif") {
 		responseField = "classification"
+		responseFields = "classification, reason"
+		outputFields = "classification, reason"
+		parseJSONResponse = true
 	}
 	prePrompt := strings.TrimSpace(task)
 	if prePrompt != "" {
@@ -1235,13 +1258,16 @@ func buildSuggestFallback(task, currentConfig string) suggestResponse {
 		inputTemplate = strings.TrimSpace(inputTemplate)
 	}
 	return suggestResponse{
-		SystemPrompt:  "You are a helpful data-processing assistant.",
-		PrePrompt:     prePrompt,
-		InputTemplate: inputTemplate,
-		PostPrompt:    "Return a concise result that matches the task.",
-		JobName:       jobName,
-		ResponseField: responseField,
-		Notes:         "Fallback configuration generated because the LLM request failed.",
+		SystemPrompt:      "You are a helpful data-processing assistant.",
+		PrePrompt:         prePrompt,
+		InputTemplate:     inputTemplate,
+		PostPrompt:        "Return a concise result that matches the task.",
+		JobName:           jobName,
+		ResponseField:     responseField,
+		ResponseFields:    responseFields,
+		OutputFields:      outputFields,
+		ParseJSONResponse: parseJSONResponse,
+		Notes:             "Fallback configuration generated because the LLM request failed.",
 	}
 }
 
