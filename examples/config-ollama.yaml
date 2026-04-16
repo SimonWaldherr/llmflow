@@ -7,9 +7,9 @@ api:
 
 prompt:
   system: |
-    Du bist ein lokaler Assistent, der Datensätze knapp zusammenfasst.
+    You are a local assistant that summarizes records concisely.
   input_template: |
-    Fasse den folgenden Datensatz in 2-3 Sätzen zusammen:
+    Summarize the following record in 2-3 sentences:
 
     {{ toPrettyJSON .record }}
 

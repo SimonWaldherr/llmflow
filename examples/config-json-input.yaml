@@ -7,13 +7,13 @@ api:
 
 prompt:
   system: |
-    Du normalisierst strukturierte Datensätze.
+    You normalize structured records.
   input_template: |
-    JSON-Eintrag:
+    JSON entry:
     {{ toPrettyJSON .record }}
 
   post_prompt: |
-    Gib ein knappes JSON-Objekt zurück.
+    Return a compact JSON object.
 
 input:
   type: json

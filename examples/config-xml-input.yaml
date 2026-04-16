@@ -7,13 +7,13 @@ api:
 
 prompt:
   system: |
-    Du transformierst XML-Datensätze in sauberes JSON.
+    You transform XML records into clean JSON.
   input_template: |
-    XML-Datensatz als Map:
+    XML record as a map:
     {{ toPrettyJSON .record }}
 
   post_prompt: |
-    Antworte nur mit JSON.
+    Respond with JSON only.
 
 input:
   type: xml

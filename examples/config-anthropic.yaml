@@ -8,14 +8,14 @@ api:
 
 prompt:
   system: |
-    Du bist ein präziser Assistent für Datenklassifikation.
+    You are a precise assistant for data classification.
   input_template: |
-    Klassifiziere den Datensatz und erkläre die Entscheidung knapp.
+    Classify the record and explain the decision briefly.
 
     {{ toPrettyJSON .record }}
 
   post_prompt: |
-    Antworte nur mit kompaktem JSON.
+    Respond with compact JSON only.
 
 input:
   type: csv

@@ -7,14 +7,14 @@ api:
 
 prompt:
   system: |
-    Du extrahierst strukturierte Informationen aus kurzen Texten.
+    You extract structured information from short texts.
   input_template: |
-    Extrahiere Schlüsselattribute aus diesem Datensatz:
+    Extract the key attributes from this record:
 
     {{ toPrettyJSON .record }}
 
   post_prompt: |
-    Gib ein JSON-Objekt mit den wichtigsten Feldern zurück.
+    Return a JSON object with the most important fields.
 
 input:
   type: csv

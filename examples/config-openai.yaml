@@ -9,15 +9,15 @@ api:
 
 prompt:
   system: |
-    Du bist ein präziser Daten-Transformationsassistent.
+    You are a precise data-transformation assistant.
   pre_prompt: |
-    Analysiere den folgenden Datensatz.
+    Analyze the following record.
   input_template: |
-    Quelle: {{ .source }}
-    Datensatz:
+    Source: {{ .source }}
+    Record:
     {{ toPrettyJSON .record }}
   post_prompt: |
-    Gib ausschließlich ein kompaktes JSON-Objekt zurück.
+    Return only a compact JSON object.
 
 input:
   type: csv

@@ -8,14 +8,14 @@ api:
 
 prompt:
   system: |
-    Du arbeitest deterministisch und gibst nur strukturierte Ergebnisse zurück.
+    You work deterministically and return only structured results.
   input_template: |
-    Transformiere diesen Datensatz:
+    Transform this record:
 
     {{ toPrettyJSON .record }}
 
   post_prompt: |
-    Antworte nur mit JSON.
+    Respond with JSON only.
 
 input:
   type: csv

@@ -8,14 +8,14 @@ api:
 
 prompt:
   system: |
-    Du strukturierst Kundendaten in präzise JSON-Antworten.
+    You structure customer data into precise JSON responses.
   input_template: |
-    Bitte analysiere diesen Datensatz und normalisiere ihn.
+    Analyze this record and normalize it.
 
     {{ toPrettyJSON .record }}
 
   post_prompt: |
-    Antworte nur mit JSON.
+    Respond with JSON only.
 
 input:
   type: csv

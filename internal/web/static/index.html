@@ -379,6 +379,7 @@ textarea { font-family: var(--font-mono); resize: vertical; }
   <button class="tab" data-panel="editor">YAML Editor</button>
   <button class="tab" data-panel="jobs">Jobs</button>
   <button class="tab" data-panel="files">Files</button>
+  <button class="tab" data-panel="guide">Guide</button>
 </div>
 
 <!-- Detection banner -->
@@ -430,7 +431,7 @@ textarea { font-family: var(--font-mono); resize: vertical; }
     <div class="section-card-header">
       <span class="section-card-num">1</span>
       <span class="section-card-title">Input File</span>
-      <span class="section-card-desc">Wähle zuerst die Eingabedatei — das Format wird automatisch erkannt.</span>
+      <span class="section-card-desc">Choose the input file first. The format will be detected automatically.</span>
     </div>
     <div class="form-group" style="margin-bottom:8px">
       <label>Input File</label>
@@ -489,8 +490,8 @@ textarea { font-family: var(--font-mono); resize: vertical; }
   <div class="section-card">
     <div class="section-card-header">
       <span class="section-card-num">2</span>
-      <span class="section-card-title">Aufgabe beschreiben</span>
-      <span class="section-card-desc">Erkläre der KI was sie tun soll — die Datenstruktur aus Schritt 1 ist bereits bekannt.</span>
+      <span class="section-card-title">Describe the task</span>
+      <span class="section-card-desc">Tell the model what it should do. It already knows the data structure from step 1.</span>
     </div>
     <!-- AI-assist bar -->
     <div class="ai-assist-bar" style="margin-bottom:0">
@@ -508,7 +509,7 @@ textarea { font-family: var(--font-mono); resize: vertical; }
     <div class="section-card-header">
       <span class="section-card-num">3</span>
       <span class="section-card-title">Provider &amp; Prompts</span>
-      <span class="section-card-desc">Wähle das Sprachmodell und stelle die Prompts ein.</span>
+      <span class="section-card-desc">Choose the provider, model, and prompt fragments.</span>
     </div>
     <div class="quick-grid">
 
@@ -578,8 +579,8 @@ textarea { font-family: var(--font-mono); resize: vertical; }
   <div class="section-card">
     <div class="section-card-header">
       <span class="section-card-num">4</span>
-      <span class="section-card-title">Ausgabe konfigurieren</span>
-      <span class="section-card-desc">Lege fest welche Felder gespeichert werden sollen.</span>
+      <span class="section-card-title">Configure output</span>
+      <span class="section-card-desc">Choose which fields should be stored in the result.</span>
     </div>
     <div class="quick-grid">
 
@@ -1012,6 +1013,158 @@ processing:
   </div>
 </div>
 
+<!-- ═══════════════════════ Guide ═══════════════════════ -->
+<div id="panel-guide" class="panel">
+  <div class="section-card">
+    <div class="section-card-header">
+      <span class="section-card-num">1</span>
+      <span class="section-card-title">How to use llmflow</span>
+      <span class="section-card-desc">A short operational guide for common tasks and UI controls.</span>
+    </div>
+    <div class="quick-guide" style="margin-bottom:0">
+      <div class="quick-step">
+        <div class="qs-label">Step 1</div>
+        <div class="qs-title">Upload or choose input</div>
+        <div class="qs-desc">Start with a file in <strong>Quick Start</strong> or <strong>Files</strong>. Use the preview to inspect records and exclude columns you do not need.</div>
+      </div>
+      <div class="quick-step">
+        <div class="qs-label">Step 2</div>
+        <div class="qs-title">Describe the task</div>
+        <div class="qs-desc">Write the task in plain English. The AI setup field should describe one job, not several unrelated tasks.</div>
+      </div>
+      <div class="quick-step">
+        <div class="qs-label">Step 3</div>
+        <div class="qs-title">Choose output shape</div>
+        <div class="qs-desc">Use <em>Include Input in Output</em>, <em>Key Column</em>, <em>Response Fields</em>, and <em>Output Fields</em> to control what gets written.</div>
+      </div>
+      <div class="quick-step">
+        <div class="qs-label">Step 4</div>
+        <div class="qs-title">Run safely</div>
+        <div class="qs-desc">Validate first, then try a Dry Run, and only then start a real job. Check the Jobs tab for progress and errors.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="section-card">
+    <div class="section-card-header">
+      <span class="section-card-num">2</span>
+      <span class="section-card-title">What each field does</span>
+      <span class="section-card-desc">The most important controls in the UI, with plain explanations.</span>
+    </div>
+    <div class="adv-grid">
+      <div class="form-group">
+        <label>Input File</label>
+        <div class="hint">Upload the source data. The file is copied into <code>data/input</code>.</div>
+      </div>
+      <div class="form-group">
+        <label>Input Type</label>
+        <div class="hint">Usually auto-detected. Change only when the automatic detection is wrong.</div>
+      </div>
+      <div class="form-group">
+        <label>Data Preview</label>
+        <div class="hint">Shows the first rows so you can confirm the structure before running anything.</div>
+      </div>
+      <div class="form-group">
+        <label>Response Field Name</label>
+        <div class="hint">The column that stores the model answer when you only want one output field.</div>
+      </div>
+      <div class="form-group">
+        <label>Include Input in Output</label>
+        <div class="hint">Choose whether the output contains all input columns, only a key column, or no input fields at all.</div>
+      </div>
+      <div class="form-group">
+        <label>Response Fields</label>
+        <div class="hint">A comma-separated list for structured JSON output fields, for example <code>weight, volume, short_expiry</code>.</div>
+      </div>
+      <div class="form-group">
+        <label>Output Fields</label>
+        <div class="hint">Explicitly choose the final columns to keep. This overrides automatic field selection.
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Data Enrichment</label>
+        <div class="hint">Optional pre-processing step that looks up an input column value and appends plain text enrichment before the LLM call.</div>
+      </div>
+      <div class="form-group">
+        <label>Agentic Tools</label>
+        <div class="hint">Lets the LLM call web, code, or SQL tools during processing. Keep it off unless the job really needs it.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="section-card">
+    <div class="section-card-header">
+      <span class="section-card-num">3</span>
+      <span class="section-card-title">What each button does</span>
+      <span class="section-card-desc">A quick reference for the actions in the web UI.</span>
+    </div>
+    <div class="adv-grid">
+      <div class="form-group">
+        <label>Suggest setup</label>
+        <div class="hint">Asks the assistant to generate a first-pass configuration from your task description.</div>
+      </div>
+      <div class="form-group">
+        <label>Generate YAML</label>
+        <div class="hint">Copies the current Quick Start form into the YAML editor.</div>
+      </div>
+      <div class="form-group">
+        <label>Validate</label>
+        <div class="hint">Checks whether the current form or YAML config is valid before you run it.</div>
+      </div>
+      <div class="form-group">
+        <label>Run</label>
+        <div class="hint">Starts a real job and calls the configured model or data source.</div>
+      </div>
+      <div class="form-group">
+        <label>Dry Run</label>
+        <div class="hint">Simulates the job without calling the provider. Use this to verify structure and output fields.</div>
+      </div>
+      <div class="form-group">
+        <label>Refresh</label>
+        <div class="hint">Reloads jobs, files, previews, or watcher states from the backend.</div>
+      </div>
+      <div class="form-group">
+        <label>Preview</label>
+        <div class="hint">Opens the first output rows before you download a file.</div>
+      </div>
+      <div class="form-group">
+        <label>Create Standing Order</label>
+        <div class="hint">Adds a watcher that automatically starts jobs for matching files.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="section-card">
+    <div class="section-card-header">
+      <span class="section-card-num">4</span>
+      <span class="section-card-title">Common mistakes to avoid</span>
+      <span class="section-card-desc">These are the most common reasons a job behaves unexpectedly.</span>
+    </div>
+    <div class="quick-guide" style="margin-bottom:0">
+      <div class="quick-step">
+        <div class="qs-label">1</div>
+        <div class="qs-title">The model returns free text</div>
+        <div class="qs-desc">Make the post prompt explicit. Say that only JSON is allowed if you need structured output.</div>
+      </div>
+      <div class="quick-step">
+        <div class="qs-label">2</div>
+        <div class="qs-title">Too many columns are included</div>
+        <div class="qs-desc">Use the preview to deselect columns that the model does not need. Fewer columns usually means better prompts.</div>
+      </div>
+      <div class="quick-step">
+        <div class="qs-label">3</div>
+        <div class="qs-title">Output is too large</div>
+        <div class="qs-desc">Switch <em>Include Input in Output</em> to <code>key</code> or <code>none</code>.</div>
+      </div>
+      <div class="quick-step">
+        <div class="qs-label">4</div>
+        <div class="qs-title">A watcher does nothing</div>
+        <div class="qs-desc">Check the directory, the pattern, and whether the watcher is active. Files must land in the watched directory, not in a subfolder.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
 </div><!-- .container -->
 
 <script>
@@ -1146,10 +1299,16 @@ async function loadPreview() {
     const keyColSel = document.getElementById('q-key-column');
     if (keyColSel) {
       keyColSel.innerHTML = columns.map(c => `<option value="${escHtml(c)}">${escHtml(c)}</option>`).join('');
+      if (columns.length > 0 && !keyColSel.value) {
+        keyColSel.value = columns[0];
+      }
     }
     const eColSel = document.getElementById('e-column');
     if (eColSel) {
       eColSel.innerHTML = '<option value="">— select a column —</option>' + columns.map(c => `<option value="${escHtml(c)}">${escHtml(c)}</option>`).join('');
+      if (columns.length > 0 && document.getElementById('e-enabled') && document.getElementById('e-enabled').checked && !eColSel.value) {
+        eColSel.value = columns[0];
+      }
     }
   } catch(e) {
     document.getElementById('preview-section').style.display = 'none';
@@ -1663,7 +1822,15 @@ function exportYAML() {
 function onIncludeInputChange() {
   const val = document.getElementById('q-include-input').value;
   const grp = document.getElementById('key-column-group');
-  if (grp) grp.style.display = val === 'key' ? '' : 'none';
+  if (grp) {
+    grp.style.display = val === 'key' ? '' : 'none';
+    if (val === 'key') {
+      const keySel = document.getElementById('q-key-column');
+      if (keySel && !keySel.value && keySel.options.length > 0) {
+        keySel.value = keySel.options[0].value;
+      }
+    }
+  }
 }
 
 // ── File Preview ──────────────────────────────────────────────────
@@ -2264,8 +2431,8 @@ async function loadModels() {
 
   btn.disabled = true;
   const originalLabel = btn.textContent;
-  btn.textContent = 'Lade...';
-  hint.textContent = 'Lade Modelle...';
+  btn.textContent = 'Loading...';
+  hint.textContent = 'Loading models...';
   try {
     const r = await fetch('/api/models', {
       method: 'POST',
