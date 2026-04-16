@@ -32,6 +32,11 @@ structured data.
 - Prompt building blocks: `system`, `pre_prompt`, `post_prompt`, optional Go templates
 - Input formats: `csv`, `json`, `jsonl`, `xml`, `sqlite`, `mssql`
 - Output formats: `csv`, `jsonl`, `sqlite`, `mssql`
+- Input preview with column exclusion before a run starts
+- Auto-detection of input format for uploaded files in the web UI
+- Optional non-agentic web enrichment step per record
+- Optional key-column-only output mode for traceable slim outputs
+- Standing orders / file watchers for folder-based automation
 - Secrets resolved from environment variables
 - Structured JSON logs via `log/slog`
 - Configurable concurrency, rate limiting, and retry count
@@ -67,6 +72,12 @@ The web UI exposes:
 | `GET`  | `/api/jobs/{id}` | Get job status and logs |
 | `POST` | `/api/upload` | Upload an input file |
 | `GET`  | `/api/files` | List input and output files |
+| `GET`  | `/api/files/preview/{dir}/{name}` | Preview the first rows of a CSV or JSONL file |
+| `GET`  | `/api/detect-format` | Detect input format for an uploaded file |
+| `GET`  | `/api/watchers` | List configured standing orders |
+| `POST` | `/api/watchers` | Create a standing order |
+| `POST` | `/api/watchers/{id}/toggle` | Pause or resume a standing order |
+| `DELETE` | `/api/watchers/{id}` | Delete a standing order |
 | `GET`  | `/openapi.json` | OpenAPI 3 specification |
 | `GET`  | `/docs` | Swagger UI |
 | `GET`  | `/api/detect` | Detect local Ollama / LM Studio |
@@ -74,6 +85,13 @@ The web UI exposes:
 Notes:
 - `AI Quick Setup` uses the same timeout as the quick form (`api.timeout`) and supports longer-running local models.
 - You can set `LLMFLOW_WEB_SUGGEST_TIMEOUT` on the server to override the default suggestion timeout budget.
+
+## Documentation
+
+- General overview: `doc/README.md`
+- User guide: `doc/anwender.md`
+- Operations guide: `doc/betrieb.md`
+- Developer guide: `doc/entwickler.md`
 
 ## Provider examples
 
@@ -123,11 +141,21 @@ output:
 processing:
   mode: per_record
   include_input_in_output: true
+  key_column: id
   response_field: llm_response
+  parse_json_response: true
   continue_on_error: true
   workers: 2                # parallel workers
   max_retries: 3            # LLM call retries per record
   dry_run: false
+  batch_size: 1
+  output_fields: [id, sentiment, score]
+
+enrich:
+  enabled: true
+  column: ean
+  output_field: web_info
+  max_chars: 2000
 
 tools:
   enabled: true
