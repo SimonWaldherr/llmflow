@@ -1016,6 +1016,10 @@ processing:
 
 <script>
 // ── Tabs ───────────────────────────────────────────────────────────
+/**
+ * Activates the requested panel and refreshes panel-specific data.
+ * @param {string} panelName Panel identifier without the `panel-` prefix.
+ */
 function activatePanel(panelName) {
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
   document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
@@ -1059,6 +1063,11 @@ if (filesUploadZone && filesFileInput) {
   filesFileInput.addEventListener('change', () => { if (filesFileInput.files.length) uploadFile(filesFileInput.files[0]); });
 }
 
+/**
+ * Uploads a file to the backend and refreshes previews and file lists.
+ * @param {File} file The file selected by the user.
+ * @returns {Promise<void>}
+ */
 async function uploadFile(file) {
   const form = new FormData();
   form.append('file', file);
@@ -1103,6 +1112,10 @@ let previewColumns = [];
 let previewRecords = [];
 let excludedColumns = new Set();
 
+/**
+ * Loads a preview for the currently uploaded file and syncs selector options.
+ * @returns {Promise<void>}
+ */
 async function loadPreview() {
   if (!uploadedPath) return;
   const inputType = document.getElementById('q-input-type').value;
@@ -1143,6 +1156,11 @@ async function loadPreview() {
   }
 }
 
+/**
+ * Renders the preview table and initializes the exclusion state.
+ * @param {string[]} columns Column names in display order.
+ * @param {Array<object>} records Preview records returned by the backend.
+ */
 function renderPreviewTable(columns, records) {
   const thead = document.getElementById('preview-thead');
   const tbody = document.getElementById('preview-tbody');
@@ -1176,6 +1194,10 @@ function renderPreviewTable(columns, records) {
   updateJSONPreview();
 }
 
+/**
+ * Excludes or re-includes a preview column and updates the JSON sample.
+ * @param {HTMLInputElement} chk Checkbox bound to the preview column.
+ */
 function togglePreviewColumn(chk) {
   const col = chk.dataset.col;
   if (chk.checked) {
@@ -1201,6 +1223,10 @@ function togglePreviewColumn(chk) {
   updateJSONPreview();
 }
 
+/**
+ * Renders the filtered JSON sample that will be sent to the LLM.
+ * @returns {void}
+ */
 function updateJSONPreview() {
   const el = document.getElementById('preview-json-sample');
   if (!el) return;
@@ -1218,6 +1244,10 @@ function updateJSONPreview() {
   el.textContent = JSON.stringify(filtered, null, 2);
 }
 
+/**
+ * Updates the human-readable summary of excluded preview columns.
+ * @returns {void}
+ */
 function updateExcludedInfo() {
   const el = document.getElementById('preview-excluded-info');
   if (excludedColumns.size === 0) {
@@ -1228,16 +1258,32 @@ function updateExcludedInfo() {
 }
 
 // ── Helpers ───────────────────────────────────────────────────────
+/**
+ * Updates a status bar element with the given state and message.
+ * @param {string} id Status element id.
+ * @param {string} type Status type class suffix.
+ * @param {string} msg Message to display.
+ */
 function showStatus(id, type, msg) {
   const el = document.getElementById(id);
   el.className = 'status-bar show ' + type;
   el.textContent = msg;
 }
 
+/**
+ * Escapes text for safe HTML insertion.
+ * @param {string} s Raw text.
+ * @returns {string} Escaped text.
+ */
 function escHtml(s) {
   return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
+/**
+ * Formats a byte count into a human-readable string.
+ * @param {number} bytes Size in bytes.
+ * @returns {string} Formatted size.
+ */
 function formatBytes(bytes) {
   if (!Number.isFinite(bytes) || bytes < 0) return '-';
   if (bytes < 1024) return bytes + ' B';
@@ -1257,6 +1303,11 @@ const fileTableSort = {
   output: { col: 'mod_time', dir: -1 },
 };
 
+/**
+ * Toggles the sort order for a file table and refreshes the listing.
+ * @param {string} dir Table scope, for example `input` or `output`.
+ * @param {string} col Sort key name.
+ */
 function sortFileTableBy(dir, col) {
   if (!fileTableSort[dir]) return;
   if (fileTableSort[dir].col === col) {
@@ -1268,6 +1319,12 @@ function sortFileTableBy(dir, col) {
   refreshFiles();
 }
 
+/**
+ * Renders an input or output file table with sortable headers.
+ * @param {string} containerId Target element id.
+ * @param {Array<object>} files File metadata from the backend.
+ * @param {string} dir File group name (`input` or `output`).
+ */
 function renderFileTable(containerId, files, dir) {
   const el = document.getElementById(containerId);
   if (!el) return;
@@ -1322,6 +1379,10 @@ function renderFileTable(containerId, files, dir) {
   </tr></thead><tbody>${rows}</tbody></table>`;
 }
 
+/**
+ * Reloads the file list and watcher list from the backend.
+ * @returns {Promise<void>}
+ */
 async function refreshFiles() {
   const statusEl = document.getElementById('files-status');
   if (statusEl) statusEl.textContent = 'Loading…';
@@ -1344,6 +1405,11 @@ async function refreshFiles() {
   refreshWatchers();
 }
 
+/**
+ * Marks a file as the current input selection and loads its preview.
+ * @param {string} path Absolute or server-relative input path.
+ * @param {string} name File name used for display and type detection.
+ */
 function useFileAsInput(path, name) {
   uploadedPath = path;
   const ext = (name || '').split('.').pop().toLowerCase();
@@ -1356,6 +1422,12 @@ function useFileAsInput(path, name) {
   loadPreview();
 }
 
+/**
+ * Deletes a file from the selected directory after confirmation.
+ * @param {string} dir File group name.
+ * @param {string} name File name.
+ * @returns {Promise<void>}
+ */
 async function deleteFile(dir, name) {
   if (!confirm(`Delete ${dir}/` + name + '?')) return;
   try {
@@ -1371,12 +1443,20 @@ async function deleteFile(dir, name) {
   }
 }
 
+/**
+ * Switches the API key field between text and password mode.
+ * @returns {void}
+ */
 function syncAPIKeyFieldMode() {
   const input = document.getElementById('q-apikey');
   const raw = (input.value || '').trim();
   input.type = raw.startsWith('sk') ? 'password' : 'text';
 }
 
+/**
+ * Resolves the API-key configuration entry for the currently selected provider.
+ * @returns {{field: string, value: string}|null}
+ */
 function getAPIKeyConfigEntry() {
   const provider = document.getElementById('q-provider').value;
   const localProviders = new Set(['ollama', 'lmstudio']);
@@ -1394,6 +1474,10 @@ function getAPIKeyConfigEntry() {
 }
 
 // ── YAML builder ──────────────────────────────────────────────────
+/**
+ * Builds a YAML configuration from the Quick Start form.
+ * @returns {string} YAML job configuration.
+ */
 function buildYAMLFromForm() {
   const provider      = document.getElementById('q-provider').value;
   const model         = getModelValue();
@@ -1520,6 +1604,10 @@ function buildYAMLFromForm() {
   return yaml;
 }
 
+/**
+ * Writes the generated YAML into the editor panel.
+ * @returns {void}
+ */
 function generateYAML() {
   document.getElementById('yaml-editor').value = buildYAMLFromForm();
   activatePanel('editor');
@@ -1527,9 +1615,18 @@ function generateYAML() {
 }
 
 // ── YAML Import / Export ──────────────────────────────────────────
+/**
+ * Opens the hidden file picker for YAML import.
+ * @returns {void}
+ */
 function importYAML() {
   document.getElementById('yaml-import-input').click();
 }
+/**
+ * Reads the selected YAML file into the editor.
+ * @param {Event} event Change event from the hidden file input.
+ * @returns {void}
+ */
 function onYAMLImportFile(event) {
   const file = event.target.files[0];
   if (!file) return;
@@ -1541,6 +1638,10 @@ function onYAMLImportFile(event) {
   reader.readAsText(file);
   event.target.value = '';
 }
+/**
+ * Downloads the current YAML editor content as a config file.
+ * @returns {void}
+ */
 function exportYAML() {
   const text = document.getElementById('yaml-editor').value;
   const blob = new Blob([text], { type: 'text/yaml' });
@@ -1555,6 +1656,10 @@ function exportYAML() {
 }
 
 // ── Include Input change handler ──────────────────────────────────
+/**
+ * Shows or hides the key-column selector based on the include-input mode.
+ * @returns {void}
+ */
 function onIncludeInputChange() {
   const val = document.getElementById('q-include-input').value;
   const grp = document.getElementById('key-column-group');
@@ -1562,6 +1667,12 @@ function onIncludeInputChange() {
 }
 
 // ── File Preview ──────────────────────────────────────────────────
+/**
+ * Opens the file preview modal and loads the first rows of a file.
+ * @param {string} dir File group name.
+ * @param {string} name File name.
+ * @returns {Promise<void>}
+ */
 async function previewFile(dir, name) {
   const modal = document.getElementById('file-preview-modal');
   const title = document.getElementById('file-preview-title');
@@ -1588,6 +1699,10 @@ async function previewFile(dir, name) {
     body.innerHTML = `<div class="empty-state">Error: ${escHtml(e.message)}</div>`;
   }
 }
+/**
+ * Closes the file preview modal.
+ * @returns {void}
+ */
 function closeFilePreview() {
   const modal = document.getElementById('file-preview-modal');
   if (modal) modal.style.display = 'none';
@@ -1599,6 +1714,10 @@ document.addEventListener('click', e => {
 });
 
 // ── Watchers ──────────────────────────────────────────────────────
+/**
+ * Fetches and renders the current watcher list.
+ * @returns {Promise<void>}
+ */
 async function refreshWatchers() {
   try {
     const r = await fetch('/api/watchers');
@@ -1633,6 +1752,10 @@ async function refreshWatchers() {
   } catch(_) {}
 }
 
+/**
+ * Creates a new standing order from the form fields in the Files panel.
+ * @returns {Promise<void>}
+ */
 async function createWatcher() {
   const name    = document.getElementById('w-name').value.trim();
   const dir     = document.getElementById('w-dir').value.trim();
@@ -1666,18 +1789,34 @@ async function createWatcher() {
   }
 }
 
+/**
+ * Deletes a standing order after confirmation.
+ * @param {number} id Watcher identifier.
+ * @returns {Promise<void>}
+ */
 async function deleteWatcher(id) {
   if (!confirm('Delete this standing order?')) return;
   await fetch(`/api/watchers/${id}`, { method: 'DELETE' });
   await refreshWatchers();
 }
 
+/**
+ * Toggles a standing order between active and paused.
+ * @param {number} id Watcher identifier.
+ * @returns {Promise<void>}
+ */
 async function toggleWatcher(id) {
   await fetch(`/api/watchers/${id}/toggle`, { method: 'POST' });
   await refreshWatchers();
 }
 
 // ── API helpers ───────────────────────────────────────────────────
+/**
+ * Sends a JSON POST request to the llmflow API.
+ * @param {string} endpoint API endpoint path.
+ * @param {object} body Request body.
+ * @returns {Promise<object>}
+ */
 async function apiPost(endpoint, body) {
   const r = await fetch(endpoint, {
     method: 'POST',
@@ -1686,24 +1825,43 @@ async function apiPost(endpoint, body) {
   });
   return r.json();
 }
+/**
+ * Calls an API endpoint with the supplied HTTP method.
+ * @param {string} endpoint API endpoint path.
+ * @param {string} method HTTP method.
+ * @returns {Promise<object>}
+ */
 async function apiAction(endpoint, method = 'POST') {
   const r = await fetch(endpoint, { method });
   return r.json();
 }
 
 // ── Validate / Run ────────────────────────────────────────────────
+/**
+ * Validates the Quick Start form by submitting the generated YAML.
+ * @returns {Promise<void>}
+ */
 async function validateQuick() {
   const d = await apiPost('/api/validate', { config: buildYAMLFromForm() });
   if (d.ok) showStatus('quick-status', 'ok', 'Configuration is valid ✓');
   else showStatus('quick-status', 'error', 'Validation failed: ' + d.error);
 }
 
+/**
+ * Validates the YAML editor content.
+ * @returns {Promise<void>}
+ */
 async function validateYAML() {
   const d = await apiPost('/api/validate', { config: document.getElementById('yaml-editor').value });
   if (d.ok) showStatus('editor-status', 'ok', 'Configuration is valid ✓');
   else showStatus('editor-status', 'error', 'Validation failed: ' + d.error);
 }
 
+/**
+ * Runs the job configured in the Quick Start form.
+ * @param {boolean} dryRun Whether to skip real provider calls.
+ * @returns {Promise<void>}
+ */
 async function runQuick(dryRun) {
   const name = document.getElementById('q-name').value;
   const d = await apiPost('/api/run', { config: buildYAMLFromForm(), dry_run: dryRun, name });
@@ -1716,6 +1874,11 @@ async function runQuick(dryRun) {
   }
 }
 
+/**
+ * Runs the job configured in the YAML editor.
+ * @param {boolean} dryRun Whether to skip real provider calls.
+ * @returns {Promise<void>}
+ */
 async function runYAML(dryRun) {
   const d = await apiPost('/api/run', { config: document.getElementById('yaml-editor').value, dry_run: dryRun });
   if (d.ok) {
@@ -1727,6 +1890,11 @@ async function runYAML(dryRun) {
   }
 }
 
+/**
+ * Opens the Jobs tab and focuses the given job.
+ * @param {number} id Job identifier.
+ * @returns {Promise<void>}
+ */
 async function openJobsAndFocus(id) {
   activatePanel('jobs');
   await refreshJobs();
@@ -1737,6 +1905,10 @@ async function openJobsAndFocus(id) {
 let autoRefreshTimer = null;
 let selectedJobID = null;
 
+/**
+ * Starts periodic job refreshes while jobs are running.
+ * @returns {void}
+ */
 function startAutoRefresh() {
   if (autoRefreshTimer) return;
   autoRefreshTimer = setInterval(async () => {
@@ -1745,10 +1917,18 @@ function startAutoRefresh() {
   }, 2000);
 }
 
+/**
+ * Stops the periodic job refresh timer.
+ * @returns {void}
+ */
 function stopAutoRefresh() {
   if (autoRefreshTimer) { clearInterval(autoRefreshTimer); autoRefreshTimer = null; }
 }
 
+/**
+ * Reloads the jobs list from the backend.
+ * @returns {Promise<void>}
+ */
 async function refreshJobs() {
   const showArchived = document.getElementById('show-archived').checked;
   try {
@@ -1790,6 +1970,11 @@ async function refreshJobs() {
   } catch(e) { console.error('refresh:', e); }
 }
 
+/**
+ * Returns a human-readable duration for a job entry.
+ * @param {object} j Job object from the API.
+ * @returns {string}
+ */
 function jobDuration(j) {
   if (!j.ended_at || j.ended_at === '0001-01-01T00:00:00Z') return '';
   const ms = new Date(j.ended_at) - new Date(j.started_at);
@@ -1798,6 +1983,11 @@ function jobDuration(j) {
   return Math.floor(ms/60000) + 'm ' + Math.floor((ms%60000)/1000) + 's';
 }
 
+/**
+ * Selects a job and loads its detail view.
+ * @param {number} id Job identifier.
+ * @returns {Promise<void>}
+ */
 async function selectJob(id) {
   selectedJobID = id;
   document.getElementById('job-detail').style.display = 'block';
@@ -1806,6 +1996,11 @@ async function selectJob(id) {
   document.getElementById('job-detail').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
+/**
+ * Loads the live detail panel for a specific job.
+ * @param {number} id Job identifier.
+ * @returns {Promise<void>}
+ */
 async function loadJobDetail(id) {
   try {
     const r = await fetch('/api/jobs/' + id);
@@ -1877,6 +2072,11 @@ async function loadJobDetail(id) {
   } catch(e) { console.error('loadJobDetail:', e); }
 }
 
+/**
+ * Cancels a running job.
+ * @param {number} id Job identifier.
+ * @returns {Promise<void>}
+ */
 async function cancelJob(id) {
   if (!confirm('Stop job #' + id + '? The job will be marked as cancelled.')) return;
   const d = await apiAction('/api/jobs/' + id + '/cancel', 'POST');
@@ -1884,12 +2084,22 @@ async function cancelJob(id) {
   else alert('Error: ' + d.error);
 }
 
+/**
+ * Archives a completed job.
+ * @param {number} id Job identifier.
+ * @returns {Promise<void>}
+ */
 async function archiveJob(id) {
   const d = await apiAction('/api/jobs/' + id + '/archive', 'POST');
   if (d.ok) { await refreshJobs(); if (selectedJobID === id) await loadJobDetail(id); }
   else alert('Error: ' + d.error);
 }
 
+/**
+ * Re-runs a completed job from its saved configuration.
+ * @param {number} id Job identifier.
+ * @returns {Promise<void>}
+ */
 async function rerunJob(id) {
   if (!confirm('Re-run job #' + id + ' with the saved configuration?')) return;
   const d = await apiAction('/api/jobs/' + id + '/rerun', 'POST');
@@ -1903,6 +2113,11 @@ async function rerunJob(id) {
   }
 }
 
+/**
+ * Deletes a job from the history.
+ * @param {number} id Job identifier.
+ * @returns {Promise<void>}
+ */
 async function deleteJob(id) {
   if (!confirm('Permanently delete job #' + id + '?')) return;
   const d = await apiAction('/api/jobs/' + id, 'DELETE');
@@ -1919,6 +2134,11 @@ async function deleteJob(id) {
 const detectedProviders = new Map();
 let quickFormTouched = false;
 
+/**
+ * Returns a display label for a provider name.
+ * @param {string} p Provider key.
+ * @returns {string}
+ */
 function providerLabel(p) {
   return p === 'ollama' ? 'Ollama' : p === 'lmstudio' ? 'LM Studio' : p;
 }
@@ -1931,20 +2151,38 @@ const PROVIDER_MODELS = {
   generic:   [],
 };
 
+/**
+ * Returns the currently selected model value from the form.
+ * @returns {string}
+ */
 function getModelValue() {
   const sel = document.getElementById('q-model');
   if (sel.value === '__custom__') return document.getElementById('q-model-custom').value.trim() || 'gpt-4o-mini';
   return sel.value || 'gpt-4o-mini';
 }
+/**
+ * Toggles the custom model input based on the select value.
+ * @returns {void}
+ */
 function onModelSelectChange() {
   const isCustom = document.getElementById('q-model').value === '__custom__';
   document.getElementById('q-model-custom').style.display = isCustom ? 'block' : 'none';
 }
+/**
+ * Shows or hides fields that only apply to cloud providers.
+ * @param {string} provider Selected provider name.
+ * @returns {void}
+ */
 function updateProviderUI(provider) {
   const isLocal = provider === 'ollama' || provider === 'lmstudio';
   document.querySelectorAll('.q-cloud-only').forEach(el => { el.style.display = isLocal ? 'none' : ''; });
 }
 
+/**
+ * Applies default provider settings and updates the visible model list.
+ * @param {string} provider Selected provider name.
+ * @returns {void}
+ */
 function applyProviderDefaults(provider) {
   const defaults = {
     openai:    { key:'OPENAI_API_KEY',    url:'' },
@@ -1982,6 +2220,11 @@ function applyProviderDefaults(provider) {
 
   setModelSuggestions(det ? (det.models || []) : []);
 }
+/**
+ * Populates the model select with detected and curated model names.
+ * @param {string[]} models Models returned by the backend.
+ * @returns {void}
+ */
 function setModelSuggestions(models) {
   const sel      = document.getElementById('q-model');
   const hint     = document.getElementById('q-model-hint');
@@ -2005,6 +2248,10 @@ function setModelSuggestions(models) {
   onModelSelectChange();
 }
 
+/**
+ * Loads available models for the currently selected provider.
+ * @returns {Promise<void>}
+ */
 async function loadModels() {
   const btn = document.getElementById('model-refresh');
   const hint = document.getElementById('q-model-hint');
@@ -2040,6 +2287,12 @@ async function loadModels() {
     btn.textContent = originalLabel;
   }
 }
+/**
+ * Applies detected local provider data to the Quick Start form.
+ * @param {object} info Detected provider descriptor.
+ * @param {{markTouched?: boolean}} [opts]
+ * @returns {void}
+ */
 function applyDetected(info, { markTouched=true } = {}) {
   if (!info) return;
   if (markTouched) quickFormTouched = true;
@@ -2051,6 +2304,11 @@ function applyDetected(info, { markTouched=true } = {}) {
   updateProviderUI(info.provider);
 }
 
+/**
+ * Renders the local-provider detection banner.
+ * @param {Array<object>} items Detected provider entries.
+ * @returns {void}
+ */
 function renderDetectedProviders(items) {
   const banner = document.getElementById('detect-banner');
   const summary = document.getElementById('detect-summary');
@@ -2072,6 +2330,11 @@ function renderDetectedProviders(items) {
   banner.classList.add('show');
 }
 
+/**
+ * Detects local provider endpoints and optionally applies the first result.
+ * @param {{autoApply?: boolean}} [opts]
+ * @returns {Promise<void>}
+ */
 async function detectLocalProviders({ autoApply=false } = {}) {
   try {
     const r = await fetch('/api/detect');
@@ -2087,6 +2350,10 @@ async function detectLocalProviders({ autoApply=false } = {}) {
 }
 
 // ── AI-assist / Suggest ──────────────────────────────────────────
+/**
+ * Requests a suggested configuration for the current task description.
+ * @returns {Promise<void>}
+ */
 async function suggestConfig() {
   const task = document.getElementById('q-task').value.trim();
   if (!task) { document.getElementById('suggest-status').textContent = 'Please describe your task first.'; return; }

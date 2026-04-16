@@ -12,6 +12,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// Config represents a complete llmflow job definition.
 type Config struct {
 	API        APIConfig        `json:"api" yaml:"api"`
 	Prompt     PromptConfig     `json:"prompt" yaml:"prompt"`
@@ -22,7 +23,7 @@ type Config struct {
 	Enrich     EnrichConfig     `json:"enrich" yaml:"enrich"`
 }
 
-// EnrichConfig enables a non-agentic web-crawl enrichment step.
+// EnrichConfig configures the non-agentic web enrichment step.
 // Before the LLM prompt is built, the value of Column for each record is used
 // as a search query; the first plaintext result is stored in OutputField.
 type EnrichConfig struct {
@@ -103,6 +104,7 @@ const (
 	ProviderGeneric   = "generic" // OpenAI-compatible generic endpoint
 )
 
+// APIConfig contains provider-specific connection settings.
 type APIConfig struct {
 	// Provider selects the API dialect. One of: openai, gemini, ollama, lmstudio, anthropic, generic.
 	// Defaults to "openai" when empty.
@@ -122,6 +124,7 @@ type APIConfig struct {
 	PromptCaching bool `json:"prompt_caching" yaml:"prompt_caching"`
 }
 
+// PromptConfig defines the prompt fragments that are rendered for each job.
 type PromptConfig struct {
 	System        string `json:"system" yaml:"system"`
 	PrePrompt     string `json:"pre_prompt" yaml:"pre_prompt"`
@@ -129,6 +132,7 @@ type PromptConfig struct {
 	PostPrompt    string `json:"post_prompt" yaml:"post_prompt"`
 }
 
+// InputConfig defines the source data to read and how to parse it.
 type InputConfig struct {
 	Type   string        `json:"type" yaml:"type"`
 	Path   string        `json:"path" yaml:"path"`
@@ -144,6 +148,7 @@ type InputConfig struct {
 	ExcludedColumns []string `json:"excluded_columns" yaml:"excluded_columns"`
 }
 
+// OutputConfig defines the destination for processed records.
 type OutputConfig struct {
 	Type   string        `json:"type" yaml:"type"`
 	Path   string        `json:"path" yaml:"path"`
@@ -154,6 +159,7 @@ type OutputConfig struct {
 	Auth   SQLAuthConfig `json:"auth" yaml:"auth"`
 }
 
+// ProcessingConfig controls how llmflow processes and shapes records.
 type ProcessingConfig struct {
 	Mode                 string `json:"mode" yaml:"mode"`
 	IncludeInputInOutput bool   `json:"include_input_in_output" yaml:"include_input_in_output"`
@@ -182,20 +188,24 @@ type ProcessingConfig struct {
 	KeyColumn string `json:"key_column" yaml:"key_column"`
 }
 
+// CSVConfig configures CSV parsing or writing.
 type CSVConfig struct {
 	Delimiter string `json:"delimiter" yaml:"delimiter"`
 	HasHeader bool   `json:"has_header" yaml:"has_header"`
 }
 
+// JSONConfig configures JSON or JSONL parsing.
 type JSONConfig struct {
 	RootPath string `json:"root_path" yaml:"root_path"`
 	JSONL    bool   `json:"jsonl" yaml:"jsonl"`
 }
 
+// XMLConfig configures XML parsing.
 type XMLConfig struct {
 	RecordPath string `json:"record_path" yaml:"record_path"`
 }
 
+// SQLiteConfig holds SQLite-specific connection and output settings.
 type SQLiteConfig struct {
 	DSN         string `json:"dsn" yaml:"dsn"`
 	DSNEnv      string `json:"dsn_env" yaml:"dsn_env"`
@@ -203,17 +213,20 @@ type SQLiteConfig struct {
 	AutoMigrate bool   `json:"auto_migrate" yaml:"auto_migrate"`
 }
 
+// MSSQLConfig holds MSSQL-specific connection and output settings.
 type MSSQLConfig struct {
 	DSN    string `json:"dsn" yaml:"dsn"`
 	DSNEnv string `json:"dsn_env" yaml:"dsn_env"`
 	Table  string `json:"table" yaml:"table"`
 }
 
+// SQLAuthConfig holds environment-variable names for database credentials.
 type SQLAuthConfig struct {
 	UsernameEnv string `json:"username_env" yaml:"username_env"`
 	PasswordEnv string `json:"password_env" yaml:"password_env"`
 }
 
+// Load reads a YAML or JSON config file, applies defaults, and validates it.
 func Load(path string) (Config, error) {
 	var cfg Config
 

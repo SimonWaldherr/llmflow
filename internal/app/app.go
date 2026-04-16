@@ -25,6 +25,8 @@ import (
 type Generator interface {
 	Generate(ctx context.Context, systemPrompt, userPrompt string) (string, error)
 }
+
+// App coordinates input, prompt building, LLM calls, and output writing for one job run.
 type App struct {
 	cfg          config.Config
 	logger       *slog.Logger
@@ -42,6 +44,7 @@ func (a *App) WithResultFunc(f func(index, total int, record map[string]any)) *A
 	return a
 }
 
+// New constructs an App with defaults applied to the supplied configuration.
 func New(cfg config.Config, logger *slog.Logger) *App {
 	cfg.ApplyDefaults()
 	return &App{cfg: cfg, logger: logger, dryRun: cfg.Processing.DryRun}
@@ -53,6 +56,7 @@ func (a *App) WithDryRun(v bool) *App { a.dryRun = v; return a }
 // WithDebug overrides the debug flag set in the config (useful for CLI flag).
 func (a *App) WithDebug(v bool) *App { a.cfg.Processing.Debug = v; return a }
 
+// Run executes the configured job from input reading through output writing.
 func (a *App) Run(ctx context.Context) error {
 	var gen Generator
 
