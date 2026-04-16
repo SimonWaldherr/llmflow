@@ -545,7 +545,7 @@ textarea { font-family: var(--font-mono); resize: vertical; }
         <span class="section-title" style="margin-bottom:0">Data Preview <span id="preview-subtitle" style="font-weight:400;font-size:13px;color:var(--text-muted)"></span></span>
         <button class="btn btn-secondary btn-sm" onclick="loadPreview()">↻ Refresh</button>
       </div>
-      <p style="font-size:12px;color:var(--text-muted);margin-bottom:8px">Uncheck column headers to exclude them from every LLM request. Excluded columns are still written to the output when <em>Include Input in Output</em> is set to <em>No</em>.</p>
+      <p style="font-size:12px;color:var(--text-muted);margin-bottom:8px">Check/uncheck column headers to control which fields are sent to the LLM. Unchecked columns are completely excluded from both the LLM prompt and (when <em>Include Input in Output</em> is on) the output file.</p>
       <div id="preview-table-wrap" style="overflow-x:auto;border:1px solid var(--border);border-radius:6px;">
         <table id="preview-table" class="file-table" style="min-width:100%">
           <thead id="preview-thead"></thead>
@@ -553,6 +553,14 @@ textarea { font-family: var(--font-mono); resize: vertical; }
         </table>
       </div>
       <div id="preview-excluded-info" style="margin-top:6px;font-size:12px;color:var(--yellow)"></div>
+      <!-- Live JSON preview of what the LLM will receive for record 1 -->
+      <div style="margin-top:12px">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+          <span style="font-size:12px;font-weight:600;color:var(--text-muted)">LLM INPUT PREVIEW</span>
+          <span style="font-size:11px;color:var(--text-muted)">— exactly what will be sent for record #1 (JSON)</span>
+        </div>
+        <pre id="preview-json-sample" style="margin:0;padding:10px 14px;background:var(--bg-secondary,#1a1a2e);border:1px solid var(--border);border-radius:6px;font-size:11px;line-height:1.5;overflow-x:auto;white-space:pre-wrap;color:var(--accent)"></pre>
+      </div>
     </div>
 
     <hr class="section-sep quick-full">
@@ -609,6 +617,11 @@ textarea { font-family: var(--font-mono); resize: vertical; }
             <option value="true">Enabled &mdash; extract structured fields from response</option>
           </select>
           <div class="hint">When enabled, the last JSON object found in the LLM response is parsed and its fields are added as separate columns alongside the full raw response. Ideal for the &ldquo;reasoning + structured output&rdquo; pattern: instruct the LLM to reason first, then append a <code>{"field": value}</code> summary at the end via <em>Post Prompt</em>.</div>
+        </div>
+        <div class="form-group">
+          <label>Output Fields <span style="font-weight:400;color:var(--text-muted)">(optional)</span></label>
+          <input id="q-output-fields" type="text" placeholder="e.g. Produkt, Paket-geeignet">
+          <div class="hint">Comma-separated list of fields to include in the output. Leave empty to include all fields. Combine with <em>Parse JSON Response</em> to produce clean output with only specific columns &mdash; e.g. input key columns plus the LLM-extracted structured fields.</div>
         </div>
         <div class="form-group">
           <label>Batch Size (records per LLM request)</label>
@@ -938,6 +951,7 @@ async function uploadFile(file) {
 
 // ── Data Preview ──────────────────────────────────────────────────
 let previewColumns = [];
+let previewRecords = [];
 let excludedColumns = new Set();
 
 async function loadPreview() {
@@ -961,6 +975,11 @@ async function loadPreview() {
     renderPreviewTable(columns, records);
     document.getElementById('preview-section').style.display = '';
     document.getElementById('preview-subtitle').textContent = `(first ${records.length} of ${records.length < 10 ? records.length : '10+'} records)`;
+    // Auto-fill template if empty so user sees data will be sent as JSON
+    const tplEl = document.getElementById('q-template');
+    if (tplEl && !tplEl.value.trim()) {
+      tplEl.value = '{{ toPrettyJSON .record }}';
+    }
   } catch(e) {
     document.getElementById('preview-section').style.display = 'none';
   }
@@ -970,6 +989,7 @@ function renderPreviewTable(columns, records) {
   const thead = document.getElementById('preview-thead');
   const tbody = document.getElementById('preview-tbody');
   excludedColumns = new Set(); // reset on reload
+  previewRecords = records || [];
 
   // Header row with checkboxes
   const thCells = columns.map(col => {
@@ -995,6 +1015,7 @@ function renderPreviewTable(columns, records) {
   }).join('');
   tbody.innerHTML = trRows;
   updateExcludedInfo();
+  updateJSONPreview();
 }
 
 function togglePreviewColumn(chk) {
@@ -1019,6 +1040,24 @@ function togglePreviewColumn(chk) {
     }
   }
   updateExcludedInfo();
+  updateJSONPreview();
+}
+
+function updateJSONPreview() {
+  const el = document.getElementById('preview-json-sample');
+  if (!el) return;
+  if (previewRecords.length === 0 || previewColumns.length === 0) {
+    el.textContent = '';
+    return;
+  }
+  const rec = previewRecords[0];
+  const filtered = {};
+  for (const col of previewColumns) {
+    if (!excludedColumns.has(col)) {
+      filtered[col] = rec[col] !== undefined ? rec[col] : null;
+    }
+  }
+  el.textContent = JSON.stringify(filtered, null, 2);
 }
 
 function updateExcludedInfo() {
@@ -1200,6 +1239,11 @@ function buildYAMLFromForm() {
   yaml += `\n\nprocessing:\n  mode: per_record\n  include_input_in_output: ${includeInput}\n  response_field: ${responseField}\n  continue_on_error: ${continueErr}\n  workers: ${workers}\n  max_retries: ${retries}\n  dry_run: false`;
   const parseJSON = document.getElementById('q-parse-json').value;
   if (parseJSON === 'true') yaml += `\n  parse_json_response: true`;
+  const outputFields = document.getElementById('q-output-fields').value.trim();
+  if (outputFields) {
+    const fields = outputFields.split(',').map(f => `"${f.trim().replace(/"/g, '\\"')}"`).filter(Boolean);
+    if (fields.length > 0) yaml += `\n  output_fields: [${fields.join(', ')}]`;
+  }
   const batchSize = parseInt(document.getElementById('q-batch-size').value || '1', 10);
   if (batchSize > 1) yaml += `\n  batch_size: ${batchSize}`;
   const debugMode = document.getElementById('q-debug').value;

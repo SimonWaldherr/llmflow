@@ -352,7 +352,7 @@ func (a *App) processRecordsWithSink(
 						}
 					}
 				}
-				resultCh <- indexedResult{idx: j.idx, rec: outRec}
+				resultCh <- indexedResult{idx: j.idx, rec: applyOutputFields(outRec, a.cfg.Processing.OutputFields)}
 				cur := int(atomic.AddInt64(&processed, 1))
 				if a.progressFunc != nil {
 					a.progressFunc(cur, len(records))
@@ -422,8 +422,6 @@ func (a *App) processRecordsWithSink(
 }
 
 // extractLastJSON finds and parses the last JSON object {...} in s.
-// This is used for the "reasoning + structured output" pattern where the LLM
-// first reasons in free text and then appends a JSON object at the end.
 func extractLastJSON(s string) (map[string]any, bool) {
 	end := strings.LastIndex(s, "}")
 	if end < 0 {
@@ -439,6 +437,21 @@ func extractLastJSON(s string) (map[string]any, bool) {
 		}
 	}
 	return nil, false
+}
+
+// applyOutputFields restricts rec to only the fields listed in fields.
+// If fields is empty the record is returned unchanged.
+func applyOutputFields(rec map[string]any, fields []string) map[string]any {
+	if len(fields) == 0 {
+		return rec
+	}
+	out := make(map[string]any, len(fields))
+	for _, f := range fields {
+		if v, ok := rec[f]; ok {
+			out[f] = v
+		}
+	}
+	return out
 }
 
 func (a *App) processRecordStream(
@@ -755,6 +768,9 @@ func (a *App) processBatch(
 			o[a.cfg.Processing.ResponseField] = responseText
 			outRecs[i] = o
 		}
+		for i := range outRecs {
+			outRecs[i] = applyOutputFields(outRecs[i], a.cfg.Processing.OutputFields)
+		}
 		return outRecs, nil
 	}
 
@@ -789,6 +805,10 @@ func (a *App) processBatch(
 			o[a.cfg.Processing.ResponseField] = ""
 		}
 		outRecs[i] = o
+	}
+
+	for i := range outRecs {
+		outRecs[i] = applyOutputFields(outRecs[i], a.cfg.Processing.OutputFields)
 	}
 
 	// Log individual rendered prompts for diagnostics but don't fail on them.
@@ -893,7 +913,7 @@ func (a *App) processJobs(
 						}
 					}
 				}
-				resultCh <- indexedResult{idx: j.idx, rec: outRec}
+				resultCh <- indexedResult{idx: j.idx, rec: applyOutputFields(outRec, a.cfg.Processing.OutputFields)}
 				cur := int(atomic.AddInt64(&processed, 1))
 				if a.progressFunc != nil {
 					a.progressFunc(cur, total)

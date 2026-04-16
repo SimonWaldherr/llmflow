@@ -156,6 +156,10 @@ type ProcessingConfig struct {
 	// All prompts sent, raw responses, and timing information are written to the
 	// logger at DEBUG level. Set log-level to "debug" or use --debug to enable.
 	Debug bool `json:"debug" yaml:"debug"`
+	// OutputFields, when non-empty, restricts the output record to only these
+	// field names. Input fields and LLM-extracted JSON fields are both eligible.
+	// Useful for producing clean output CSVs with only the desired columns.
+	OutputFields []string `json:"output_fields" yaml:"output_fields"`
 }
 
 type CSVConfig struct {
