@@ -19,6 +19,22 @@ type Config struct {
 	Output     OutputConfig     `json:"output" yaml:"output"`
 	Processing ProcessingConfig `json:"processing" yaml:"processing"`
 	Tools      ToolsConfig      `json:"tools" yaml:"tools"`
+	Enrich     EnrichConfig     `json:"enrich" yaml:"enrich"`
+}
+
+// EnrichConfig enables a non-agentic web-crawl enrichment step.
+// Before the LLM prompt is built, the value of Column for each record is used
+// as a search query; the first plaintext result is stored in OutputField.
+type EnrichConfig struct {
+	// Enabled activates the enrichment step.
+	Enabled bool `json:"enabled" yaml:"enabled"`
+	// Column is the input record field whose value is used as the search query.
+	Column string `json:"column" yaml:"column"`
+	// OutputField is the name of the field added to each record with the result.
+	// Defaults to "enriched_<Column>" when empty.
+	OutputField string `json:"output_field" yaml:"output_field"`
+	// MaxChars limits the enrichment result length (default 2000).
+	MaxChars int `json:"max_chars" yaml:"max_chars"`
 }
 
 // ToolsConfig controls optional agent tools the LLM may call during processing.
@@ -160,6 +176,10 @@ type ProcessingConfig struct {
 	// field names. Input fields and LLM-extracted JSON fields are both eligible.
 	// Useful for producing clean output CSVs with only the desired columns.
 	OutputFields []string `json:"output_fields" yaml:"output_fields"`
+	// KeyColumn, when set with IncludeInputInOutput true, copies only this
+	// single column from the input record into the output (instead of all columns).
+	// Useful when you want the key identifier alongside new LLM-generated fields.
+	KeyColumn string `json:"key_column" yaml:"key_column"`
 }
 
 type CSVConfig struct {

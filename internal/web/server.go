@@ -2,6 +2,7 @@
 package web
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/subtle"
@@ -15,6 +16,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -34,15 +36,32 @@ var staticFS embed.FS
 
 // Server holds the web UI HTTP server state.
 type Server struct {
-	logger    *slog.Logger
-	addr      string
-	dataDir   string
-	jobsFile  string
-	mu        sync.Mutex
-	jobs      []*JobStatus
-	jobIDSeq  int
-	wg        sync.WaitGroup  // tracks running job goroutines
-	serverCtx context.Context // cancelled on graceful shutdown; used for job lifecycles
+	logger       *slog.Logger
+	addr         string
+	dataDir      string
+	jobsFile     string
+	watchersFile string
+	mu           sync.Mutex
+	jobs         []*JobStatus
+	jobIDSeq     int
+	watchers     []*WatcherConfig
+	watcherIDSeq int
+	wg           sync.WaitGroup  // tracks running job goroutines
+	serverCtx    context.Context // cancelled on graceful shutdown; used for job lifecycles
+}
+
+// WatcherConfig defines a standing order that auto-launches a job when a
+// matching file appears in the watched directory.
+type WatcherConfig struct {
+	ID       int    `json:"id"`
+	Name     string `json:"name"`
+	WatchDir string `json:"watch_dir"`
+	// Pattern is a glob pattern for filenames, e.g. "PRODUCTS_*.csv".
+	Pattern string `json:"pattern"`
+	// Config is the YAML job config template. Use {{.InputFile}} as placeholder
+	// for the matched file path (it will be substituted at trigger time).
+	Config string `json:"config"`
+	Active bool   `json:"active"`
 }
 
 // JobProgress tracks how many records have been processed.
@@ -83,12 +102,14 @@ func NewServer(addr string, logger *slog.Logger) *Server {
 		dataDir = "data"
 	}
 	jobsFile := filepath.Join(dataDir, "jobs", "jobs.json")
+	watchersFile := filepath.Join(dataDir, "jobs", "watchers.json")
 	return &Server{
-		addr:      addr,
-		dataDir:   dataDir,
-		jobsFile:  jobsFile,
-		logger:    logger,
-		serverCtx: context.Background(), // replaced by Run(); guards against nil if handleRun is called early
+		addr:         addr,
+		dataDir:      dataDir,
+		jobsFile:     jobsFile,
+		watchersFile: watchersFile,
+		logger:       logger,
+		serverCtx:    context.Background(), // replaced by Run(); guards against nil if handleRun is called early
 	}
 }
 
@@ -152,6 +173,12 @@ func (s *Server) Run(ctx context.Context) error {
 	if err := s.loadJobs(); err != nil {
 		return err
 	}
+	if err := s.loadWatchers(); err != nil {
+		return err
+	}
+
+	// Start the file-watcher polling loop.
+	go s.runWatcherLoop(ctx)
 
 	mux := http.NewServeMux()
 
@@ -168,6 +195,12 @@ func (s *Server) Run(ctx context.Context) error {
 	mux.HandleFunc("GET /api/files", s.handleListFiles)
 	mux.HandleFunc("DELETE /api/files/{dir}/{name}", s.handleDeleteFile)
 	mux.HandleFunc("GET /api/files/download/{dir}/{name}", s.handleDownloadFile)
+	mux.HandleFunc("GET /api/files/preview/{dir}/{name}", s.handlePreviewFile)
+	mux.HandleFunc("GET /api/detect-format", s.handleDetectFormat)
+	mux.HandleFunc("GET /api/watchers", s.handleListWatchers)
+	mux.HandleFunc("POST /api/watchers", s.handleCreateWatcher)
+	mux.HandleFunc("DELETE /api/watchers/{id}", s.handleDeleteWatcher)
+	mux.HandleFunc("POST /api/watchers/{id}/toggle", s.handleToggleWatcher)
 	mux.HandleFunc("GET /api/openapi.json", s.handleOpenAPI)
 	mux.HandleFunc("GET /openapi.json", s.handleOpenAPI)
 	mux.HandleFunc("GET /docs", s.handleSwaggerUI)
@@ -1716,4 +1749,459 @@ func normalizeLMStudioBaseURL(raw string) string {
 		return base
 	}
 	return strings.TrimRight(base, "/") + "/v1"
+}
+
+// ─── /api/files/preview/{dir}/{name} ──────────────────────────────────────────
+// handlePreviewFile reads the first N records from an output or input file and
+// returns them as JSON so the UI can show a preview before downloading.
+
+func (s *Server) handlePreviewFile(w http.ResponseWriter, r *http.Request) {
+	dir := r.PathValue("dir")
+	name := r.PathValue("name")
+
+	dirPath, ok := s.allowedFileDir(dir)
+	if !ok {
+		writeJSON(w, http.StatusBadRequest, apiResponse{Error: "invalid dir"})
+		return
+	}
+	name = filepath.Base(name)
+	dst := filepath.Join(dirPath, name)
+	if !safeInDir(dirPath, dst) {
+		writeJSON(w, http.StatusBadRequest, apiResponse{Error: "invalid filename"})
+		return
+	}
+
+	nStr := r.URL.Query().Get("n")
+	n := 50
+	if nStr != "" {
+		if _, err := fmt.Sscan(nStr, &n); err != nil || n <= 0 {
+			n = 50
+		}
+	}
+	if n > 200 {
+		n = 200
+	}
+
+	f, err := os.Open(dst)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, apiResponse{Error: "file not found"})
+		return
+	}
+	defer f.Close()
+
+	ext := strings.ToLower(path.Ext(name))
+	var records []map[string]any
+
+	switch ext {
+	case ".jsonl":
+		scanner := bufio.NewScanner(f)
+		scanner.Buffer(make([]byte, 1<<20), 1<<20)
+		for scanner.Scan() && len(records) < n {
+			line := strings.TrimSpace(scanner.Text())
+			if line == "" {
+				continue
+			}
+			var rec map[string]any
+			if err := json.Unmarshal([]byte(line), &rec); err == nil {
+				records = append(records, rec)
+			}
+		}
+	case ".csv":
+		scanner := bufio.NewScanner(f)
+		scanner.Buffer(make([]byte, 1<<20), 1<<20)
+		var headers []string
+		for scanner.Scan() && len(records) < n {
+			line := scanner.Text()
+			if headers == nil {
+				headers = splitCSVLine(line)
+				continue
+			}
+			fields := splitCSVLine(line)
+			rec := make(map[string]any, len(headers))
+			for i, h := range headers {
+				if i < len(fields) {
+					rec[h] = fields[i]
+				} else {
+					rec[h] = ""
+				}
+			}
+			records = append(records, rec)
+		}
+	default:
+		writeJSON(w, http.StatusBadRequest, apiResponse{Error: "preview not supported for this file type"})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, apiResponse{OK: true, Data: records})
+}
+
+// splitCSVLine splits a simple CSV line (handles quoted fields).
+func splitCSVLine(line string) []string {
+	var fields []string
+	var cur strings.Builder
+	inQuote := false
+	for i := 0; i < len(line); i++ {
+		c := line[i]
+		if c == '"' {
+			if inQuote && i+1 < len(line) && line[i+1] == '"' {
+				cur.WriteByte('"')
+				i++
+			} else {
+				inQuote = !inQuote
+			}
+		} else if c == ',' && !inQuote {
+			fields = append(fields, cur.String())
+			cur.Reset()
+		} else {
+			cur.WriteByte(c)
+		}
+	}
+	fields = append(fields, cur.String())
+	return fields
+}
+
+// ─── /api/detect-format ───────────────────────────────────────────────────────
+// handleDetectFormat sniffs a file to determine its format and delimiter.
+
+type detectFormatResponse struct {
+	Type      string `json:"type"`
+	Delimiter string `json:"delimiter,omitempty"`
+	HasHeader bool   `json:"has_header"`
+}
+
+func (s *Server) handleDetectFormat(w http.ResponseWriter, r *http.Request) {
+	filePath := r.URL.Query().Get("path")
+	if filePath == "" {
+		writeJSON(w, http.StatusBadRequest, apiResponse{Error: "path is required"})
+		return
+	}
+
+	cleanPath := filepath.Clean(filePath)
+	dataRoot := filepath.Clean(s.dataRoot())
+	if !strings.HasPrefix(cleanPath, dataRoot+string(os.PathSeparator)) {
+		writeJSON(w, http.StatusBadRequest, apiResponse{Error: "path must be inside the data directory"})
+		return
+	}
+
+	f, err := os.Open(cleanPath)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, apiResponse{Error: "file not found"})
+		return
+	}
+	defer f.Close()
+
+	buf := make([]byte, 512)
+	n, _ := f.Read(buf)
+	buf = buf[:n]
+
+	result := sniffFormat(cleanPath, buf)
+	writeJSON(w, http.StatusOK, apiResponse{OK: true, Data: result})
+}
+
+func sniffFormat(filePath string, buf []byte) detectFormatResponse {
+	ext := strings.ToLower(filepath.Ext(filePath))
+
+	// Extension-based detection as primary hint.
+	switch ext {
+	case ".json":
+		trimmed := strings.TrimSpace(string(buf))
+		if strings.HasPrefix(trimmed, "[") {
+			return detectFormatResponse{Type: "json", HasHeader: false}
+		}
+		return detectFormatResponse{Type: "jsonl", HasHeader: false}
+	case ".jsonl":
+		return detectFormatResponse{Type: "jsonl", HasHeader: false}
+	case ".xml":
+		return detectFormatResponse{Type: "xml", HasHeader: false}
+	}
+
+	// Content-based detection for CSV.
+	trimmed := strings.TrimSpace(string(buf))
+	if strings.HasPrefix(trimmed, "<") {
+		return detectFormatResponse{Type: "xml", HasHeader: false}
+	}
+	if strings.HasPrefix(trimmed, "[") {
+		return detectFormatResponse{Type: "json", HasHeader: false}
+	}
+	if strings.HasPrefix(trimmed, "{") {
+		return detectFormatResponse{Type: "jsonl", HasHeader: false}
+	}
+
+	// Assume CSV; sniff delimiter.
+	delim := sniffDelimiterFromBytes(buf)
+	return detectFormatResponse{Type: "csv", Delimiter: string(delim), HasHeader: true}
+}
+
+func sniffDelimiterFromBytes(buf []byte) byte {
+	counts := map[byte]int{',': 0, ';': 0, '\t': 0, '|': 0}
+	for _, b := range buf {
+		if _, ok := counts[b]; ok {
+			counts[b]++
+		}
+	}
+	best := byte(',')
+	max := 0
+	for b, c := range counts {
+		if c > max {
+			max = c
+			best = b
+		}
+	}
+	return best
+}
+
+// ─── Watcher persistence ──────────────────────────────────────────────────────
+
+type watcherState struct {
+	Watchers []*WatcherConfig `json:"watchers"`
+}
+
+func (s *Server) loadWatchers() error {
+	data, err := os.ReadFile(s.watchersFile)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("read watchers: %w", err)
+	}
+	var state watcherState
+	if err := json.Unmarshal(data, &state); err != nil {
+		return fmt.Errorf("parse watchers: %w", err)
+	}
+	maxID := 0
+	for _, w := range state.Watchers {
+		if w != nil && w.ID > maxID {
+			maxID = w.ID
+		}
+	}
+	s.mu.Lock()
+	s.watchers = state.Watchers
+	s.watcherIDSeq = maxID
+	s.mu.Unlock()
+	return nil
+}
+
+func (s *Server) persistWatchers() {
+	s.mu.Lock()
+	state := watcherState{Watchers: make([]*WatcherConfig, 0, len(s.watchers))}
+	for _, w := range s.watchers {
+		if w != nil {
+			wc := *w
+			state.Watchers = append(state.Watchers, &wc)
+		}
+	}
+	filePath := s.watchersFile
+	s.mu.Unlock()
+
+	if err := os.MkdirAll(filepath.Dir(filePath), 0o750); err != nil {
+		return
+	}
+	data, err := json.MarshalIndent(state, "", "  ")
+	if err != nil {
+		return
+	}
+	tmp := filePath + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o640); err != nil {
+		return
+	}
+	_ = os.Rename(tmp, filePath)
+}
+
+// ─── Watcher HTTP handlers ────────────────────────────────────────────────────
+
+func (s *Server) handleListWatchers(w http.ResponseWriter, _ *http.Request) {
+	s.mu.Lock()
+	result := make([]*WatcherConfig, 0, len(s.watchers))
+	for _, wc := range s.watchers {
+		if wc != nil {
+			cp := *wc
+			result = append(result, &cp)
+		}
+	}
+	s.mu.Unlock()
+	writeJSON(w, http.StatusOK, apiResponse{OK: true, Data: result})
+}
+
+type createWatcherRequest struct {
+	Name     string `json:"name"`
+	WatchDir string `json:"watch_dir"`
+	Pattern  string `json:"pattern"`
+	Config   string `json:"config"`
+	Active   bool   `json:"active"`
+}
+
+func (s *Server) handleCreateWatcher(w http.ResponseWriter, r *http.Request) {
+	var req createWatcherRequest
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, apiResponse{Error: "invalid JSON body"})
+		return
+	}
+	req.WatchDir = strings.TrimSpace(req.WatchDir)
+	req.Pattern = strings.TrimSpace(req.Pattern)
+	if req.WatchDir == "" || req.Pattern == "" {
+		writeJSON(w, http.StatusBadRequest, apiResponse{Error: "watch_dir and pattern are required"})
+		return
+	}
+
+	s.mu.Lock()
+	s.watcherIDSeq++
+	wc := &WatcherConfig{
+		ID:       s.watcherIDSeq,
+		Name:     req.Name,
+		WatchDir: req.WatchDir,
+		Pattern:  req.Pattern,
+		Config:   req.Config,
+		Active:   req.Active,
+	}
+	s.watchers = append(s.watchers, wc)
+	s.mu.Unlock()
+	s.persistWatchers()
+
+	cp := *wc
+	writeJSON(w, http.StatusCreated, apiResponse{OK: true, Data: &cp})
+}
+
+func (s *Server) handleDeleteWatcher(w http.ResponseWriter, r *http.Request) {
+	id, ok := parsePatternID(r)
+	if !ok {
+		writeJSON(w, http.StatusBadRequest, apiResponse{Error: "invalid watcher id"})
+		return
+	}
+	s.mu.Lock()
+	for i, wc := range s.watchers {
+		if wc != nil && wc.ID == id {
+			s.watchers = append(s.watchers[:i], s.watchers[i+1:]...)
+			s.mu.Unlock()
+			s.persistWatchers()
+			writeJSON(w, http.StatusOK, apiResponse{OK: true})
+			return
+		}
+	}
+	s.mu.Unlock()
+	writeJSON(w, http.StatusNotFound, apiResponse{Error: "watcher not found"})
+}
+
+func (s *Server) handleToggleWatcher(w http.ResponseWriter, r *http.Request) {
+	id, ok := parsePatternID(r)
+	if !ok {
+		writeJSON(w, http.StatusBadRequest, apiResponse{Error: "invalid watcher id"})
+		return
+	}
+	s.mu.Lock()
+	for _, wc := range s.watchers {
+		if wc != nil && wc.ID == id {
+			wc.Active = !wc.Active
+			s.mu.Unlock()
+			s.persistWatchers()
+			cp := *wc
+			writeJSON(w, http.StatusOK, apiResponse{OK: true, Data: &cp})
+			return
+		}
+	}
+	s.mu.Unlock()
+	writeJSON(w, http.StatusNotFound, apiResponse{Error: "watcher not found"})
+}
+
+// ─── Watcher polling loop ─────────────────────────────────────────────────────
+
+// runWatcherLoop polls all active watchers every 5 seconds and launches jobs
+// for newly matching files. Matched files are moved to active/ subdirectory
+// during processing and then to done/ after the job completes.
+func (s *Server) runWatcherLoop(ctx context.Context) {
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			s.pollWatchers(ctx)
+		}
+	}
+}
+
+func (s *Server) pollWatchers(ctx context.Context) {
+	s.mu.Lock()
+	watchers := make([]*WatcherConfig, 0, len(s.watchers))
+	for _, wc := range s.watchers {
+		if wc != nil && wc.Active {
+			cp := *wc
+			watchers = append(watchers, &cp)
+		}
+	}
+	s.mu.Unlock()
+
+	for _, wc := range watchers {
+		s.processWatcher(ctx, wc)
+	}
+}
+
+func (s *Server) processWatcher(ctx context.Context, wc *WatcherConfig) {
+	matches, err := filepath.Glob(filepath.Join(wc.WatchDir, wc.Pattern))
+	if err != nil || len(matches) == 0 {
+		return
+	}
+
+	activeDir := filepath.Join(wc.WatchDir, "active")
+	doneDir := filepath.Join(wc.WatchDir, "done")
+	for _, dir := range []string{activeDir, doneDir} {
+		if err := os.MkdirAll(dir, 0o750); err != nil {
+			s.logger.Warn("watcher: cannot create subdir", "dir", dir, "error", err)
+			return
+		}
+	}
+
+	for _, match := range matches {
+		// Only handle files directly in WatchDir (not in active/ or done/).
+		if filepath.Dir(match) != filepath.Clean(wc.WatchDir) {
+			continue
+		}
+
+		name := filepath.Base(match)
+		activePath := filepath.Join(activeDir, name)
+
+		// Move to active/ to claim the file atomically.
+		if err := os.Rename(match, activePath); err != nil {
+			s.logger.Warn("watcher: cannot move to active", "file", match, "error", err)
+			continue
+		}
+
+		// Substitute {{.InputFile}} placeholder in the config template.
+		jobConfig := strings.ReplaceAll(wc.Config, "{{.InputFile}}", activePath)
+
+		cfg, err := parseConfig(jobConfig)
+		if err != nil {
+			s.logger.Warn("watcher: invalid config template", "watcher", wc.Name, "error", err)
+			// Move file to done/ even if config fails so it doesn't loop.
+			_ = os.Rename(activePath, filepath.Join(doneDir, name))
+			continue
+		}
+
+		jobName := wc.Name
+		if jobName == "" {
+			jobName = "watcher"
+		}
+		jobName = jobName + ": " + name
+
+		s.logger.Info("watcher: launching job", "watcher", wc.Name, "file", name)
+		job := s.enqueueJob(jobName, jobConfig, false, cfg)
+
+		// After job completes, move file to done/ in a background goroutine.
+		go func(j *JobStatus, ap, dp string) {
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(2 * time.Second):
+				}
+				s.mu.Lock()
+				status := j.Status
+				s.mu.Unlock()
+				if status != "running" {
+					_ = os.Rename(ap, filepath.Join(dp, filepath.Base(ap)))
+					return
+				}
+			}
+		}(job, activePath, doneDir)
+	}
 }

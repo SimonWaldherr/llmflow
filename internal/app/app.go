@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/SimonWaldherr/llmflow/internal/config"
+	"github.com/SimonWaldherr/llmflow/internal/enrich"
 	"github.com/SimonWaldherr/llmflow/internal/input"
 	"github.com/SimonWaldherr/llmflow/internal/llm"
 	"github.com/SimonWaldherr/llmflow/internal/output"
@@ -106,7 +107,7 @@ func (a *App) Run(ctx context.Context) error {
 	var writerPrepared bool
 	emit := func(_ int, record map[string]any) error {
 		if !writerPrepared {
-			columns := buildOutputColumns([]input.Record{record}, a.cfg.Processing.ResponseField, a.cfg.Processing.IncludeInputInOutput)
+			columns := buildOutputColumns([]input.Record{record}, a.cfg.Processing.ResponseField, a.cfg.Processing.IncludeInputInOutput, a.cfg.Processing.KeyColumn)
 			if err := writer.Prepare(ctx, columns); err != nil {
 				return err
 			}
@@ -144,12 +145,22 @@ func PreviewRecords(r input.Reader, n int) ([]input.Record, error) {
 	return out, nil
 }
 
-func buildOutputColumns(records []input.Record, responseField string, includeInput bool) []string {
+func buildOutputColumns(records []input.Record, responseField string, includeInput bool, keyColumn string) []string {
 	if !includeInput {
 		if strings.TrimSpace(responseField) == "" {
 			responseField = "response"
 		}
 		return []string{responseField}
+	}
+	if keyColumn != "" {
+		// Key-column-only mode: include only the key column + response field.
+		if responseField == "" {
+			responseField = "response"
+		}
+		if keyColumn == responseField {
+			return []string{keyColumn}
+		}
+		return []string{keyColumn, responseField}
 	}
 	set := map[string]struct{}{}
 	for _, rec := range records {
@@ -295,7 +306,18 @@ func (a *App) processRecordsWithSink(
 					}
 				}
 
-				userPrompt, err := pb.Build(j.rec)
+				// Enrichment step (non-agentic web crawl) before prompt building.
+				rec := j.rec
+				if a.cfg.Enrich.Enabled && a.cfg.Enrich.Column != "" {
+					enricher := enrich.New(a.cfg.Enrich)
+					if enriched, enrichErr := enricher.Enrich(ctx, rec); enrichErr != nil {
+						a.logger.Warn("enrich step failed", "index", j.idx, "error", enrichErr)
+					} else {
+						rec = enriched
+					}
+				}
+
+				userPrompt, err := pb.Build(rec)
 				if err != nil {
 					if !a.cfg.Processing.ContinueOnError {
 						mu.Lock()
@@ -332,8 +354,14 @@ func (a *App) processRecordsWithSink(
 
 				outRec := map[string]any{}
 				if a.cfg.Processing.IncludeInputInOutput {
-					for k, v := range j.rec {
-						outRec[k] = v
+					if a.cfg.Processing.KeyColumn != "" {
+						if v, ok := rec[a.cfg.Processing.KeyColumn]; ok {
+							outRec[a.cfg.Processing.KeyColumn] = v
+						}
+					} else {
+						for k, v := range rec {
+							outRec[k] = v
+						}
 					}
 				}
 				// Always preserve the raw LLM response so reasoning text is never lost.
@@ -858,7 +886,18 @@ func (a *App) processJobs(
 					}
 				}
 
-				userPrompt, err := pb.Build(j.rec)
+				// Enrichment step (non-agentic web crawl) before prompt building.
+				rec := j.rec
+				if a.cfg.Enrich.Enabled && a.cfg.Enrich.Column != "" {
+					enricher := enrich.New(a.cfg.Enrich)
+					if enriched, enrichErr := enricher.Enrich(ctx, rec); enrichErr != nil {
+						a.logger.Warn("enrich step failed", "index", j.idx, "error", enrichErr)
+					} else {
+						rec = enriched
+					}
+				}
+
+				userPrompt, err := pb.Build(rec)
 				if err != nil {
 					if !a.cfg.Processing.ContinueOnError {
 						mu.Lock()
@@ -895,8 +934,14 @@ func (a *App) processJobs(
 
 				outRec := map[string]any{}
 				if a.cfg.Processing.IncludeInputInOutput {
-					for k, v := range j.rec {
-						outRec[k] = v
+					if a.cfg.Processing.KeyColumn != "" {
+						if v, ok := rec[a.cfg.Processing.KeyColumn]; ok {
+							outRec[a.cfg.Processing.KeyColumn] = v
+						}
+					} else {
+						for k, v := range rec {
+							outRec[k] = v
+						}
 					}
 				}
 				// Always preserve the raw LLM response so reasoning text is never lost.

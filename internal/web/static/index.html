@@ -280,14 +280,37 @@ textarea { font-family: var(--font-mono); resize: vertical; }
 
 .section-sep { border: none; border-top: 1px solid var(--border); margin: 20px 0; }
 
+/* Section cards — input-first workflow grouping */
+.section-card {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  padding: 18px 20px;
+  margin-bottom: 18px;
+}
+.section-card-header {
+  display: flex; align-items: baseline; gap: 10px; margin-bottom: 14px;
+}
+.section-card-num {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; border-radius: 50%;
+  background: var(--accent); color: #fff; font-size: 12px; font-weight: 700;
+  flex-shrink: 0;
+}
+.section-card-title {
+  font-size: 14px; font-weight: 700; color: var(--text);
+}
+.section-card-desc {
+  font-size: 12px; color: var(--text-muted);
+}
+
 /* Advanced processing collapsible */
 .adv-processing {
-  grid-column: 1 / -1;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--surface);
   padding: 12px 16px;
-  margin-top: 4px;
+  margin-bottom: 18px;
 }
 .adv-processing summary {
   cursor: pointer; font-size: 13px; font-weight: 600; color: var(--text-muted);
@@ -306,7 +329,7 @@ textarea { font-family: var(--font-mono); resize: vertical; }
   border: 1px solid rgba(124,58,237,0.25);
   border-radius: 10px;
   padding: 14px 16px;
-  margin-bottom: 20px;
+  margin-bottom: 0;
 }
 .ai-assist-inner { display: flex; gap: 10px; align-items: flex-start; }
 .ai-assist-label { font-size: 13px; font-weight: 600; color: #a78bfa; white-space: nowrap; padding-top: 6px; }
@@ -402,40 +425,92 @@ textarea { font-family: var(--font-mono); resize: vertical; }
     </div>
   </div>
 
-  <div class="quick-guide">
-    <div class="quick-step">
-      <div class="qs-label">1. LLM wählen</div>
-      <div class="qs-title">Provider und Modell</div>
-      <div class="qs-desc">Hier legst du fest, <strong>welcher Dienst</strong> die Aufgabe bearbeitet. Bei lokalen Modellen reicht meistens der Modellname. API-Key nur bei Cloud-Providern.</div>
+  <!-- ── Step 1: Input File ── -->
+  <div class="section-card">
+    <div class="section-card-header">
+      <span class="section-card-num">1</span>
+      <span class="section-card-title">Input File</span>
+      <span class="section-card-desc">Wähle zuerst die Eingabedatei — das Format wird automatisch erkannt.</span>
     </div>
-    <div class="quick-step">
-      <div class="qs-label">2. Aufgabe beschreiben</div>
-      <div class="qs-title">Was soll pro Zeile passieren?</div>
-      <div class="qs-desc">Schreibe in einem Satz, <strong>was das LLM tun soll</strong> und welches Ergebnis du erwartest. Das Feld oben darf ruhig natürlich formuliert sein.</div>
+    <div class="form-group" style="margin-bottom:8px">
+      <label>Input File</label>
+      <div id="upload-zone" class="upload-zone">
+        Drop a file here or click to upload
+        <input type="file" id="file-input" style="display:none" accept=".csv,.json,.jsonl,.xml">
+        <div id="upload-path" class="upload-path" style="display:none"></div>
+      </div>
+      <div class="hint">Upload or select the source data file. The format and delimiter are detected automatically.</div>
     </div>
-    <div class="quick-step">
-      <div class="qs-label">3. Daten zuordnen</div>
-      <div class="qs-title">Input, Output und Ergebnisfeld</div>
-      <div class="qs-desc">Wähle den Dateityp, lade oder verknüpfe die Eingabe und sage, <strong>wo das Ergebnis gespeichert werden soll</strong>. Das Response Field ist der Spaltenname für die LLM-Antwort.</div>
-    </div>
-    <div class="quick-step">
-      <div class="qs-label">4. Erst testen</div>
-      <div class="qs-title">Validieren, dann Dry Run</div>
-      <div class="qs-desc">Wenn du unsicher bist: erst <strong>Validate</strong>, dann <strong>Dry Run</strong>. Workers, Timeout und Retries nur anfassen, wenn du sie wirklich brauchst.</div>
+    <div style="display:flex;gap:12px;flex-wrap:wrap">
+      <div class="form-group" style="flex:1;min-width:160px;margin-bottom:0">
+        <label>Input Type <span style="font-size:11px;color:var(--green)">(auto-detected)</span></label>
+        <select id="q-input-type">
+          <option value="csv">CSV</option>
+          <option value="json">JSON (array)</option>
+          <option value="jsonl">JSONL (JSON Lines)</option>
+          <option value="xml">XML</option>
+        </select>
+      </div>
+      <div class="form-group" style="flex:1;min-width:160px;margin-bottom:0">
+        <label>Output Type</label>
+        <select id="q-output-type">
+          <option value="jsonl">JSONL (JSON Lines)</option>
+          <option value="csv">CSV</option>
+        </select>
+      </div>
     </div>
   </div>
 
-  <!-- AI-assist bar -->
-  <div class="ai-assist-bar">
-    <div class="ai-assist-inner">
-      <span class="ai-assist-label">✨ AI Quick Setup</span>
-      <textarea id="q-task" class="ai-assist-input" rows="2" placeholder="Describe the job in one sentence — for example: &#34;Classify each customer ticket as urgent, normal, or low priority and explain why.&#34;"></textarea>
-      <button class="btn btn-accent" onclick="suggestConfig()" id="suggest-btn">Suggest setup</button>
+  <!-- Data Preview + Column Exclusion -->
+  <div id="preview-section" style="display:none;margin-bottom:24px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+      <span class="section-title" style="margin-bottom:0">Data Preview <span id="preview-subtitle" style="font-weight:400;font-size:13px;color:var(--text-muted)"></span></span>
+      <button class="btn btn-secondary btn-sm" onclick="loadPreview()">↻ Refresh</button>
     </div>
-    <div id="suggest-status" class="suggest-status"></div>
+    <p style="font-size:12px;color:var(--text-muted);margin-bottom:8px">Check/uncheck column headers to control which fields are sent to the LLM. Unchecked columns are completely excluded from both the LLM prompt and (when <em>Include Input in Output</em> is on) the output file.</p>
+    <div id="preview-table-wrap" style="overflow-x:auto;border:1px solid var(--border);border-radius:6px;">
+      <table id="preview-table" class="file-table" style="min-width:100%">
+        <thead id="preview-thead"></thead>
+        <tbody id="preview-tbody"></tbody>
+      </table>
+    </div>
+    <div id="preview-excluded-info" style="margin-top:6px;font-size:12px;color:var(--yellow)"></div>
+    <!-- Live JSON preview of what the LLM will receive for record 1 -->
+    <div style="margin-top:12px">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+        <span style="font-size:12px;font-weight:600;color:var(--text-muted)">LLM INPUT PREVIEW</span>
+        <span style="font-size:11px;color:var(--text-muted)">— exactly what will be sent for record #1 (JSON)</span>
+      </div>
+      <pre id="preview-json-sample" style="margin:0;padding:10px 14px;background:var(--bg-secondary,#1a1a2e);border:1px solid var(--border);border-radius:6px;font-size:11px;line-height:1.5;overflow-x:auto;white-space:pre-wrap;color:var(--accent)"></pre>
+    </div>
   </div>
 
-  <div class="quick-grid">
+  <!-- ── Step 2: AI Quick Setup ── -->
+  <div class="section-card">
+    <div class="section-card-header">
+      <span class="section-card-num">2</span>
+      <span class="section-card-title">Aufgabe beschreiben</span>
+      <span class="section-card-desc">Erkläre der KI was sie tun soll — die Datenstruktur aus Schritt 1 ist bereits bekannt.</span>
+    </div>
+    <!-- AI-assist bar -->
+    <div class="ai-assist-bar" style="margin-bottom:0">
+      <div class="ai-assist-inner">
+        <span class="ai-assist-label">✨ AI Quick Setup</span>
+        <textarea id="q-task" class="ai-assist-input" rows="2" placeholder="Describe the job in one sentence — for example: &#34;Classify each customer ticket as urgent, normal, or low priority and explain why.&#34;"></textarea>
+        <button class="btn btn-accent" onclick="suggestConfig()" id="suggest-btn">Suggest setup</button>
+      </div>
+      <div id="suggest-status" class="suggest-status"></div>
+    </div>
+  </div>
+
+  <!-- ── Step 3: LLM + Prompts ── -->
+  <div class="section-card">
+    <div class="section-card-header">
+      <span class="section-card-num">3</span>
+      <span class="section-card-title">Provider &amp; Prompts</span>
+      <span class="section-card-desc">Wähle das Sprachmodell und stelle die Prompts ein.</span>
+    </div>
+    <div class="quick-grid">
 
     <!-- Provider / Model -->
     <div class="form-group">
@@ -496,76 +571,39 @@ textarea { font-family: var(--font-mono); resize: vertical; }
       <div class="hint">Add output rules here, for example JSON-only or a short explanation style.</div>
     </div>
 
-    <hr class="section-sep quick-full">
+    </div><!-- .quick-grid -->
+  </div><!-- .section-card -->
 
-    <!-- I/O -->
-    <div class="form-group">
-      <label>Input Type</label>
-      <select id="q-input-type">
-        <option value="csv">CSV</option>
-        <option value="json">JSON (array)</option>
-        <option value="jsonl">JSONL (JSON Lines)</option>
-        <option value="xml">XML</option>
-      </select>
-      <div class="hint">Choose the format of the file you are loading.</div>
+  <!-- ── Step 4: Output Options ── -->
+  <div class="section-card">
+    <div class="section-card-header">
+      <span class="section-card-num">4</span>
+      <span class="section-card-title">Ausgabe konfigurieren</span>
+      <span class="section-card-desc">Lege fest welche Felder gespeichert werden sollen.</span>
     </div>
-    <div class="form-group">
-      <label>Output Type</label>
-      <select id="q-output-type">
-        <option value="jsonl">JSONL (JSON Lines)</option>
-        <option value="csv">CSV</option>
-      </select>
-      <div class="hint">Choose how the results should be written.</div>
-    </div>
+    <div class="quick-grid">
+
     <div class="form-group">
       <label>⑤ Response Field Name</label>
       <input id="q-response-field" type="text" value="llm_response">
-      <div class="hint">Name of the output column that stores the LLM answer.</div>
+      <div class="hint">Name of the output column that stores the LLM answer. For multiple structured fields, use <em>Parse JSON Response</em> + <em>Response Fields</em> in Advanced settings.</div>
     </div>
     <div class="form-group">
       <label>Include Input in Output</label>
-      <select id="q-include-input">
-        <option value="true">Yes — copy all input fields alongside the response</option>
-        <option value="false">No — output only the response field</option>
+      <select id="q-include-input" onchange="onIncludeInputChange()">
+        <option value="all">Yes — copy all input fields alongside the response</option>
+        <option value="key">Key column only — select the identifier column below</option>
+        <option value="none">No — output only the response field(s)</option>
       </select>
-      <div class="hint">Turn this off if you only want the generated result in the output file.</div>
+      <div class="hint">Choose how much of the input data is written alongside the LLM results.</div>
     </div>
-    <div class="form-group quick-full">
-      <label>Input File</label>
-      <div id="upload-zone" class="upload-zone">
-        Drop a file here or click to upload
-        <input type="file" id="file-input" style="display:none" accept=".csv,.json,.jsonl,.xml">
-        <div id="upload-path" class="upload-path" style="display:none"></div>
-      </div>
-      <div class="hint">Upload or select the source data file here. The file will be copied into <code>data/input</code>.</div>
+    <div class="form-group" id="key-column-group" style="display:none">
+      <label>Key Column</label>
+      <select id="q-key-column">
+        <option value="">— select after uploading a file —</option>
+      </select>
+      <div class="hint">Only this column from the input will be included in the output alongside the LLM response.</div>
     </div>
-    <!-- Data Preview + Column Exclusion -->
-    <div id="preview-section" class="quick-full" style="display:none">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-        <span class="section-title" style="margin-bottom:0">Data Preview <span id="preview-subtitle" style="font-weight:400;font-size:13px;color:var(--text-muted)"></span></span>
-        <button class="btn btn-secondary btn-sm" onclick="loadPreview()">↻ Refresh</button>
-      </div>
-      <p style="font-size:12px;color:var(--text-muted);margin-bottom:8px">Check/uncheck column headers to control which fields are sent to the LLM. Unchecked columns are completely excluded from both the LLM prompt and (when <em>Include Input in Output</em> is on) the output file.</p>
-      <div id="preview-table-wrap" style="overflow-x:auto;border:1px solid var(--border);border-radius:6px;">
-        <table id="preview-table" class="file-table" style="min-width:100%">
-          <thead id="preview-thead"></thead>
-          <tbody id="preview-tbody"></tbody>
-        </table>
-      </div>
-      <div id="preview-excluded-info" style="margin-top:6px;font-size:12px;color:var(--yellow)"></div>
-      <!-- Live JSON preview of what the LLM will receive for record 1 -->
-      <div style="margin-top:12px">
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
-          <span style="font-size:12px;font-weight:600;color:var(--text-muted)">LLM INPUT PREVIEW</span>
-          <span style="font-size:11px;color:var(--text-muted)">— exactly what will be sent for record #1 (JSON)</span>
-        </div>
-        <pre id="preview-json-sample" style="margin:0;padding:10px 14px;background:var(--bg-secondary,#1a1a2e);border:1px solid var(--border);border-radius:6px;font-size:11px;line-height:1.5;overflow-x:auto;white-space:pre-wrap;color:var(--accent)"></pre>
-      </div>
-    </div>
-
-    <hr class="section-sep quick-full">
-
-    <!-- Processing -->
     <div class="form-group">
       <label>Workers (parallel)</label>
       <input id="q-workers" type="number" value="2" min="1" max="32">
@@ -576,69 +614,77 @@ textarea { font-family: var(--font-mono); resize: vertical; }
       <input id="q-name" type="text" placeholder="My sentiment analysis run">
       <div class="hint">A short name for the Jobs list, useful when you run several jobs.</div>
     </div>
-    <details class="adv-processing quick-full">
-      <summary>⚙ Advanced settings</summary>
-      <div class="adv-grid">
-        <div class="form-group">
-          <label>Rate Limit (RPM, 0 = unlimited)</label>
-          <input id="q-rpm" type="number" value="60" min="0">
-          <div class="hint">Only lower this if your provider has request limits.</div>
-        </div>
-        <div class="form-group">
-          <label>Timeout per LLM request</label>
-          <input id="q-timeout" type="text" value="300s">
-          <div class="hint">Use a longer timeout for slow local models. Format: <code>60s</code>, <code>5m</code>.</div>
-        </div>
-        <div class="form-group">
-          <label>Max Retries</label>
-          <input id="q-retries" type="number" value="3" min="0" max="10">
-          <div class="hint">Retry when the model or network fails briefly.</div>
-        </div>
-        <div class="form-group">
-          <label>On Error</label>
-          <select id="q-continue-on-error">
-            <option value="true">Continue — skip failed records</option>
-            <option value="false">Stop — abort job on first error</option>
-          </select>
-          <div class="hint">Choose whether one bad row should stop the whole run.</div>
-        </div>
-        <div class="form-group">
-          <label>Prompt Caching</label>
-          <select id="q-prompt-caching">
-            <option value="false">Disabled</option>
-            <option value="true">Enabled</option>
-          </select>
-          <div class="hint">Useful for long, repeated prompts. Supported by OpenAI (&ge;1024 tokens) and Anthropic.</div>
-        </div>
-        <div class="form-group">
-          <label>Parse JSON Response</label>
-          <select id="q-parse-json">
-            <option value="false">Disabled</option>
-            <option value="true">Enabled &mdash; extract structured fields from response</option>
-          </select>
-          <div class="hint">When enabled, the last JSON object found in the LLM response is parsed and its fields are added as separate columns alongside the full raw response. Ideal for the &ldquo;reasoning + structured output&rdquo; pattern: instruct the LLM to reason first, then append a <code>{"field": value}</code> summary at the end via <em>Post Prompt</em>.</div>
-        </div>
-        <div class="form-group">
-          <label>Output Fields <span style="font-weight:400;color:var(--text-muted)">(optional)</span></label>
-          <input id="q-output-fields" type="text" placeholder="e.g. Produkt, Paket-geeignet">
-          <div class="hint">Comma-separated list of fields to include in the output. Leave empty to include all fields. Combine with <em>Parse JSON Response</em> to produce clean output with only specific columns &mdash; e.g. input key columns plus the LLM-extracted structured fields.</div>
-        </div>
-        <div class="form-group">
-          <label>Batch Size (records per LLM request)</label>
-          <input id="q-batch-size" type="number" value="1" min="1" max="500">
-          <div class="hint">1 = one record per request (default). Higher values bundle multiple records into one LLM call &mdash; useful to reduce overhead. The LLM must return a JSON array of responses.</div>
-        </div>
-        <div class="form-group">
-          <label>Debug Mode</label>
-          <select id="q-debug">
-            <option value="false">Disabled</option>
-            <option value="true">Enabled &mdash; log all prompts &amp; responses</option>
-          </select>
-          <div class="hint">When enabled, every LLM request (system prompt, user prompt) and the full raw response are written to the job logs. Useful for troubleshooting prompts. Automatically sets log level to DEBUG.</div>
-        </div>
+
+    </div><!-- .quick-grid -->
+  </div><!-- .section-card -->
+
+  <details class="adv-processing">
+    <summary>⚙ Advanced settings</summary>
+    <div class="adv-grid">
+      <div class="form-group">
+        <label>Rate Limit (RPM, 0 = unlimited)</label>
+        <input id="q-rpm" type="number" value="60" min="0">
+        <div class="hint">Only lower this if your provider has request limits.</div>
       </div>
-    </details>
-  </div>
+      <div class="form-group">
+        <label>Timeout per LLM request</label>
+        <input id="q-timeout" type="text" value="300s">
+        <div class="hint">Use a longer timeout for slow local models. Format: <code>60s</code>, <code>5m</code>.</div>
+      </div>
+      <div class="form-group">
+        <label>Max Retries</label>
+        <input id="q-retries" type="number" value="3" min="0" max="10">
+        <div class="hint">Retry when the model or network fails briefly.</div>
+      </div>
+      <div class="form-group">
+        <label>On Error</label>
+        <select id="q-continue-on-error">
+          <option value="true">Continue — skip failed records</option>
+          <option value="false">Stop — abort job on first error</option>
+        </select>
+        <div class="hint">Choose whether one bad row should stop the whole run.</div>
+      </div>
+      <div class="form-group">
+        <label>Prompt Caching</label>
+        <select id="q-prompt-caching">
+          <option value="false">Disabled</option>
+          <option value="true">Enabled</option>
+        </select>
+        <div class="hint">Useful for long, repeated prompts. Supported by OpenAI (&ge;1024 tokens) and Anthropic.</div>
+      </div>
+      <div class="form-group">
+        <label>Parse JSON Response</label>
+        <select id="q-parse-json">
+          <option value="false">Disabled</option>
+          <option value="true">Enabled &mdash; extract structured fields from response</option>
+        </select>
+        <div class="hint">When enabled, the last JSON object found in the LLM response is parsed and its fields are added as separate columns. Combine with <em>Response Fields</em> below for clean structured output.</div>
+      </div>
+      <div class="form-group">
+        <label>Response Fields <span style="font-weight:400;color:var(--text-muted)">(optional)</span></label>
+        <input id="q-response-fields" type="text" placeholder="e.g. weight, volume, needs_freight, short_expiry">
+        <div class="hint">Comma-separated list of JSON field names the LLM should return. Automatically enables <em>Parse JSON Response</em> and sets <em>Output Fields</em> to these + the key column. The Post-Prompt should instruct the LLM to return exactly these fields as a JSON object.</div>
+      </div>
+      <div class="form-group">
+        <label>Output Fields <span style="font-weight:400;color:var(--text-muted)">(optional, overrides Response Fields)</span></label>
+        <input id="q-output-fields" type="text" placeholder="e.g. Produkt, Paket-geeignet">
+        <div class="hint">Comma-separated list of fields to include in the output. Leave empty to include all fields.</div>
+      </div>
+      <div class="form-group">
+        <label>Batch Size (records per LLM request)</label>
+        <input id="q-batch-size" type="number" value="1" min="1" max="500">
+        <div class="hint">1 = one record per request (default). Higher values bundle multiple records into one LLM call. The LLM must return a JSON array of responses.</div>
+      </div>
+      <div class="form-group">
+        <label>Debug Mode</label>
+        <select id="q-debug">
+          <option value="false">Disabled</option>
+          <option value="true">Enabled &mdash; log all prompts &amp; responses</option>
+        </select>
+        <div class="hint">When enabled, every LLM request and the full raw response are written to the job logs.</div>
+      </div>
+    </div>
+  </details>
 
   <!-- Agentic tools -->
   <details id="tools-section" class="tools-section">
@@ -716,6 +762,34 @@ textarea { font-family: var(--font-mono); resize: vertical; }
             <input id="t-sql-dsn-env" type="text" placeholder="DB_DSN" style="margin-top:4px">
           </div>
         </div>
+      </div>
+    </div>
+  </details>
+
+  <!-- Data Enrichment (non-agentic web crawl) -->
+  <details class="tools-section" id="enrich-section">
+    <summary>Data Enrichment <span style="color:var(--text-muted);font-weight:400">(optional — non-agentic web crawl: enrich records from the web before LLM processing)</span></summary>
+    <div class="adv-grid">
+      <div class="form-group">
+        <label><input type="checkbox" id="e-enabled" style="width:auto"> Enable Data Enrichment</label>
+        <div class="hint">When enabled, llmflow searches the web for the value in the selected column and appends the first result as plain text to each record — before the LLM prompt is built.</div>
+      </div>
+      <div class="form-group">
+        <label>Search Column</label>
+        <select id="e-column">
+          <option value="">— select after uploading a file —</option>
+        </select>
+        <div class="hint">The column whose value is used as the search query (e.g. EAN number, product name).</div>
+      </div>
+      <div class="form-group">
+        <label>Output Field Name</label>
+        <input id="e-output-field" type="text" placeholder="e.g. web_info">
+        <div class="hint">Name of the field added to each record with the web search result. Defaults to <code>enriched_&lt;column&gt;</code>.</div>
+      </div>
+      <div class="form-group">
+        <label>Max Characters</label>
+        <input id="e-max-chars" type="number" value="2000" min="100" max="10000">
+        <div class="hint">Truncate the enrichment result to this many characters.</div>
       </div>
     </div>
   </details>
@@ -802,6 +876,10 @@ processing:
     <button class="btn btn-secondary" onclick="validateYAML()">Validate</button>
     <button class="btn btn-primary" onclick="runYAML(false)">▶ Run</button>
     <button class="btn btn-secondary" onclick="runYAML(true)">Dry Run</button>
+    <span style="flex:1"></span>
+    <button class="btn btn-secondary" onclick="importYAML()" title="Import a YAML config file from disk">⬆ Import</button>
+    <button class="btn btn-secondary" onclick="exportYAML()" title="Download the current YAML config as a file">⬇ Export</button>
+    <input type="file" id="yaml-import-input" accept=".yaml,.yml" style="display:none" onchange="onYAMLImportFile(event)">
   </div>
   <div id="editor-status" class="status-bar"></div>
 </div>
@@ -874,6 +952,64 @@ processing:
       <div class="empty-state">No output files yet. Completed jobs will write here when the output path is set to data/output/…</div>
     </div>
   </div>
+
+  <!-- Standing Orders / Watchers -->
+  <div class="files-section">
+    <h3>🔄 Standing Orders <span style="font-weight:400;font-size:13px;color:var(--text-muted)">(auto-process new files matching a pattern)</span></h3>
+    <div id="watchers-table-wrap">
+      <div class="empty-state" id="watchers-empty">No standing orders yet.</div>
+      <table class="file-table" id="watchers-table" style="display:none">
+        <thead><tr>
+          <th>ID</th><th>Name</th><th>Watch Dir</th><th>Pattern</th><th>Active</th><th>Actions</th>
+        </tr></thead>
+        <tbody id="watchers-tbody"></tbody>
+      </table>
+    </div>
+    <details style="margin-top:12px">
+      <summary style="cursor:pointer;font-size:13px;font-weight:600;color:var(--accent)">+ Add Standing Order</summary>
+      <div class="adv-grid" style="margin-top:12px">
+        <div class="form-group">
+          <label>Name</label>
+          <input id="w-name" type="text" placeholder="e.g. Nightly product import">
+        </div>
+        <div class="form-group">
+          <label>Watch Directory</label>
+          <input id="w-dir" type="text" placeholder="e.g. /data/drops">
+          <div class="hint">Absolute path to the directory to watch for new files.</div>
+        </div>
+        <div class="form-group">
+          <label>File Pattern</label>
+          <input id="w-pattern" type="text" placeholder="e.g. PRODUCTS_*.csv">
+          <div class="hint">Glob pattern for file names in the watch directory.</div>
+        </div>
+        <div class="form-group" style="grid-column:1/-1">
+          <label>YAML Config Template</label>
+          <textarea id="w-config" rows="6" placeholder="Paste your llmflow YAML config here. Use {{.InputFile}} where the matched file path should be injected."></textarea>
+          <div class="hint">Use <code>{{.InputFile}}</code> as the input path placeholder — it will be replaced with the actual file path at run time.</div>
+        </div>
+        <div class="form-group">
+          <label><input type="checkbox" id="w-active" checked style="width:auto"> Active immediately</label>
+        </div>
+      </div>
+      <div class="btn-row" style="margin-top:8px">
+        <button class="btn btn-primary" onclick="createWatcher()">Create</button>
+      </div>
+      <div id="watcher-create-status" class="status-bar"></div>
+    </details>
+  </div>
+
+  <!-- File Preview Modal -->
+  <div id="file-preview-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:9999;overflow:auto;padding:32px 16px">
+    <div style="max-width:900px;margin:0 auto;background:var(--bg-panel);border:1px solid var(--border);border-radius:10px;padding:24px;position:relative">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+        <span id="file-preview-title" style="font-size:15px;font-weight:700"></span>
+        <button class="btn btn-secondary btn-sm" onclick="closeFilePreview()">✕ Close</button>
+      </div>
+      <div id="file-preview-body" style="overflow-x:auto">
+        <div class="empty-state">Loading…</div>
+      </div>
+    </div>
+  </div>
 </div>
 
 </div><!-- .container -->
@@ -931,14 +1067,27 @@ async function uploadFile(file) {
     const d = await r.json();
     if (d.ok) {
       uploadedPath = d.data.path;
-      const ext = file.name.split('.').pop().toLowerCase();
-      const typeMap = { csv:'csv', json:'json', jsonl:'jsonl', xml:'xml' };
-      if (typeMap[ext]) document.getElementById('q-input-type').value = typeMap[ext];
       [document.getElementById('upload-path'), document.getElementById('files-upload-path')].forEach(el => {
         if (!el) return;
         el.textContent = '✓ ' + uploadedPath;
         el.style.display = 'block';
       });
+      // Auto-detect format + delimiter
+      try {
+        const dr = await fetch('/api/detect-format?path=' + encodeURIComponent(uploadedPath));
+        const dd = await dr.json();
+        if (dd.ok && dd.data) {
+          const fmt = dd.data.type;
+          const typeEl = document.getElementById('q-input-type');
+          if (fmt && typeEl) typeEl.value = fmt;
+        }
+      } catch(_) {
+        // Fallback: use extension
+        const ext = file.name.split('.').pop().toLowerCase();
+        const typeMap = { csv:'csv', json:'json', jsonl:'jsonl', xml:'xml' };
+        const typeEl = document.getElementById('q-input-type');
+        if (typeEl && typeMap[ext]) typeEl.value = typeMap[ext];
+      }
       await refreshFiles();
       await loadPreview();
     } else {
@@ -979,6 +1128,15 @@ async function loadPreview() {
     const tplEl = document.getElementById('q-template');
     if (tplEl && !tplEl.value.trim()) {
       tplEl.value = '{{ toPrettyJSON .record }}';
+    }
+    // Populate key-column and enrichment column selectors
+    const keyColSel = document.getElementById('q-key-column');
+    if (keyColSel) {
+      keyColSel.innerHTML = columns.map(c => `<option value="${escHtml(c)}">${escHtml(c)}</option>`).join('');
+    }
+    const eColSel = document.getElementById('e-column');
+    if (eColSel) {
+      eColSel.innerHTML = '<option value="">— select a column —</option>' + columns.map(c => `<option value="${escHtml(c)}">${escHtml(c)}</option>`).join('');
     }
   } catch(e) {
     document.getElementById('preview-section').style.display = 'none';
@@ -1093,6 +1251,23 @@ function formatBytes(bytes) {
   return value.toFixed(value >= 10 || unit === 0 ? 0 : 1) + ' ' + units[unit];
 }
 
+// ── File table sort state ─────────────────────────────────────────
+const fileTableSort = {
+  input:  { col: 'name', dir: 1 },
+  output: { col: 'mod_time', dir: -1 },
+};
+
+function sortFileTableBy(dir, col) {
+  if (!fileTableSort[dir]) return;
+  if (fileTableSort[dir].col === col) {
+    fileTableSort[dir].dir *= -1;
+  } else {
+    fileTableSort[dir].col = col;
+    fileTableSort[dir].dir = 1;
+  }
+  refreshFiles();
+}
+
 function renderFileTable(containerId, files, dir) {
   const el = document.getElementById(containerId);
   if (!el) return;
@@ -1103,7 +1278,28 @@ function renderFileTable(containerId, files, dir) {
     return;
   }
 
-  const rows = files.map(f => `
+  const sort = fileTableSort[dir] || { col: 'name', dir: 1 };
+  const sorted = [...files].sort((a, b) => {
+    let va = a[sort.col], vb = b[sort.col];
+    if (sort.col === 'size') {
+      va = Number(va) || 0;
+      vb = Number(vb) || 0;
+    } else if (sort.col === 'mod_time') {
+      va = va ? new Date(va).getTime() : 0;
+      vb = vb ? new Date(vb).getTime() : 0;
+    } else {
+      va = String(va || '').toLowerCase();
+      vb = String(vb || '').toLowerCase();
+    }
+    return va < vb ? -sort.dir : va > vb ? sort.dir : 0;
+  });
+
+  function thIcon(col) {
+    if (sort.col !== col) return ' ⇅';
+    return sort.dir === 1 ? ' ▲' : ' ▼';
+  }
+
+  const rows = sorted.map(f => `
     <tr>
       <td>${escHtml(f.name || '')}</td>
       <td class="file-size">${formatBytes(f.size || 0)}</td>
@@ -1111,13 +1307,19 @@ function renderFileTable(containerId, files, dir) {
       <td>
         <div class="file-actions">
           ${dir === 'input' ? `<button class="btn btn-sm btn-secondary js-use-file-input" data-path="${escHtml(f.path || '')}" data-name="${escHtml(f.name || '')}">Use as Input</button>` : ''}
+          ${dir === 'output' ? `<button class="btn btn-sm btn-secondary" onclick="previewFile('output','${escHtml(f.name || '')}')">Preview</button>` : ''}
           <a class="btn btn-sm btn-secondary" href="/api/files/download/${encodeURIComponent(dir)}/${encodeURIComponent(f.name || '')}" download="${escHtml(f.name || '')}">Download</a>
           <button class="btn btn-sm btn-danger js-delete-file" data-dir="${escHtml(dir)}" data-name="${escHtml(f.name || '')}">Delete</button>
         </div>
       </td>
     </tr>`).join('');
 
-  el.innerHTML = `<table class="file-table"><thead><tr><th>Name</th><th>Size</th><th>Modified</th><th>Actions</th></tr></thead><tbody>${rows}</tbody></table>`;
+  el.innerHTML = `<table class="file-table"><thead><tr>
+    <th style="cursor:pointer" onclick="sortFileTableBy('${dir}','name')">Name${thIcon('name')}</th>
+    <th style="cursor:pointer" onclick="sortFileTableBy('${dir}','size')">Size${thIcon('size')}</th>
+    <th style="cursor:pointer" onclick="sortFileTableBy('${dir}','mod_time')">Modified${thIcon('mod_time')}</th>
+    <th>Actions</th>
+  </tr></thead><tbody>${rows}</tbody></table>`;
 }
 
 async function refreshFiles() {
@@ -1139,6 +1341,7 @@ async function refreshFiles() {
   } catch(e) {
     if (statusEl) statusEl.textContent = 'Error: ' + e.message;
   }
+  refreshWatchers();
 }
 
 function useFileAsInput(path, name) {
@@ -1207,16 +1410,21 @@ function buildYAMLFromForm() {
   const retries       = document.getElementById('q-retries').value || '3';
   const continueErr   = document.getElementById('q-continue-on-error').value;
   const responseField = document.getElementById('q-response-field').value || 'llm_response';
-  const includeInput  = document.getElementById('q-include-input').value;
+  const includeMode   = document.getElementById('q-include-input').value; // all | key | none
   const inputPath     = uploadedPath || './input.' + (inputType === 'jsonl' ? 'jsonl' : inputType);
   const ts            = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
   const outputPath    = `data/output/output-${ts}.` + outputType;
+  const task          = (document.getElementById('q-task').value || '').trim();
+  const responseFieldsRaw = (document.getElementById('q-response-fields') ? document.getElementById('q-response-fields').value.trim() : '');
 
   const promptCaching = document.getElementById('q-prompt-caching').value;
   const ind4 = s => s.split('\n').join('\n    ');
   const apiKeyEntry = getAPIKeyConfigEntry();
 
-  let yaml = `api:\n  provider: ${provider}\n  model: ${model}\n  timeout: ${timeout}\n  rate_limit_rpm: ${rpm}`;
+  let yaml = '';
+  if (task) yaml += `# Task: ${task}\n\n`;
+
+  yaml += `api:\n  provider: ${provider}\n  model: ${model}\n  timeout: ${timeout}\n  rate_limit_rpm: ${rpm}`;
   if (apiKeyEntry) yaml += `\n  ${apiKeyEntry.field}: ${apiKeyEntry.value}`;
   if (promptCaching === 'true') yaml += `\n  prompt_caching: true`;
   if (baseurl) yaml += `\n  base_url: ${baseurl}`;
@@ -1236,12 +1444,29 @@ function buildYAMLFromForm() {
   yaml += `\n\noutput:\n  type: ${outputType}\n  path: ${outputPath}`;
   if (outputType === 'csv') yaml += `\n  csv:\n    has_header: true`;
 
-  yaml += `\n\nprocessing:\n  mode: per_record\n  include_input_in_output: ${includeInput}\n  response_field: ${responseField}\n  continue_on_error: ${continueErr}\n  workers: ${workers}\n  max_retries: ${retries}\n  dry_run: false`;
+  // include_input_in_output: all → true, none → false, key → true + key_column
+  const includeInputBool = includeMode !== 'none';
+  yaml += `\n\nprocessing:\n  mode: per_record\n  include_input_in_output: ${includeInputBool}`;
+  if (includeMode === 'key') {
+    const keyCol = document.getElementById('q-key-column').value;
+    if (keyCol) yaml += `\n  key_column: ${keyCol}`;
+  }
+  yaml += `\n  response_field: ${responseField}\n  continue_on_error: ${continueErr}\n  workers: ${workers}\n  max_retries: ${retries}\n  dry_run: false`;
+
+  // Response fields → parse_json_response + output_fields
+  const responseFieldsList = responseFieldsRaw ? responseFieldsRaw.split(',').map(f => f.trim()).filter(Boolean) : [];
   const parseJSON = document.getElementById('q-parse-json').value;
-  if (parseJSON === 'true') yaml += `\n  parse_json_response: true`;
-  const outputFields = document.getElementById('q-output-fields').value.trim();
-  if (outputFields) {
-    const fields = outputFields.split(',').map(f => `"${f.trim().replace(/"/g, '\\"')}"`).filter(Boolean);
+  if (parseJSON === 'true' || responseFieldsList.length > 0) yaml += `\n  parse_json_response: true`;
+
+  let outputFieldsRaw = (document.getElementById('q-output-fields').value || '').trim();
+  if (!outputFieldsRaw && responseFieldsList.length > 0) {
+    // Auto-derive output_fields from response fields
+    const keyCol = includeMode === 'key' ? document.getElementById('q-key-column').value : '';
+    const allOut = keyCol ? [keyCol, ...responseFieldsList] : responseFieldsList;
+    outputFieldsRaw = allOut.join(', ');
+  }
+  if (outputFieldsRaw) {
+    const fields = outputFieldsRaw.split(',').map(f => `"${f.trim().replace(/"/g, '\\"')}"`).filter(Boolean);
     if (fields.length > 0) yaml += `\n  output_fields: [${fields.join(', ')}]`;
   }
   const batchSize = parseInt(document.getElementById('q-batch-size').value || '1', 10);
@@ -1280,6 +1505,18 @@ function buildYAMLFromForm() {
       else yaml += `\n    dsn_env: ${sqlDsnEnv}`;
     }
   }
+
+  // Data Enrichment
+  if (document.getElementById('e-enabled') && document.getElementById('e-enabled').checked) {
+    const eCol    = document.getElementById('e-column').value;
+    const eOut    = (document.getElementById('e-output-field').value || '').trim();
+    const eMax    = parseInt(document.getElementById('e-max-chars').value || '2000', 10);
+    yaml += `\n\nenrich:\n  enabled: true`;
+    if (eCol) yaml += `\n  column: ${eCol}`;
+    if (eOut) yaml += `\n  output_field: ${eOut}`;
+    if (eMax && eMax !== 2000) yaml += `\n  max_chars: ${eMax}`;
+  }
+
   return yaml;
 }
 
@@ -1287,6 +1524,157 @@ function generateYAML() {
   document.getElementById('yaml-editor').value = buildYAMLFromForm();
   activatePanel('editor');
   showStatus('editor-status', 'info', 'YAML generated from Quick Start form.');
+}
+
+// ── YAML Import / Export ──────────────────────────────────────────
+function importYAML() {
+  document.getElementById('yaml-import-input').click();
+}
+function onYAMLImportFile(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    document.getElementById('yaml-editor').value = e.target.result;
+    showStatus('editor-status', 'ok', 'Imported: ' + file.name);
+  };
+  reader.readAsText(file);
+  event.target.value = '';
+}
+function exportYAML() {
+  const text = document.getElementById('yaml-editor').value;
+  const blob = new Blob([text], { type: 'text/yaml' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'llmflow-config.yaml';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+// ── Include Input change handler ──────────────────────────────────
+function onIncludeInputChange() {
+  const val = document.getElementById('q-include-input').value;
+  const grp = document.getElementById('key-column-group');
+  if (grp) grp.style.display = val === 'key' ? '' : 'none';
+}
+
+// ── File Preview ──────────────────────────────────────────────────
+async function previewFile(dir, name) {
+  const modal = document.getElementById('file-preview-modal');
+  const title = document.getElementById('file-preview-title');
+  const body  = document.getElementById('file-preview-body');
+  if (!modal) return;
+  title.textContent = name;
+  body.innerHTML = '<div class="empty-state">Loading…</div>';
+  modal.style.display = '';
+  try {
+    const r = await fetch(`/api/files/preview/${encodeURIComponent(dir)}/${encodeURIComponent(name)}?n=50`);
+    const d = await r.json();
+    if (!d.ok || !d.data || !d.data.length) {
+      body.innerHTML = '<div class="empty-state">No records found or unsupported format.</div>';
+      return;
+    }
+    const records = d.data;
+    const keys = [...new Set(records.flatMap(r => Object.keys(r)))];
+    const thead = '<thead><tr>' + keys.map(k => `<th>${escHtml(k)}</th>`).join('') + '</tr></thead>';
+    const tbody = '<tbody>' + records.map(rec =>
+      '<tr>' + keys.map(k => `<td style="white-space:nowrap;max-width:300px;overflow:hidden;text-overflow:ellipsis">${escHtml(String(rec[k] !== undefined ? rec[k] : ''))}</td>`).join('') + '</tr>'
+    ).join('') + '</tbody>';
+    body.innerHTML = `<p style="font-size:12px;color:var(--text-muted);margin-bottom:8px">First ${records.length} record(s)</p><div style="overflow-x:auto"><table class="file-table">${thead}${tbody}</table></div>`;
+  } catch(e) {
+    body.innerHTML = `<div class="empty-state">Error: ${escHtml(e.message)}</div>`;
+  }
+}
+function closeFilePreview() {
+  const modal = document.getElementById('file-preview-modal');
+  if (modal) modal.style.display = 'none';
+}
+// Close modal on backdrop click
+document.addEventListener('click', e => {
+  const modal = document.getElementById('file-preview-modal');
+  if (modal && e.target === modal) modal.style.display = 'none';
+});
+
+// ── Watchers ──────────────────────────────────────────────────────
+async function refreshWatchers() {
+  try {
+    const r = await fetch('/api/watchers');
+    const d = await r.json();
+    if (!d.ok) return;
+    const watchers = Array.isArray(d.data) ? d.data : [];
+    const tbody = document.getElementById('watchers-tbody');
+    const table = document.getElementById('watchers-table');
+    const empty = document.getElementById('watchers-empty');
+    if (!tbody) return;
+    if (watchers.length === 0) {
+      if (table) table.style.display = 'none';
+      if (empty) empty.style.display = '';
+      return;
+    }
+    if (table) table.style.display = '';
+    if (empty) empty.style.display = 'none';
+    tbody.innerHTML = watchers.map(w => `
+      <tr>
+        <td>${w.id}</td>
+        <td>${escHtml(w.name || '')}</td>
+        <td><code style="font-size:11px">${escHtml(w.watch_dir || '')}</code></td>
+        <td><code style="font-size:11px">${escHtml(w.pattern || '')}</code></td>
+        <td>${w.active ? '✅' : '⏸'}</td>
+        <td>
+          <div class="file-actions">
+            <button class="btn btn-sm btn-secondary" onclick="toggleWatcher(${w.id})">${w.active ? 'Pause' : 'Resume'}</button>
+            <button class="btn btn-sm btn-danger" onclick="deleteWatcher(${w.id})">Delete</button>
+          </div>
+        </td>
+      </tr>`).join('');
+  } catch(_) {}
+}
+
+async function createWatcher() {
+  const name    = document.getElementById('w-name').value.trim();
+  const dir     = document.getElementById('w-dir').value.trim();
+  const pattern = document.getElementById('w-pattern').value.trim();
+  const config  = document.getElementById('w-config').value.trim();
+  const active  = document.getElementById('w-active').checked;
+  const statusEl = document.getElementById('watcher-create-status');
+  if (!dir || !pattern) {
+    if (statusEl) { statusEl.className='status-bar show error'; statusEl.textContent='Watch dir and pattern are required.'; }
+    return;
+  }
+  try {
+    const r = await fetch('/api/watchers', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, watch_dir: dir, pattern, config, active }),
+    });
+    const d = await r.json();
+    if (d.ok) {
+      if (statusEl) { statusEl.className='status-bar show ok'; statusEl.textContent='Standing order created ✓'; }
+      document.getElementById('w-name').value = '';
+      document.getElementById('w-dir').value = '';
+      document.getElementById('w-pattern').value = '';
+      document.getElementById('w-config').value = '';
+      await refreshWatchers();
+    } else {
+      if (statusEl) { statusEl.className='status-bar show error'; statusEl.textContent='Error: ' + d.error; }
+    }
+  } catch(e) {
+    if (statusEl) { statusEl.className='status-bar show error'; statusEl.textContent='Error: ' + e.message; }
+  }
+}
+
+async function deleteWatcher(id) {
+  if (!confirm('Delete this standing order?')) return;
+  await fetch(`/api/watchers/${id}`, { method: 'DELETE' });
+  await refreshWatchers();
+}
+
+async function toggleWatcher(id) {
+  await fetch(`/api/watchers/${id}/toggle`, { method: 'POST' });
+  await refreshWatchers();
 }
 
 // ── API helpers ───────────────────────────────────────────────────
