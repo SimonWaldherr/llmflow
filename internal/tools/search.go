@@ -7,8 +7,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
 	"net/url"
 	"strings"
 	"time"
@@ -51,22 +49,9 @@ func webSearch(ctx context.Context, argsJSON string) (string, error) {
 		"skip_disambig": {"1"},
 	}.Encode()
 
-	client := &http.Client{Timeout: 10 * time.Second}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	body, err := fetchURL(ctx, endpoint, 10*time.Second, 256*1024)
 	if err != nil {
-		return "", fmt.Errorf("create request: %w", err)
-	}
-	req.Header.Set("User-Agent", "llmflow-agent/1.0")
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("http request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 256*1024))
-	if err != nil {
-		return "", fmt.Errorf("read body: %w", err)
+		return "", err
 	}
 
 	var ddg struct {

@@ -52,6 +52,12 @@ type ToolsConfig struct {
 	WebSearch bool `json:"web_search" yaml:"web_search"`
 	// WebExtractLinks allows the LLM to extract absolute links from a web page.
 	WebExtractLinks bool `json:"web_extract_links" yaml:"web_extract_links"`
+	// TextStats allows the LLM to inspect deterministic statistics for raw text.
+	TextStats bool `json:"text_stats" yaml:"text_stats"`
+	// RegexExtract allows the LLM to extract matching substrings with a regular expression.
+	RegexExtract bool `json:"regex_extract" yaml:"regex_extract"`
+	// JSONExtract allows the LLM to read a nested value from a JSON document via a simple path syntax.
+	JSONExtract bool `json:"json_extract" yaml:"json_extract"`
 	// CodeExecute allows the LLM to run sandboxed Go code via nanoGo.
 	CodeExecute bool `json:"code_execute" yaml:"code_execute"`
 	// Code configures the sandbox behavior for code_execute.

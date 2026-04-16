@@ -190,20 +190,21 @@ func (a *App) buildTools() []tools.Tool {
 		return nil
 	}
 	var ts []tools.Tool
-	if a.cfg.Tools.WebFetch {
-		ts = append(ts, tools.NewWebFetchTool())
-		a.logger.Info("tool enabled", "tool", "web_fetch")
+	addTool := func(enabled bool, name string, tool tools.Tool) {
+		if !enabled {
+			return
+		}
+		ts = append(ts, tool)
+		a.logger.Info("tool enabled", "tool", name)
 	}
-	if a.cfg.Tools.WebSearch {
-		ts = append(ts, tools.NewWebSearchTool())
-		a.logger.Info("tool enabled", "tool", "web_search")
-	}
-	if a.cfg.Tools.WebExtractLinks {
-		ts = append(ts, tools.NewWebExtractLinksTool())
-		a.logger.Info("tool enabled", "tool", "web_extract_links")
-	}
+	addTool(a.cfg.Tools.WebFetch, "web_fetch", tools.NewWebFetchTool())
+	addTool(a.cfg.Tools.WebSearch, "web_search", tools.NewWebSearchTool())
+	addTool(a.cfg.Tools.WebExtractLinks, "web_extract_links", tools.NewWebExtractLinksTool())
+	addTool(a.cfg.Tools.TextStats, "text_stats", tools.NewTextStatsTool())
+	addTool(a.cfg.Tools.RegexExtract, "regex_extract", tools.NewRegexExtractTool())
+	addTool(a.cfg.Tools.JSONExtract, "json_extract", tools.NewJSONExtractTool())
 	if a.cfg.Tools.CodeExecute {
-		ts = append(ts, tools.NewCodeExecTool(tools.CodeExecConfig{
+		addTool(true, "code_execute", tools.NewCodeExecTool(tools.CodeExecConfig{
 			Timeout:         a.cfg.Tools.Code.Timeout,
 			MaxSourceBytes:  a.cfg.Tools.Code.MaxSourceBytes,
 			ReadOnlyFS:      a.cfg.Tools.Code.ReadOnlyFS,
@@ -212,7 +213,6 @@ func (a *App) buildTools() []tools.Tool {
 			HTTPTimeout:     a.cfg.Tools.Code.HTTPTimeout,
 			HTTPMinInterval: a.cfg.Tools.Code.HTTPMinInterval,
 		}))
-		a.logger.Info("tool enabled", "tool", "code_execute")
 	}
 	if a.cfg.Tools.SQLQuery {
 		dsn := config.ResolveSecret(a.cfg.Tools.SQL.DSN, a.cfg.Tools.SQL.DSNEnv)
@@ -231,7 +231,7 @@ func (a *App) buildTools() []tools.Tool {
 		if strings.TrimSpace(dsn) == "" {
 			a.logger.Warn("sql_query tool enabled with empty DSN; set tools.sql.dsn or tools.sql.dsn_env", "driver", driver)
 		}
-		ts = append(ts, tools.NewSQLQueryTool(driver, dsn))
+		addTool(true, "sql_query", tools.NewSQLQueryTool(driver, dsn))
 		a.logger.Info("tool enabled", "tool", "sql_query", "driver", driver)
 	}
 	return ts

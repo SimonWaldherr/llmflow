@@ -6,8 +6,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
 	"net/url"
 	"regexp"
 	"strings"
@@ -67,22 +65,9 @@ func webExtractLinks(ctx context.Context, argsJSON string) (string, error) {
 		return "", fmt.Errorf("invalid url: %w", err)
 	}
 
-	client := &http.Client{Timeout: 15 * time.Second}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, args.URL, nil)
+	body, err := fetchURL(ctx, args.URL, 15*time.Second, 512*1024)
 	if err != nil {
-		return "", fmt.Errorf("create request: %w", err)
-	}
-	req.Header.Set("User-Agent", "llmflow-agent/1.0")
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("http request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 512*1024))
-	if err != nil {
-		return "", fmt.Errorf("read body: %w", err)
+		return "", err
 	}
 
 	matches := hrefAttrRe.FindAllStringSubmatch(string(body), -1)
