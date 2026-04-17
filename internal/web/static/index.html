@@ -3,481 +3,1019 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>llmflow – Web UI</title>
+<title>llmflow - Web UI</title>
 <style>
-/* ── Theme definitions ─────────────────────────────────────────── */
 :root {
-  --bg: #0d1117;
-  --surface: #161b22;
-  --bg-panel: #161b22;
-  --border: #30363d;
-  --text: #e6edf3;
-  --text-muted: #8b949e;
-  --accent: #58a6ff;
-  --accent-hover: #79c0ff;
-  --green: #3fb950;
-  --red: #f85149;
-  --yellow: #d29922;
-  --orange: #e3712a;
-  --font-mono: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace;
-  --theme-switcher-bg: #21262d;
-}
-[data-theme="light"] {
-  --bg: #ffffff;
-  --surface: #f6f8fa;
-  --bg-panel: #ffffff;
-  --border: #d0d7de;
-  --text: #1f2328;
-  --text-muted: #636c76;
-  --accent: #0969da;
-  --accent-hover: #0550ae;
-  --green: #1a7f37;
-  --red: #cf222e;
-  --yellow: #9a6700;
-  --orange: #bc4c00;
-  --theme-switcher-bg: #eaeef2;
-}
-[data-theme="forest"] {
-  --bg: #0a1a0a;
-  --surface: #0f2a0f;
-  --bg-panel: #0f2a0f;
-  --border: #1e4a1e;
-  --text: #cceacc;
-  --text-muted: #6ea86e;
-  --accent: #3fb950;
-  --accent-hover: #56d364;
-  --green: #56d364;
-  --red: #f85149;
-  --yellow: #d29922;
-  --orange: #e3712a;
-  --theme-switcher-bg: #1a3a1a;
-}
-[data-theme="ocean"] {
-  --bg: #070e1a;
-  --surface: #0c1829;
-  --bg-panel: #0c1829;
-  --border: #1a3558;
-  --text: #bdd5f0;
-  --text-muted: #5a8ab5;
-  --accent: #409eff;
-  --accent-hover: #69b4ff;
-  --green: #00c58e;
-  --red: #f85149;
-  --yellow: #d29922;
-  --orange: #e3712a;
-  --theme-switcher-bg: #112040;
-}
-[data-theme="violet"] {
-  --bg: #12091a;
-  --surface: #1c1030;
-  --bg-panel: #1c1030;
-  --border: #3d1f6a;
-  --text: #e2d9f3;
-  --text-muted: #9b8ec4;
-  --accent: #a78bfa;
-  --accent-hover: #c4b5fd;
-  --green: #34d399;
-  --red: #f87171;
-  --yellow: #fbbf24;
+  --bg: #0f172a;
+  --bg-alt: #111827;
+  --surface: #1f2937;
+  --surface-soft: #273449;
+  --bg-panel: #1f2937;
+  --border: #334155;
+  --text: #e5e7eb;
+  --text-muted: #94a3b8;
+  --accent: #2f7cf6;
+  --accent-strong: #1d4ed8;
+  --green: #22c55e;
+  --red: #ef4444;
+  --yellow: #f59e0b;
   --orange: #f97316;
-  --theme-switcher-bg: #2a1850;
+  --font-sans: "IBM Plex Sans", "Avenir Next", "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", "SF Mono", "Cascadia Code", monospace;
+  --shadow: 0 10px 28px rgba(2, 6, 23, 0.28);
+  --theme-switcher-bg: #273449;
+  --bg-secondary: #111827;
 }
 
-/* ── Theme switcher ─────────────────────────────────────────────── */
-.theme-switcher {
-  display: flex; align-items: center; gap: 6px;
-  background: var(--theme-switcher-bg); border: 1px solid var(--border);
-  border-radius: 20px; padding: 4px 10px; font-size: 12px; cursor: pointer;
+[data-theme="light"] {
+  --bg: #f4f7fb;
+  --bg-alt: #e9eff7;
+  --surface: #ffffff;
+  --surface-soft: #f9fbff;
+  --bg-panel: #ffffff;
+  --border: #d3deea;
+  --text: #0f172a;
+  --text-muted: #475569;
+  --accent: #1d4ed8;
+  --accent-strong: #1e40af;
+  --green: #15803d;
+  --red: #b91c1c;
+  --yellow: #b45309;
+  --orange: #c2410c;
+  --theme-switcher-bg: #eef3fa;
+  --bg-secondary: #f8fbff;
+  --shadow: 0 8px 22px rgba(15, 23, 42, 0.08);
 }
-.theme-switcher select {
-  background: transparent; border: none; color: var(--text-muted);
-  font-size: 12px; cursor: pointer; padding: 0; width: auto;
-  outline: none;
+
+[data-theme="forest"] {
+  --bg: #0f1a13;
+  --bg-alt: #122318;
+  --surface: #1c2e22;
+  --surface-soft: #223728;
+  --bg-panel: #1c2e22;
+  --border: #31523d;
+  --text: #d4e9d7;
+  --text-muted: #9db7a1;
+  --accent: #38a169;
+  --accent-strong: #2f855a;
+  --green: #22c55e;
+  --red: #f87171;
+  --yellow: #eab308;
+  --orange: #fb923c;
+  --theme-switcher-bg: #243d2d;
+  --bg-secondary: #122318;
 }
-.theme-switcher select:focus { outline: none; }
-* { box-sizing: border-box; margin: 0; padding: 0; }
+
+[data-theme="ocean"] {
+  --bg: #0b1621;
+  --bg-alt: #0d2030;
+  --surface: #14293d;
+  --surface-soft: #17344c;
+  --bg-panel: #14293d;
+  --border: #285072;
+  --text: #d5e7f6;
+  --text-muted: #8fb2d1;
+  --accent: #3b82f6;
+  --accent-strong: #2563eb;
+  --green: #14b8a6;
+  --red: #f87171;
+  --yellow: #f59e0b;
+  --orange: #fb923c;
+  --theme-switcher-bg: #1a3954;
+  --bg-secondary: #0d2030;
+}
+
+[data-theme="violet"] {
+  --bg: #190f2a;
+  --bg-alt: #211238;
+  --surface: #2b1e42;
+  --surface-soft: #32244d;
+  --bg-panel: #2b1e42;
+  --border: #5b3f7f;
+  --text: #e7ddf9;
+  --text-muted: #bea9df;
+  --accent: #8b5cf6;
+  --accent-strong: #7c3aed;
+  --green: #34d399;
+  --red: #fb7185;
+  --yellow: #fbbf24;
+  --orange: #fb923c;
+  --theme-switcher-bg: #3a2a59;
+  --bg-secondary: #211238;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
 body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
-  background: var(--bg); color: var(--text);
-  line-height: 1.5;
+  font-family: var(--font-sans);
+  color: var(--text);
+  background: linear-gradient(180deg, var(--bg-alt) 0%, var(--bg) 200px);
+  line-height: 1.45;
 }
-a { color: var(--accent); text-decoration: none; }
-a:hover { color: var(--accent-hover); }
+
+a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
 
 header {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 12px 24px; border-bottom: 1px solid var(--border);
-  background: var(--surface);
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  backdrop-filter: blur(8px);
+  background: color-mix(in srgb, var(--bg) 82%, transparent);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  padding: 14px 20px;
 }
-header h1 { font-size: 18px; font-weight: 600; }
-header h1 span { color: var(--accent); }
+
+header h1 {
+  font-size: 18px;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+}
+
+header h1 span {
+  color: var(--accent);
+}
 
 .container {
-  max-width: 1200px; margin: 0 auto; padding: 24px;
+  max-width: 1240px;
+  margin: 0 auto;
+  padding: 22px 20px 44px;
+}
+
+.theme-switcher {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+  background: var(--theme-switcher-bg);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+}
+
+.theme-switcher select {
+  width: auto;
+  border: none;
+  padding: 0;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12px;
 }
 
 .tabs {
-  display: flex; gap: 0; border-bottom: 1px solid var(--border); margin-bottom: 24px;
-}
-.tab {
-  padding: 8px 20px; cursor: pointer; border: none; background: none;
-  color: var(--text-muted); font-size: 14px; border-bottom: 2px solid transparent;
-  transition: color 0.15s, border-color 0.15s;
-}
-.tab:hover { color: var(--text); }
-.tab.active { color: var(--text); border-bottom-color: var(--accent); }
-
-.panel { display: none; }
-.panel.active { display: block; }
-
-/* Form */
-.form-group { margin-bottom: 16px; }
-.form-group label {
-  display: block; font-size: 13px; color: var(--text-muted);
-  margin-bottom: 4px; font-weight: 500;
-}
-.form-group .hint {
-  font-size: 12px; color: var(--text-muted); margin-top: 4px; line-height: 1.5;
-}
-input, select, textarea {
-  width: 100%; padding: 8px 12px; background: var(--bg); color: var(--text);
-  border: 1px solid var(--border); border-radius: 6px; font-size: 14px;
-  font-family: inherit;
-}
-input:focus, select:focus, textarea:focus {
-  outline: none; border-color: var(--accent);
-}
-textarea { font-family: var(--font-mono); resize: vertical; }
-
-.editor-full {
-  width: 100%; min-height: 400px; font-family: var(--font-mono); font-size: 13px;
-  padding: 16px; background: var(--bg); color: var(--text);
-  border: 1px solid var(--border); border-radius: 6px;
-  tab-size: 2; line-height: 1.6;
-}
-
-.btn-row { display: flex; gap: 8px; margin-top: 16px; flex-wrap: wrap; align-items: center; }
-
-.btn {
-  padding: 8px 20px; border-radius: 6px; border: 1px solid var(--border);
-  font-size: 14px; cursor: pointer; font-weight: 500; transition: all 0.15s;
-}
-.btn-primary { background: var(--accent); color: #fff; border-color: var(--accent); }
-.btn-primary:hover { background: var(--accent-hover); }
-.btn-secondary { background: var(--surface); color: var(--text); }
-.btn-secondary:hover { background: var(--border); }
-.btn-danger { background: transparent; color: var(--red); border-color: var(--red); }
-.btn-danger:hover { background: rgba(248,81,73,0.1); }
-.btn-warning { background: transparent; color: var(--orange); border-color: var(--orange); }
-.btn-warning:hover { background: rgba(227,113,42,0.1); }
-.btn-sm { padding: 4px 12px; font-size: 12px; }
-.btn:disabled { opacity: 0.4; cursor: not-allowed; }
-.model-controls { display: flex; gap: 8px; align-items: center; }
-.model-controls select { flex: 1; }
-
-.status-bar {
-  margin-top: 12px; padding: 10px 14px; border-radius: 6px; font-size: 13px;
-  font-family: var(--font-mono); display: none;
-}
-.status-bar.show { display: block; }
-.status-bar.ok { background: rgba(63,185,80,0.15); border: 1px solid var(--green); color: var(--green); }
-.status-bar.error { background: rgba(248,81,73,0.15); border: 1px solid var(--red); color: var(--red); }
-.status-bar.info { background: rgba(88,166,255,0.15); border: 1px solid var(--accent); color: var(--accent); }
-
-/* Quick-start grid */
-.quick-grid {
-  display: grid; grid-template-columns: 1fr 1fr; gap: 16px;
-}
-@media (max-width: 800px) { .quick-grid { grid-template-columns: 1fr; } }
-.quick-full { grid-column: 1 / -1; }
-
-/* Prompt flow diagram */
-.prompt-flow {
-  background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
-  padding: 16px; margin-bottom: 24px;
-}
-.prompt-flow h3 { font-size: 14px; font-weight: 600; margin-bottom: 12px; color: var(--text); }
-.prompt-flow-steps {
-  display: flex; align-items: stretch; flex-wrap: wrap; gap: 4px;
-}
-.pf-step {
-  flex: 1; min-width: 130px; padding: 10px 12px;
-  background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
-  font-size: 12px;
-}
-.pf-step .pf-label { font-weight: 600; color: var(--accent); margin-bottom: 4px; }
-.pf-step .pf-desc { color: var(--text-muted); line-height: 1.4; }
-.pf-arrow {
-  display: flex; align-items: center; padding: 0 2px; color: var(--text-muted);
-  font-size: 16px; flex-shrink: 0;
-}
-.pf-output { border-color: var(--green); }
-.pf-output .pf-label { color: var(--green); }
-
-/* Quick start guide */
-.quick-guide {
-  display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
   margin-bottom: 16px;
 }
-@media (max-width: 980px) { .quick-guide { grid-template-columns: 1fr 1fr; } }
-@media (max-width: 640px) { .quick-guide { grid-template-columns: 1fr; } }
-.quick-step {
-  padding: 12px 14px; background: var(--surface); border: 1px solid var(--border);
-  border-radius: 8px;
-}
-.quick-step .qs-label { font-size: 12px; font-weight: 700; color: var(--accent); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 6px; }
-.quick-step .qs-title { font-size: 14px; font-weight: 600; color: var(--text); margin-bottom: 4px; }
-.quick-step .qs-desc { font-size: 12px; color: var(--text-muted); line-height: 1.45; }
 
-/* Jobs list */
-.job-list { display: flex; flex-direction: column; gap: 8px; }
-.job-card {
-  padding: 12px 16px; background: var(--surface); border: 1px solid var(--border);
-  border-radius: 8px; display: flex; align-items: center; gap: 12px;
-  cursor: pointer; transition: border-color 0.15s;
-}
-.job-card:hover { border-color: var(--accent); }
-.job-card.archived { opacity: 0.45; }
-.job-badge {
-  padding: 2px 10px; border-radius: 12px; font-size: 12px; font-weight: 600;
-  text-transform: uppercase; letter-spacing: 0.5px; white-space: nowrap; flex-shrink: 0;
-}
-.job-badge.running   { background: rgba(210,153,34,0.2);  color: var(--yellow); }
-.job-badge.completed { background: rgba(63,185,80,0.2);   color: var(--green); }
-.job-badge.failed    { background: rgba(248,81,73,0.2);   color: var(--red); }
-.job-badge.cancelled { background: rgba(139,148,158,0.2); color: var(--text-muted); }
-.job-meta { flex: 1; font-size: 13px; color: var(--text-muted); min-width: 0; overflow: hidden; }
-.job-id { font-weight: 600; color: var(--text); margin-right: 6px; }
-.job-name { color: var(--text); margin-right: 6px; }
-.job-actions { display: flex; gap: 6px; flex-shrink: 0; }
-
-/* Progress */
-.progress-wrap { margin: 8px 0 4px; }
-.progress-bar-bg {
-  height: 4px; background: var(--border); border-radius: 2px; overflow: hidden;
-}
-.progress-bar-fill {
-  height: 100%; background: var(--accent); border-radius: 2px;
-  transition: width 0.4s ease;
-}
-.progress-label { font-size: 11px; color: var(--text-muted); margin-top: 3px; }
-
-/* Job detail */
-.log-box {
-  background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
-  padding: 16px; font-family: var(--font-mono); font-size: 12px;
-  max-height: 500px; overflow-y: auto; white-space: pre-wrap; word-break: break-all;
-  line-height: 1.7; color: var(--text-muted);
-}
-.preview-box {
-  background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
-  padding: 10px 12px; font-family: var(--font-mono); font-size: 12px;
-  max-height: 280px; overflow-y: auto; line-height: 1.5;
-}
-.preview-item { padding: 8px 0; border-bottom: 1px dashed var(--border); }
-.preview-item:last-child { border-bottom: none; }
-.preview-meta { color: var(--accent); font-size: 11px; margin-bottom: 6px; }
-.preview-json {
-  margin: 0; white-space: pre-wrap; word-break: break-word; color: var(--text-muted);
-}
-.detail-header {
-  display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 12px;
-}
-.detail-header h3 { flex: 1; margin-bottom: 0; }
-
-.section-title {
-  font-size: 15px; font-weight: 600; margin-bottom: 12px; color: var(--text);
+.tab {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-muted);
+  border-radius: 999px;
+  font-size: 13px;
+  padding: 7px 14px;
+  cursor: pointer;
 }
 
-/* Upload */
-.upload-zone {
-  border: 2px dashed var(--border); border-radius: 8px; padding: 28px;
-  text-align: center; color: var(--text-muted); cursor: pointer;
-  transition: border-color 0.15s;
-}
-.upload-zone:hover { border-color: var(--accent); }
-.upload-zone.dragover { border-color: var(--accent); background: rgba(88,166,255,0.05); }
-.upload-path { margin-top: 8px; font-family: var(--font-mono); font-size: 13px; color: var(--green); }
-
-.files-section { margin-bottom: 24px; }
-.files-section h3 { font-size: 15px; font-weight: 600; margin-bottom: 10px; color: var(--text); }
-.file-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-.file-table th { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); color: var(--text-muted); font-weight: 500; }
-.file-table td { padding: 8px 10px; border-bottom: 1px solid var(--border); color: var(--text); vertical-align: top; }
-.file-table tr:last-child td { border-bottom: none; }
-.file-table tr:hover td { background: rgba(88,166,255,0.04); }
-.file-size { color: var(--text-muted); white-space: nowrap; }
-.file-date { color: var(--text-muted); white-space: nowrap; font-size: 12px; }
-.file-actions { display: flex; gap: 6px; flex-wrap: wrap; }
-
-.empty-state {
-  text-align: center; padding: 48px; color: var(--text-muted); font-size: 14px;
+.tab:hover {
+  color: var(--text);
 }
 
-/* Detection banner */
-.detect-banner {
-  display: none; margin-bottom: 16px; padding: 12px 14px;
-  border-radius: 8px; border: 1px solid var(--green);
-  background: rgba(63,185,80,0.08);
+.tab.active {
+  color: #fff;
+  border-color: var(--accent);
+  background: var(--accent);
 }
-.detect-banner.show { display: block; }
-.detect-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.detect-summary { color: var(--text-muted); font-size: 13px; }
-.detect-pills { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
-.detect-pill { padding: 3px 10px; font-size: 12px; }
-.detect-pill small { color: var(--text-muted); margin-left: 4px; }
 
-/* Tools */
-.tools-section {
-  margin-top: 24px; padding: 16px; border: 1px solid var(--border);
-  border-radius: 8px; background: var(--surface);
+.panel {
+  display: none;
 }
-.tools-section summary {
-  cursor: pointer; font-size: 14px; font-weight: 600; color: var(--text);
-  user-select: none; list-style: none;
-}
-.tools-section summary::before { content: '▶ '; font-size: 11px; color: var(--text-muted); }
-.tools-section[open] summary::before { content: '▼ '; }
-.tools-section .tools-grid {
-  display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 14px;
-}
-@media (max-width: 800px) { .tools-section .tools-grid { grid-template-columns: 1fr; } }
-.tool-card {
-  padding: 12px 14px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg);
-}
-.tool-card label {
-  display: flex; align-items: center; gap: 8px; cursor: pointer;
-  font-size: 14px; font-weight: 600; color: var(--text); margin-bottom: 4px;
-}
-.tool-card label input[type=checkbox] { width: auto; }
-.tool-card p { font-size: 12px; color: var(--text-muted); margin: 0 0 0 22px; }
-.tool-card .tool-extra { margin-top: 8px; display: none; }
-.tool-card .tool-extra.show { display: block; }
 
-.section-sep { border: none; border-top: 1px solid var(--border); margin: 20px 0; }
+.panel.active {
+  display: block;
+}
 
-/* Section cards — input-first workflow grouping */
 .section-card {
-  border: 1px solid var(--border);
-  border-radius: 10px;
   background: var(--surface);
-  padding: 18px 20px;
-  margin-bottom: 18px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 18px;
+  margin-bottom: 14px;
+  box-shadow: var(--shadow);
 }
+
 .section-card-header {
-  display: flex; align-items: baseline; gap: 10px; margin-bottom: 14px;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
 }
+
 .section-card-num {
-  display: inline-flex; align-items: center; justify-content: center;
-  width: 22px; height: 22px; border-radius: 50%;
-  background: var(--accent); color: #fff; font-size: 12px; font-weight: 700;
-  flex-shrink: 0;
+  width: 21px;
+  height: 21px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--accent);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
 }
+
 .section-card-title {
-  font-size: 14px; font-weight: 700; color: var(--text);
+  font-size: 15px;
+  font-weight: 650;
 }
+
 .section-card-desc {
-  font-size: 12px; color: var(--text-muted);
+  color: var(--text-muted);
+  font-size: 12px;
 }
 
-/* Advanced processing collapsible */
-.adv-processing {
+.minimal-list {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.minimal-item {
+  background: var(--surface-soft);
   border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--surface);
-  padding: 12px 16px;
-  margin-bottom: 18px;
-}
-.adv-processing summary {
-  cursor: pointer; font-size: 13px; font-weight: 600; color: var(--text-muted);
-  user-select: none; list-style: none;
-}
-.adv-processing summary::before { content: '▶ '; font-size: 11px; }
-.adv-processing[open] summary::before { content: '▼ '; }
-.adv-processing .adv-grid {
-  display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 14px;
-}
-@media (max-width: 800px) { .adv-processing .adv-grid { grid-template-columns: 1fr; } }
-
-/* AI-assist bar */
-.ai-assist-bar {
-  background: linear-gradient(135deg, rgba(124,58,237,0.08) 0%, rgba(124,58,237,0.03) 100%);
-  border: 1px solid rgba(124,58,237,0.25);
   border-radius: 10px;
-  padding: 14px 16px;
+  padding: 10px 12px;
+}
+
+.minimal-item strong {
+  display: block;
+  font-size: 12px;
+  margin-bottom: 3px;
+}
+
+.minimal-item span {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.quick-grid,
+.adv-grid,
+.tools-section .tools-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.quick-full {
+  grid-column: 1 / -1;
+}
+
+.form-group {
+  margin-bottom: 10px;
+}
+
+.form-group:last-child {
   margin-bottom: 0;
 }
-.ai-assist-inner { display: flex; gap: 10px; align-items: flex-start; }
-.ai-assist-label { font-size: 13px; font-weight: 600; color: #a78bfa; white-space: nowrap; padding-top: 6px; }
-.ai-assist-input {
-  flex: 1;
-  min-height: 52px;
-  resize: vertical;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  color: var(--text);
+
+.form-group label {
+  display: block;
   font-size: 13px;
-  padding: 8px 10px;
-  font-family: inherit;
+  font-weight: 600;
+  margin-bottom: 4px;
 }
-.ai-assist-input:focus { outline: none; border-color: #7c3aed; box-shadow: 0 0 0 2px rgba(124,58,237,0.2); }
-.btn-accent {
-  background: #7c3aed;
-  color: #fff;
-  border: none;
-  border-radius: 6px;
-  padding: 8px 14px;
+
+.form-group .hint {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+input,
+select,
+textarea,
+button {
+  font: inherit;
+}
+
+input,
+select,
+textarea {
+  width: 100%;
+  border: 1px solid var(--border);
+  background: var(--bg-secondary);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 13px;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 30%, transparent);
+}
+
+textarea {
+  resize: vertical;
+}
+
+.editor-full {
+  min-height: 420px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.model-controls {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.model-controls select {
+  flex: 1;
+}
+
+.btn-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+
+.btn {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 12px;
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
-  white-space: nowrap;
-  transition: background 0.15s;
+  background: var(--surface-soft);
+  color: var(--text);
 }
-.btn-accent:hover:not(:disabled) { background: #6d28d9; }
-.btn-accent:disabled { opacity: 0.55; cursor: not-allowed; }
-.suggest-status { font-size: 12px; margin-top: 8px; min-height: 16px; }
-.suggest-status.ok    { color: var(--green); }
-.suggest-status.error { color: var(--red); }
 
-/* ── Structured output section ──────────────────────────────────── */
+.btn:hover {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+}
+
+.btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.btn-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.btn-primary:hover {
+  background: var(--accent-strong);
+  border-color: var(--accent-strong);
+}
+
+.btn-secondary {
+  background: var(--surface-soft);
+}
+
+.btn-danger {
+  color: var(--red);
+  border-color: color-mix(in srgb, var(--red) 65%, var(--border));
+  background: transparent;
+}
+
+.btn-warning {
+  color: var(--orange);
+  border-color: color-mix(in srgb, var(--orange) 60%, var(--border));
+  background: transparent;
+}
+
+.btn-sm {
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
+.status-bar {
+  display: none;
+  margin-top: 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  padding: 8px 10px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.status-bar.show {
+  display: block;
+}
+
+.status-bar.ok {
+  border-color: color-mix(in srgb, var(--green) 60%, var(--border));
+  color: var(--green);
+  background: color-mix(in srgb, var(--green) 12%, transparent);
+}
+
+.status-bar.error {
+  border-color: color-mix(in srgb, var(--red) 60%, var(--border));
+  color: var(--red);
+  background: color-mix(in srgb, var(--red) 12%, transparent);
+}
+
+.status-bar.info {
+  border-color: color-mix(in srgb, var(--accent) 60%, var(--border));
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.upload-zone {
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+  text-align: center;
+  color: var(--text-muted);
+  padding: 20px 12px;
+  cursor: pointer;
+  background: var(--bg-secondary);
+}
+
+.upload-zone:hover,
+.upload-zone.dragover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.upload-path {
+  margin-top: 7px;
+  color: var(--green);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.section-title {
+  font-size: 14px;
+  font-weight: 650;
+  margin-bottom: 8px;
+}
+
+.file-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.file-table th,
+.file-table td {
+  text-align: left;
+  padding: 8px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+
+.file-table th {
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.file-table tr:last-child td {
+  border-bottom: none;
+}
+
+.file-table tr:hover td {
+  background: color-mix(in srgb, var(--accent) 5%, transparent);
+}
+
+.file-size,
+.file-date {
+  color: var(--text-muted);
+}
+
+.file-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.preview-box,
+.log-box {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-secondary);
+  font-family: var(--font-mono);
+}
+
+.preview-box {
+  max-height: 340px;
+  overflow: auto;
+  font-size: 12px;
+  padding: 10px;
+}
+
+.log-box {
+  min-height: 180px;
+  max-height: 540px;
+  overflow: auto;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-muted);
+  padding: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.preview-item {
+  padding: 8px 0;
+  border-bottom: 1px dashed var(--border);
+}
+
+.preview-item:last-child {
+  border-bottom: none;
+}
+
+.preview-meta {
+  color: var(--accent);
+  font-size: 11px;
+  margin-bottom: 4px;
+}
+
+.preview-json {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text-muted);
+}
+
+.progress-wrap,
+#detail-progress-wrap {
+  margin: 8px 0;
+}
+
+.progress-bar-bg {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--border);
+  overflow: hidden;
+}
+
+.progress-bar-fill {
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.3s ease;
+}
+
+.progress-label {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.job-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.job-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px;
+  cursor: pointer;
+}
+
+.job-card:hover {
+  border-color: var(--accent);
+}
+
+.job-card.archived {
+  opacity: 0.55;
+}
+
+.job-badge {
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.job-badge.running {
+  background: color-mix(in srgb, var(--yellow) 20%, transparent);
+  color: var(--yellow);
+}
+
+.job-badge.completed {
+  background: color-mix(in srgb, var(--green) 20%, transparent);
+  color: var(--green);
+}
+
+.job-badge.failed {
+  background: color-mix(in srgb, var(--red) 20%, transparent);
+  color: var(--red);
+}
+
+.job-badge.cancelled {
+  background: color-mix(in srgb, var(--text-muted) 20%, transparent);
+  color: var(--text-muted);
+}
+
+.job-meta {
+  flex: 1;
+  min-width: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.job-id,
+.job-name {
+  color: var(--text);
+  font-weight: 600;
+  margin-right: 5px;
+}
+
+.detail-header {
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.files-section {
+  margin-bottom: 14px;
+}
+
+.files-section h3 {
+  font-size: 14px;
+  margin-bottom: 6px;
+}
+
+.empty-state {
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+  padding: 22px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.detect-banner {
+  display: none;
+  border: 1px solid color-mix(in srgb, var(--green) 40%, var(--border));
+  background: color-mix(in srgb, var(--green) 10%, transparent);
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+}
+
+.detect-banner.show {
+  display: block;
+}
+
+.detect-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.detect-summary {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 6px;
+}
+
+.detect-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.detect-pill small {
+  color: var(--text-muted);
+  margin-left: 4px;
+}
+
+.ai-assist-bar {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-soft);
+  padding: 10px;
+}
+
+.ai-assist-inner {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+.ai-assist-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--accent);
+  margin-top: 7px;
+}
+
+.ai-assist-input {
+  flex: 1;
+  min-height: 52px;
+}
+
+.btn-accent {
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  color: #fff;
+  border-radius: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.btn-accent:hover:not(:disabled) {
+  background: var(--accent-strong);
+  border-color: var(--accent-strong);
+}
+
+.suggest-status {
+  margin-top: 7px;
+  min-height: 16px;
+  font-size: 12px;
+}
+
+.suggest-status.ok {
+  color: var(--green);
+}
+
+.suggest-status.error {
+  color: var(--red);
+}
+
 .structured-output-card {
-  background: linear-gradient(135deg, rgba(63,185,80,0.05) 0%, rgba(63,185,80,0.02) 100%);
-  border: 1px solid rgba(63,185,80,0.2); border-radius: 8px; padding: 14px 16px;
-  margin-top: 16px;
+  margin-top: 12px;
+  background: color-mix(in srgb, var(--green) 8%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--green) 25%, var(--border));
+  border-radius: 10px;
+  padding: 12px;
 }
+
 .structured-output-header {
-  display: flex; align-items: center; gap: 8px; margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
 }
+
 .structured-output-badge {
-  background: rgba(63,185,80,0.15); color: var(--green);
-  font-size: 11px; font-weight: 700; padding: 2px 8px;
-  border-radius: 10px; text-transform: uppercase; letter-spacing: 0.05em;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--green);
+  background: color-mix(in srgb, var(--green) 15%, transparent);
+  border-radius: 999px;
+  padding: 2px 8px;
 }
+
 .schema-editor {
-  width: 100%; min-height: 80px; font-family: var(--font-mono);
-  font-size: 12px; padding: 10px 12px; resize: vertical;
-  background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
-  color: var(--text); line-height: 1.6;
+  min-height: 90px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
 }
-.schema-editor:focus { outline: none; border-color: var(--green); }
+
 .thinking-toggle {
-  display: flex; align-items: flex-start; gap: 10px; padding: 10px 14px;
-  background: rgba(167,139,250,0.06); border: 1px solid rgba(167,139,250,0.2);
-  border-radius: 8px; margin-top: 8px;
+  display: flex;
+  gap: 8px;
+  border: 1px solid color-mix(in srgb, var(--accent) 25%, var(--border));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--accent) 7%, var(--surface));
+  padding: 10px;
 }
-.thinking-toggle input[type=checkbox] { width: auto; margin-top: 2px; flex-shrink: 0; }
-.thinking-toggle .thinking-label { font-size: 13px; font-weight: 600; color: var(--text); }
-.thinking-toggle .thinking-desc { font-size: 12px; color: var(--text-muted); margin-top: 3px; }
+
+.thinking-toggle input[type="checkbox"] {
+  width: auto;
+  margin-top: 3px;
+}
+
+.thinking-label {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.thinking-desc {
+  margin-top: 3px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.output-structure {
+  margin-top: 10px;
+  border: 1px dashed color-mix(in srgb, var(--accent) 45%, var(--border));
+  border-radius: 9px;
+  padding: 9px;
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+.output-structure strong {
+  display: block;
+  font-size: 12px;
+  margin-bottom: 6px;
+}
+
+.output-structure .mono {
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.output-structure p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.output-structure .chips {
+  margin-top: 7px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.output-structure .chip {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+}
+
+.adv-processing,
+.tools-section {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px;
+  margin-bottom: 12px;
+}
+
+.tools-section summary,
+.adv-processing summary {
+  list-style: none;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.tools-section summary::before,
+.adv-processing summary::before {
+  content: "+";
+  display: inline-block;
+  width: 14px;
+  color: var(--text-muted);
+}
+
+.tools-section[open] summary::before,
+.adv-processing[open] summary::before {
+  content: "-";
+}
+
+.tool-card {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-secondary);
+  padding: 10px;
+}
+
+.tool-card label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.tool-card label input[type="checkbox"] {
+  width: auto;
+}
+
+.tool-card p {
+  color: var(--text-muted);
+  font-size: 12px;
+  margin-left: 24px;
+}
+
+.tool-extra {
+  margin-top: 8px;
+  display: none;
+}
+
+.tool-extra.show {
+  display: block;
+}
+
+.section-sep {
+  border: 0;
+  border-top: 1px solid var(--border);
+  margin: 2px 0;
+}
+
+#file-preview-modal {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.72);
+  z-index: 9999;
+  overflow: auto;
+  padding: 22px 14px;
+}
+
+#file-preview-modal .modal-inner {
+  max-width: 980px;
+  margin: 0 auto;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 18px;
+}
+
+.guide-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.guide-item {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px;
+  background: var(--surface-soft);
+}
+
+.guide-item h4 {
+  font-size: 13px;
+  margin-bottom: 4px;
+}
+
+.guide-item p {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+@media (max-width: 980px) {
+  .minimal-list,
+  .guide-grid,
+  .quick-grid,
+  .adv-grid,
+  .tools-section .tools-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .ai-assist-inner {
+    flex-direction: column;
+  }
+
+  .ai-assist-label {
+    margin-top: 0;
+  }
+}
 </style>
 </head>
 <body>
 
 <header>
   <h1><span>llm</span>flow</h1>
-  <div style="display:flex;align-items:center;gap:14px">
+  <div style="display:flex;align-items:center;gap:10px">
     <div class="theme-switcher">
-      <span style="color:var(--text-muted)">🎨</span>
+      <span style="color:var(--text-muted)">Theme</span>
       <select id="theme-select" title="Switch theme">
         <option value="dark">Dark</option>
         <option value="light">Light</option>
@@ -486,99 +1024,80 @@ textarea { font-family: var(--font-mono); resize: vertical; }
         <option value="violet">Violet</option>
       </select>
     </div>
-    <span style="font-size:13px;color:var(--text-muted)">Web UI</span>
+    <span style="font-size:12px;color:var(--text-muted)">Web UI</span>
   </div>
 </header>
 
 <div class="container">
 
 <div class="tabs">
-  <button class="tab active" data-panel="quick">Quick Start</button>
-  <button class="tab" data-panel="editor">YAML Editor</button>
+  <button class="tab active" data-panel="quick">Setup</button>
+  <button class="tab" data-panel="editor">YAML</button>
   <button class="tab" data-panel="jobs">Jobs</button>
   <button class="tab" data-panel="files">Files</button>
   <button class="tab" data-panel="guide">Guide</button>
 </div>
 
-<!-- Detection banner -->
 <div id="detect-banner" class="detect-banner">
   <div class="detect-row">
-    <strong style="color:var(--green)">Local LLM detected</strong>
-    <button id="detect-refresh" class="btn btn-secondary" style="padding:4px 10px;font-size:12px;">Rescan</button>
+    <strong style="color:var(--green)">Local provider detected</strong>
+    <button id="detect-refresh" class="btn btn-secondary btn-sm">Rescan</button>
   </div>
   <div id="detect-summary" class="detect-summary"></div>
   <div id="detect-pills" class="detect-pills"></div>
 </div>
 
-<!-- ═══════════════════════ Quick Start ═══════════════════════ -->
 <div id="panel-quick" class="panel active">
-
-  <!-- How it works -->
-  <div class="prompt-flow">
-    <h3>How llmflow works — the prompt pipeline per record</h3>
-    <div class="prompt-flow-steps">
-      <div class="pf-step">
-        <div class="pf-label">① System Prompt</div>
-        <div class="pf-desc">Sets the LLM's role &amp; global instructions. Sent once — not per record.</div>
+  <div class="section-card">
+    <div class="section-card-header">
+      <span class="section-card-num">0</span>
+      <span class="section-card-title">How It Flows</span>
+      <span class="section-card-desc">Upload data, define task + prompts, run, then review outputs.</span>
+    </div>
+    <div class="minimal-list">
+      <div class="minimal-item">
+        <strong>Input</strong>
+        <span>Upload or reuse a file and verify columns in preview.</span>
       </div>
-      <div class="pf-arrow">→</div>
-      <div class="pf-step">
-        <div class="pf-label">② Pre-Prompt</div>
-        <div class="pf-desc">Optional text prepended before each record's data. Good for task framing.</div>
+      <div class="minimal-item">
+        <strong>Prompt</strong>
+        <span>Set provider/model and specify the response shape.</span>
       </div>
-      <div class="pf-arrow">→</div>
-      <div class="pf-step">
-        <div class="pf-label">③ Input Template</div>
-        <div class="pf-desc">Go template rendered per record. Use <code style="color:var(--accent)">{{ toPrettyJSON .record }}</code> or <code style="color:var(--accent)">{{ .fieldName }}</code>.</div>
-      </div>
-      <div class="pf-arrow">→</div>
-      <div class="pf-step">
-        <div class="pf-label">④ Post-Prompt</div>
-        <div class="pf-desc">Optional extra instruction. Leave empty when <em>Response Format</em> is set — instructions are injected automatically.</div>
-      </div>
-      <div class="pf-arrow">→</div>
-      <div class="pf-step" style="border-color:rgba(63,185,80,0.4)">
-        <div class="pf-label" style="color:var(--green)">⑤ Format Injection</div>
-        <div class="pf-desc">When <em>Response Format</em> is set, llmflow appends the schema instruction + parses the JSON reply automatically.</div>
-      </div>
-      <div class="pf-arrow">→</div>
-      <div class="pf-step pf-output">
-        <div class="pf-label">⑥ Output</div>
-        <div class="pf-desc">LLM answer stored in <em>Response Field</em>. With JSON format, each schema key becomes its own output column.</div>
+      <div class="minimal-item">
+        <strong>Execution</strong>
+        <span>Validate first, then run and monitor job progress live.</span>
       </div>
     </div>
   </div>
 
-  <!-- ── Step 1: Input File ── -->
   <div class="section-card">
     <div class="section-card-header">
       <span class="section-card-num">1</span>
-      <span class="section-card-title">Input File</span>
-      <span class="section-card-desc">Choose the input file first. The format will be detected automatically.</span>
+      <span class="section-card-title">Input</span>
+      <span class="section-card-desc">Select the source file and format.</span>
     </div>
-    <div class="form-group" style="margin-bottom:8px">
+    <div class="form-group">
       <label>Input File</label>
       <div id="upload-zone" class="upload-zone">
-        Drop a file here or click to upload
+        Drop file here or click to upload
         <input type="file" id="file-input" style="display:none" accept=".csv,.json,.jsonl,.xml">
         <div id="upload-path" class="upload-path" style="display:none"></div>
       </div>
-      <div class="hint">Upload or select the source data file. The format and delimiter are detected automatically.</div>
     </div>
-    <div style="display:flex;gap:12px;flex-wrap:wrap">
-      <div class="form-group" style="flex:1;min-width:160px;margin-bottom:0">
-        <label>Input Type <span style="font-size:11px;color:var(--green)">(auto-detected)</span></label>
+    <div class="quick-grid">
+      <div class="form-group">
+        <label>Input Type</label>
         <select id="q-input-type">
           <option value="csv">CSV</option>
           <option value="json">JSON (array)</option>
-          <option value="jsonl">JSONL (JSON Lines)</option>
+          <option value="jsonl">JSONL (lines)</option>
           <option value="xml">XML</option>
         </select>
       </div>
-      <div class="form-group" style="flex:1;min-width:160px;margin-bottom:0">
+      <div class="form-group">
         <label>Output Type</label>
         <select id="q-output-type">
-          <option value="jsonl">JSONL (JSON Lines)</option>
+          <option value="jsonl">JSONL</option>
           <option value="csv">CSV</option>
           <option value="xml">XML</option>
         </select>
@@ -586,228 +1105,204 @@ textarea { font-family: var(--font-mono); resize: vertical; }
     </div>
   </div>
 
-  <!-- Data Preview + Column Exclusion -->
-  <div id="preview-section" style="display:none;margin-bottom:24px">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-      <span class="section-title" style="margin-bottom:0">Data Preview <span id="preview-subtitle" style="font-weight:400;font-size:13px;color:var(--text-muted)"></span></span>
-      <button class="btn btn-secondary btn-sm" onclick="loadPreview()">↻ Refresh</button>
+  <div id="preview-section" class="section-card" style="display:none;">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:8px">
+      <span class="section-title" style="margin-bottom:0">Data Preview <span id="preview-subtitle" style="font-weight:400;font-size:12px;color:var(--text-muted)"></span></span>
+      <button class="btn btn-secondary btn-sm" onclick="loadPreview()">Refresh preview</button>
     </div>
-    <p style="font-size:12px;color:var(--text-muted);margin-bottom:8px">Check/uncheck column headers to control which fields are sent to the LLM. Unchecked columns are completely excluded from both the LLM prompt and (when <em>Include Input in Output</em> is on) the output file.</p>
-    <div id="preview-table-wrap" style="overflow-x:auto;border:1px solid var(--border);border-radius:6px;">
+    <p style="font-size:12px;color:var(--text-muted);margin-bottom:8px">
+      Toggle column checkboxes to exclude fields from prompt input and from copied output columns.
+    </p>
+    <div id="preview-table-wrap" style="overflow-x:auto;border:1px solid var(--border);border-radius:10px;">
       <table id="preview-table" class="file-table" style="min-width:100%">
         <thead id="preview-thead"></thead>
         <tbody id="preview-tbody"></tbody>
       </table>
     </div>
     <div id="preview-excluded-info" style="margin-top:6px;font-size:12px;color:var(--yellow)"></div>
-    <!-- Live JSON preview of what the LLM will receive for record 1 -->
-    <div style="margin-top:12px">
-      <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
-        <span style="font-size:12px;font-weight:600;color:var(--text-muted)">LLM INPUT PREVIEW</span>
-        <span style="font-size:11px;color:var(--text-muted)">— exactly what will be sent for record #1 (JSON)</span>
-      </div>
-      <pre id="preview-json-sample" style="margin:0;padding:10px 14px;background:var(--bg-secondary,#1a1a2e);border:1px solid var(--border);border-radius:6px;font-size:11px;line-height:1.5;overflow-x:auto;white-space:pre-wrap;color:var(--accent)"></pre>
+    <div style="margin-top:10px">
+      <div style="font-size:12px;font-weight:600;color:var(--text-muted);margin-bottom:6px">Prompt Input Sample (record #1)</div>
+      <pre id="preview-json-sample" style="margin:0;padding:10px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:8px;font-size:11px;line-height:1.5;overflow-x:auto;white-space:pre-wrap;color:var(--text)"></pre>
     </div>
   </div>
 
-  <!-- ── Step 2: AI Quick Setup ── -->
   <div class="section-card">
     <div class="section-card-header">
       <span class="section-card-num">2</span>
-      <span class="section-card-title">Describe the task</span>
-      <span class="section-card-desc">Tell the model what it should do. It already knows the data structure from step 1.</span>
+      <span class="section-card-title">Task</span>
+      <span class="section-card-desc">Describe the desired transformation and auto-fill settings.</span>
     </div>
-    <!-- AI-assist bar -->
-    <div class="ai-assist-bar" style="margin-bottom:0">
+    <div class="ai-assist-bar">
       <div class="ai-assist-inner">
-        <span class="ai-assist-label">✨ AI Quick Setup</span>
-        <textarea id="q-task" class="ai-assist-input" rows="2" placeholder="Describe the job — e.g.: &quot;For each product (name + description), decide if freight forwarding (Spedition) is needed for shipping and whether an expiry date (MHD) must be tracked. Return spedition_required, versandart, mhd_pflichtig, and a brief reason.&quot;"></textarea>
-        <button class="btn btn-accent" onclick="suggestConfig()" id="suggest-btn">Suggest setup</button>
+        <span class="ai-assist-label">AI Setup</span>
+        <textarea id="q-task" class="ai-assist-input" rows="2" placeholder="Example: classify each product for freight shipping need and expiry-date relevance."></textarea>
+        <button class="btn btn-accent" onclick="suggestConfig()" id="suggest-btn">Configure with AI</button>
       </div>
       <div id="suggest-status" class="suggest-status"></div>
     </div>
   </div>
 
-  <!-- ── Step 3: LLM + Prompts ── -->
   <div class="section-card">
     <div class="section-card-header">
       <span class="section-card-num">3</span>
-      <span class="section-card-title">Provider &amp; Prompts</span>
-      <span class="section-card-desc">Choose the provider, model, and prompt fragments.</span>
+      <span class="section-card-title">Provider And Prompts</span>
+      <span class="section-card-desc">Control model selection and prompt pipeline.</span>
     </div>
     <div class="quick-grid">
-
-    <!-- Provider / Model -->
-    <div class="form-group">
-      <label>LLM Provider</label>
-      <select id="q-provider">
-        <option value="openai">OpenAI</option>
-        <option value="gemini">Google Gemini</option>
-        <option value="anthropic">Anthropic Claude</option>
-        <option value="ollama">Ollama (local)</option>
-        <option value="lmstudio">LM Studio (local)</option>
-        <option value="generic">Generic OpenAI-compatible</option>
-      </select>
-    </div>
-    <div class="form-group">
-      <label>Model Name</label>
-      <div class="model-controls">
-        <select id="q-model" onchange="onModelSelectChange()"></select>
-        <button id="model-refresh" class="btn btn-secondary btn-sm" type="button">Load models</button>
+      <div class="form-group">
+        <label>Provider</label>
+        <select id="q-provider">
+          <option value="openai">OpenAI</option>
+          <option value="gemini">Google Gemini</option>
+          <option value="anthropic">Anthropic Claude</option>
+          <option value="ollama">Ollama (local)</option>
+          <option value="lmstudio">LM Studio (local)</option>
+          <option value="generic">Generic OpenAI-compatible</option>
+        </select>
       </div>
-      <input id="q-model-custom" type="text" placeholder="your-model-name" style="display:none; margin-top:6px">
-      <div class="hint" id="q-model-hint"></div>
-    </div>
-    <div class="form-group q-cloud-only">
-      <label>API Key or Environment Variable</label>
-      <input id="q-apikey" type="text" placeholder="OPENAI_API_KEY or sk-...">
-      <div class="hint">Use an env var name or paste a raw key. Not needed for local providers like Ollama or LM Studio.</div>
-    </div>
-    <div class="form-group">
-      <label>Base URL <span style="font-weight:400">(optional)</span></label>
-      <input id="q-baseurl" type="text" placeholder="Leave empty to use the provider default">
-      <div class="hint">Only change this when you use a self-hosted or custom endpoint.</div>
-    </div>
+      <div class="form-group">
+        <label>Model</label>
+        <div class="model-controls">
+          <select id="q-model" onchange="onModelSelectChange()"></select>
+          <button id="model-refresh" class="btn btn-secondary btn-sm" type="button">Load</button>
+        </div>
+        <input id="q-model-custom" type="text" placeholder="custom-model-name" style="display:none; margin-top:6px">
+        <div class="hint" id="q-model-hint"></div>
+      </div>
+      <div class="form-group q-cloud-only">
+        <label>API Key / Env Name</label>
+        <input id="q-apikey" type="text" placeholder="OPENAI_API_KEY or sk-...">
+        <div class="hint">Leave blank for local providers.</div>
+      </div>
+      <div class="form-group">
+        <label>Base URL (optional)</label>
+        <input id="q-baseurl" type="text" placeholder="Provider default if empty">
+      </div>
 
-    <hr class="section-sep quick-full">
+      <hr class="section-sep quick-full">
 
-    <!-- Prompts -->
-    <div class="form-group quick-full">
-      <label>① System Prompt</label>
-      <textarea id="q-system" rows="3" placeholder="You are a helpful data-processing assistant. Respond concisely."></textarea>
-      <div class="hint">Global behavior and tone. Written once, then reused for every row.</div>
+      <div class="form-group quick-full">
+        <label>System Prompt</label>
+        <textarea id="q-system" rows="3" placeholder="You are a helpful data-processing assistant. Respond concisely."></textarea>
+      </div>
+      <div class="form-group quick-full">
+        <label>Pre-Prompt (optional)</label>
+        <textarea id="q-pre" rows="2" placeholder="Analyze this record:"></textarea>
+      </div>
+      <div class="form-group quick-full">
+        <label>Input Template</label>
+        <textarea id="q-template" rows="4" placeholder="{{ toPrettyJSON .record }}"></textarea>
+        <div class="hint">
+          Defines what the model sees for each single row (record).<br>
+          1) The template is rendered once per row.<br>
+          2) The rendered text is inserted into the prompt and sent to the LLM.<br>
+          Example (full row): <code>{{ toPrettyJSON .record }}</code><br>
+          Example (selected fields): <code>Name: {{ .Name }}&#10;Description: {{ .Description }}</code>
+        </div>
+      </div>
+      <div class="form-group quick-full">
+        <label>Post-Prompt (optional)</label>
+        <textarea id="q-post" rows="2" placeholder='Reply with only JSON: {"sentiment":"positive|negative|neutral"}'></textarea>
+      </div>
     </div>
-    <div class="form-group quick-full">
-      <label>② Pre-Prompt <span style="font-weight:400">(optional)</span></label>
-      <textarea id="q-pre" rows="2" placeholder="Analyze the following record:"></textarea>
-      <div class="hint">Short instruction before each row. Use it to frame the task or add context.</div>
-    </div>
-    <div class="form-group quick-full">
-      <label>③ Input Template</label>
-      <textarea id="q-template" rows="4" placeholder="{{ toPrettyJSON .record }}"></textarea>
-      <div class="hint">Controls what the model sees for each row.
-        <code>{{ toPrettyJSON .record }}</code> = full record as JSON.
-        <code>{{ .fieldName }}</code> = single field.
-        Available helpers: <code>toPrettyJSON</code>.</div>
-    </div>
-    <div class="form-group quick-full">
-      <label>④ Post-Prompt <span style="font-weight:400">(optional)</span></label>
-      <textarea id="q-post" rows="2" placeholder='Reply with ONLY a JSON object: {"sentiment":"positive|negative|neutral","score":0.0-1.0}'></textarea>
-      <div class="hint">Add output rules here, for example JSON-only or a short explanation style.</div>
-    </div>
+  </div>
 
-    </div><!-- .quick-grid -->
-  </div><!-- .section-card -->
-
-  <!-- ── Step 4: Output Options ── -->
   <div class="section-card">
     <div class="section-card-header">
       <span class="section-card-num">4</span>
-      <span class="section-card-title">Configure output</span>
-      <span class="section-card-desc">Choose which fields should be stored in the result.</span>
+      <span class="section-card-title">Output And Processing</span>
+      <span class="section-card-desc">Define output fields and execution behavior.</span>
     </div>
+
     <div class="quick-grid">
-
-    <div class="form-group">
-      <label>⑤ Response Field Name</label>
-      <input id="q-response-field" type="text" value="llm_response">
-      <div class="hint">Name of the output column that stores the LLM answer. For multiple structured fields, use <em>Parse JSON Response</em> + <em>Response Fields</em> in Advanced settings.</div>
-    </div>
-    <div class="form-group">
-      <label>Include Input in Output</label>
-      <select id="q-include-input" onchange="onIncludeInputChange()">
-        <option value="all">Yes — copy all input fields alongside the response</option>
-        <option value="key">Key column only — select the identifier column below</option>
-        <option value="none">No — output only the response field(s)</option>
-      </select>
-      <div class="hint">Choose how much of the input data is written alongside the LLM results.</div>
-    </div>
-    <div class="form-group" id="key-column-group" style="display:none">
-      <label>Key Column</label>
-      <select id="q-key-column">
-        <option value="">— select after uploading a file —</option>
-      </select>
-      <div class="hint">Only this column from the input will be included in the output alongside the LLM response.</div>
-    </div>
-    <div class="form-group">
-      <label>Workers (parallel)</label>
-      <input id="q-workers" type="number" value="2" min="1" max="32">
-      <div class="hint">Higher means faster, but also more load on your model/server.</div>
-    </div>
-    <div class="form-group">
-      <label>Job Name <span style="font-weight:400">(optional)</span></label>
-      <input id="q-name" type="text" placeholder="My sentiment analysis run">
-      <div class="hint">A short name for the Jobs list, useful when you run several jobs.</div>
+      <div class="form-group">
+        <label>Response Field</label>
+        <input id="q-response-field" type="text" value="llm_response">
+      </div>
+      <div class="form-group">
+        <label>Include Input In Output</label>
+        <select id="q-include-input" onchange="onIncludeInputChange()">
+          <option value="all">All input fields</option>
+          <option value="key">Only key column</option>
+          <option value="none">No input fields</option>
+        </select>
+      </div>
+      <div class="form-group" id="key-column-group" style="display:none">
+        <label>Key Column</label>
+        <select id="q-key-column">
+          <option value="">- select after upload -</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Workers</label>
+        <input id="q-workers" type="number" value="2" min="1" max="32">
+      </div>
+      <div class="form-group">
+        <label>Job Name (optional)</label>
+        <input id="q-name" type="text" placeholder="my run">
+      </div>
     </div>
 
-    </div><!-- .quick-grid -->
-
-    <!-- ── Structured Output ── -->
     <div class="structured-output-card">
       <div class="structured-output-header">
         <span class="structured-output-badge">Structured Output</span>
-        <span style="font-size:13px;color:var(--text-muted)">Define what the LLM must return — instructions are injected automatically.</span>
+        <span style="font-size:12px;color:var(--text-muted)">Use this when you want deterministic columns.</span>
       </div>
       <div class="quick-grid">
+        <div class="form-group quick-full">
+          <label>Response Format</label>
+          <select id="q-response-format" onchange="onResponseFormatChange()">
+            <option value="">Text (free-form)</option>
+            <option value="json">JSON (recommended)</option>
+            <option value="xml">XML output</option>
+            <option value="csv">CSV output</option>
+          </select>
+        </div>
 
-      <div class="form-group quick-full">
-        <label>Response Format</label>
-        <select id="q-response-format" onchange="onResponseFormatChange()">
-          <option value="">Text — free-form response (default)</option>
-          <option value="json">JSON — parse and spread fields into output columns</option>
-          <option value="xml">XML — parse JSON, convert to XML output file</option>
-          <option value="csv">CSV — parse JSON, write fields as CSV columns</option>
-        </select>
-        <div class="hint">When set to JSON/XML/CSV, llmflow automatically appends the format instruction to every prompt and parses the LLM's JSON reply. No manual <em>post_prompt</em> needed.</div>
-      </div>
+        <div class="form-group quick-full" id="response-schema-group" style="display:none">
+          <label>Schema (optional, one field per line)</label>
+          <textarea id="q-response-schema" class="schema-editor" rows="4" placeholder="needs_freight: true|false&#10;shipping_type: DHL|UPS|Forwarder&#10;reason: short sentence"></textarea>
+        </div>
 
-      <div class="form-group quick-full" id="response-schema-group" style="display:none">
-        <label>Response Schema <span style="font-weight:400;color:var(--text-muted)">(optional — one field per line)</span></label>
-        <textarea id="q-response-schema" class="schema-editor" rows="4"
-          placeholder="spedition_required: true or false&#10;versandart: one of: DHL, GLS, UPS, Spedition&#10;mhd_pflichtig: true or false&#10;begruendung: short explanation (one sentence)"></textarea>
-        <div class="hint">Each line: <code>fieldname: type hint or description</code>. These become output columns. Leave empty to let the LLM decide the JSON structure.</div>
-      </div>
-
-      <div id="thinking-group" style="display:none" class="quick-full">
-        <div class="thinking-toggle">
-          <input type="checkbox" id="q-thinking">
-          <div>
-            <div class="thinking-label">Enable Thinking Mode</div>
-            <div class="thinking-desc">The LLM reasons step-by-step in a <code>&lt;thinking&gt;…&lt;/thinking&gt;</code> block before producing the structured output. Improves accuracy for complex decisions (e.g. freight classification, expiry assessment). The full reasoning is stored in the Response Field.</div>
+        <div id="thinking-group" style="display:none" class="quick-full">
+          <div class="thinking-toggle">
+            <input type="checkbox" id="q-thinking">
+            <div>
+              <div class="thinking-label">Enable Thinking Mode</div>
+              <div class="thinking-desc">Adds a reasoning block before the structured answer for harder decisions.</div>
+            </div>
           </div>
         </div>
       </div>
 
-      </div><!-- .quick-grid inside structured-output-card -->
-    </div><!-- .structured-output-card -->
-
-  </div><!-- .section-card -->
+      <div class="output-structure">
+        <strong>Output Structure Preview</strong>
+        <div id="output-structure-summary" class="mono">Set response format or response fields to preview final output columns.</div>
+      </div>
+    </div>
+  </div>
 
   <details class="adv-processing">
-    <summary>⚙ Advanced settings</summary>
-    <div class="adv-grid">
+    <summary>Advanced Settings</summary>
+    <div class="adv-grid" style="margin-top:10px">
       <div class="form-group">
-        <label>Rate Limit (RPM, 0 = unlimited)</label>
+        <label>Rate Limit (RPM)</label>
         <input id="q-rpm" type="number" value="60" min="0">
-        <div class="hint">Only lower this if your provider has request limits.</div>
       </div>
       <div class="form-group">
-        <label>Timeout per LLM request</label>
+        <label>Timeout</label>
         <input id="q-timeout" type="text" value="300s">
-        <div class="hint">Use a longer timeout for slow local models. Format: <code>60s</code>, <code>5m</code>.</div>
       </div>
       <div class="form-group">
         <label>Max Retries</label>
         <input id="q-retries" type="number" value="3" min="0" max="10">
-        <div class="hint">Retry when the model or network fails briefly.</div>
       </div>
       <div class="form-group">
         <label>On Error</label>
         <select id="q-continue-on-error">
-          <option value="true">Continue — skip failed records</option>
-          <option value="false">Stop — abort job on first error</option>
+          <option value="true">Continue</option>
+          <option value="false">Stop on first error</option>
         </select>
-        <div class="hint">Choose whether one bad row should stop the whole run.</div>
       </div>
       <div class="form-group">
         <label>Prompt Caching</label>
@@ -815,69 +1310,62 @@ textarea { font-family: var(--font-mono); resize: vertical; }
           <option value="false">Disabled</option>
           <option value="true">Enabled</option>
         </select>
-        <div class="hint">Useful for long, repeated prompts. Supported by OpenAI (&ge;1024 tokens) and Anthropic.</div>
       </div>
       <div class="form-group">
         <label>Parse JSON Response</label>
         <select id="q-parse-json">
           <option value="false">Disabled</option>
-          <option value="true">Enabled &mdash; extract structured fields from response</option>
+          <option value="true">Enabled</option>
         </select>
-        <div class="hint">When enabled, the last JSON object found in the LLM response is parsed and its fields are added as separate columns. Combine with <em>Response Fields</em> below for clean structured output.</div>
       </div>
       <div class="form-group">
-        <label>Response Fields <span style="font-weight:400;color:var(--text-muted)">(optional)</span></label>
-        <input id="q-response-fields" type="text" placeholder="e.g. weight, volume, needs_freight, short_expiry">
-        <div class="hint">Comma-separated list of JSON field names the LLM should return. Automatically enables <em>Parse JSON Response</em> and sets <em>Output Fields</em> to these + the key column. The Post-Prompt should instruct the LLM to return exactly these fields as a JSON object.</div>
+        <label>Response Fields (CSV)</label>
+        <input id="q-response-fields" type="text" placeholder="weight, volume, needs_freight">
       </div>
       <div class="form-group">
-        <label>Output Fields <span style="font-weight:400;color:var(--text-muted)">(optional, overrides Response Fields)</span></label>
-        <input id="q-output-fields" type="text" placeholder="e.g. Produkt, Paket-geeignet">
-        <div class="hint">Comma-separated list of fields to include in the output. Leave empty to include all fields.</div>
+        <label>Output Fields (CSV, optional override)</label>
+        <input id="q-output-fields" type="text" placeholder="product_id, needs_freight, reason">
       </div>
       <div class="form-group">
-        <label>Batch Size (records per LLM request)</label>
+        <label>Batch Size</label>
         <input id="q-batch-size" type="number" value="1" min="1" max="500">
-        <div class="hint">1 = one record per request (default). Higher values bundle multiple records into one LLM call. The LLM must return a JSON array of responses.</div>
       </div>
       <div class="form-group">
         <label>Debug Mode</label>
         <select id="q-debug">
           <option value="false">Disabled</option>
-          <option value="true">Enabled &mdash; log all prompts &amp; responses</option>
+          <option value="true">Enabled</option>
         </select>
-        <div class="hint">When enabled, every LLM request and the full raw response are written to the job logs.</div>
       </div>
     </div>
   </details>
 
-  <!-- Agentic tools -->
   <details id="tools-section" class="tools-section">
-    <summary>Agentic Tools <span style="color:var(--text-muted);font-weight:400">(optional — let the LLM call tools: web fetch/search, code execution, SQL)</span></summary>
-    <div class="tools-grid">
+    <summary>Agentic Tools (optional)</summary>
+    <div class="tools-grid" style="margin-top:10px">
       <div class="tool-card">
-        <label><input type="checkbox" id="t-enabled"> Enable Agent Tools</label>
-        <p>When enabled the LLM may call the selected tools before producing its final answer (multi-turn agentic loop).</p>
+        <label><input type="checkbox" id="t-enabled"> Enable Tool Calls</label>
+        <p>Allow the LLM to run selected tools before generating the final answer.</p>
         <div class="form-group" style="margin-top:8px;margin-bottom:0">
-          <label style="color:var(--text-muted);font-weight:500">Max Tool Rounds</label>
+          <label style="font-size:12px;color:var(--text-muted)">Max Tool Rounds</label>
           <input id="t-max-rounds" type="number" value="5" min="1" max="20" style="margin-top:4px">
         </div>
       </div>
       <div class="tool-card">
         <label><input type="checkbox" id="t-web-fetch"> Web Fetch</label>
-        <p>Fetch the content of any URL. Useful for reading docs, articles, or real-time pages.</p>
+        <p>Read page content by URL.</p>
       </div>
       <div class="tool-card">
         <label><input type="checkbox" id="t-web-search"> Web Search</label>
-        <p>Search the web via DuckDuckGo — no API key required. Good for current information.</p>
+        <p>Search the web for current information.</p>
       </div>
       <div class="tool-card">
         <label><input type="checkbox" id="t-web-extract-links"> Web Extract Links</label>
-        <p>Extract absolute HTTP(S) links from a page so the LLM can quickly discover useful follow-up sources.</p>
+        <p>Collect follow-up links from pages.</p>
       </div>
       <div class="tool-card">
-        <label><input type="checkbox" id="t-code-exec"> Sandbox Code Execution (nanoGo)</label>
-        <p>Execute restricted Go snippets in an interpreter. Useful for lightweight transforms and calculations.</p>
+        <label><input type="checkbox" id="t-code-exec"> Sandbox Code Execution</label>
+        <p>Run restricted Go snippets for transformations or calculations.</p>
         <div id="t-code-extra" class="tool-extra">
           <div class="form-group" style="margin-bottom:8px">
             <label>Execution Timeout</label>
@@ -891,7 +1379,7 @@ textarea { font-family: var(--font-mono); resize: vertical; }
             <label><input type="checkbox" id="t-code-readonlyfs" style="width:auto"> Enable HostReadFile(path)</label>
           </div>
           <div class="form-group" style="margin-bottom:8px">
-            <label>Read Whitelist (comma-separated, repo-relative)</label>
+            <label>Read Whitelist</label>
             <input id="t-code-read-whitelist" type="text" value="examples,README.md,LICENSE" style="margin-top:4px">
           </div>
           <div class="form-group" style="margin-bottom:8px">
@@ -909,21 +1397,21 @@ textarea { font-family: var(--font-mono); resize: vertical; }
       </div>
       <div class="tool-card">
         <label><input type="checkbox" id="t-sql-query"> SQL Query</label>
-        <p>Execute read-only SELECT queries to enrich records with data from a database.</p>
+        <p>Execute read-only SELECT queries as a retrieval tool.</p>
         <div id="t-sql-extra" class="tool-extra">
           <div class="form-group" style="margin-bottom:8px">
             <label>SQL Driver</label>
             <select id="t-sql-driver" style="margin-top:4px">
               <option value="sqlite">SQLite</option>
-              <option value="sqlserver">SQL Server (MSSQL)</option>
+              <option value="sqlserver">SQL Server</option>
             </select>
           </div>
           <div class="form-group" style="margin-bottom:8px">
-            <label>DSN <span style="font-weight:400">(optional direct string)</span></label>
+            <label>DSN (optional)</label>
             <input id="t-sql-dsn" type="text" placeholder="file:./data.db?_pragma=busy_timeout%3D5000" style="margin-top:4px">
           </div>
           <div class="form-group" style="margin-bottom:0">
-            <label>DSN Env Variable <span style="font-weight:400">(fallback)</span></label>
+            <label>DSN Env Variable</label>
             <input id="t-sql-dsn-env" type="text" placeholder="DB_DSN" style="margin-top:4px">
           </div>
         </div>
@@ -931,30 +1419,26 @@ textarea { font-family: var(--font-mono); resize: vertical; }
     </div>
   </details>
 
-  <!-- Data Enrichment (non-agentic web crawl) -->
   <details class="tools-section" id="enrich-section">
-    <summary>Data Enrichment <span style="color:var(--text-muted);font-weight:400">(optional — non-agentic web crawl: enrich records from the web before LLM processing)</span></summary>
-    <div class="adv-grid">
+    <summary>Data Enrichment (optional)</summary>
+    <div class="adv-grid" style="margin-top:10px">
       <div class="form-group">
         <label><input type="checkbox" id="e-enabled" style="width:auto"> Enable Data Enrichment</label>
-        <div class="hint">When enabled, llmflow searches the web for the value in the selected column and appends the first result as plain text to each record — before the LLM prompt is built.</div>
+        <div class="hint">Fetch web context by one input column before prompting the LLM.</div>
       </div>
       <div class="form-group">
         <label>Search Column</label>
         <select id="e-column">
-          <option value="">— select after uploading a file —</option>
+          <option value="">- select after upload -</option>
         </select>
-        <div class="hint">The column whose value is used as the search query (e.g. EAN number, product name).</div>
       </div>
       <div class="form-group">
-        <label>Output Field Name</label>
-        <input id="e-output-field" type="text" placeholder="e.g. web_info">
-        <div class="hint">Name of the field added to each record with the web search result. Defaults to <code>enriched_&lt;column&gt;</code>.</div>
+        <label>Output Field</label>
+        <input id="e-output-field" type="text" placeholder="web_info">
       </div>
       <div class="form-group">
         <label>Max Characters</label>
         <input id="e-max-chars" type="number" value="2000" min="100" max="10000">
-        <div class="hint">Truncate the enrichment result to this many characters.</div>
       </div>
     </div>
   </details>
@@ -962,37 +1446,27 @@ textarea { font-family: var(--font-mono); resize: vertical; }
   <div class="btn-row">
     <button class="btn btn-secondary" onclick="generateYAML()">Generate YAML</button>
     <button class="btn btn-secondary" onclick="validateQuick()">Validate</button>
-    <button class="btn btn-primary" onclick="runQuick(false)">▶ Run</button>
+    <button class="btn btn-primary" onclick="runQuick(false)">Run</button>
     <button class="btn btn-secondary" onclick="runQuick(true)">Dry Run</button>
   </div>
   <div id="quick-status" class="status-bar"></div>
 </div>
 
-<!-- ═══════════════════════ YAML Editor ═══════════════════════ -->
 <div id="panel-editor" class="panel">
   <textarea id="yaml-editor" class="editor-full" spellcheck="false">api:
   provider: openai
   api_key_env: OPENAI_API_KEY
   model: gpt-4o-mini
-  # timeout: how long to wait for the LLM (increase for local/slow models)
   timeout: 300s
   rate_limit_rpm: 60
 
 prompt:
-  # system: role and global instructions for the LLM (sent once, not per record)
   system: |
     You are a helpful data-processing assistant. Respond concisely.
-  # pre_prompt: prepended before each record's data (optional)
   pre_prompt: |
     Analyze the following record:
-  # input_template: Go template rendered per record
-  #   {{ toPrettyJSON .record }} → full record as JSON
-  #   {{ .fieldName }}           → single field value
   input_template: |
     {{ toPrettyJSON .record }}
-  # post_prompt: appended after each record – enforce output format here (optional)
-  # post_prompt: |
-  #   Reply with ONLY a JSON object: {"sentiment":"positive|negative|neutral"}
 
 input:
   type: csv
@@ -1007,120 +1481,99 @@ output:
 processing:
   mode: per_record
   include_input_in_output: true
-  # response_field: key in each output row that holds the LLM answer
   response_field: llm_response
   continue_on_error: true
   workers: 2
   max_retries: 3
   dry_run: false
-  # debug: true   # log every prompt sent to and response from the LLM
 
-# Optional: enable agentic tools so the LLM can search, fetch pages, or query a DB.
-# tools:
-#   enabled: true
-#   web_fetch: true
-#   web_search: true
-#   web_extract_links: true
-#   code_execute: true
-#   sql_query: false
-#   max_rounds: 5
-#   code:
-#     timeout: 10s
-#     max_source_bytes: 65536
-#     read_only_fs: false
-#     read_whitelist: ["examples", "README.md", "LICENSE"]
-#     http_get: false
-#     http_timeout: 5s
-#     http_min_interval: 200ms
-#   sql:
-#     driver: sqlite        # sqlite or sqlserver
-#     dsn_env: DB_DSN       # env var holding the connection string
+# Optional tools config can be generated from the Setup tab.
 </textarea>
 
   <div class="btn-row">
     <button class="btn btn-secondary" onclick="validateYAML()">Validate</button>
-    <button class="btn btn-primary" onclick="runYAML(false)">▶ Run</button>
+    <button class="btn btn-primary" onclick="runYAML(false)">Run</button>
     <button class="btn btn-secondary" onclick="runYAML(true)">Dry Run</button>
     <span style="flex:1"></span>
-    <button class="btn btn-secondary" onclick="importYAML()" title="Import a YAML config file from disk">⬆ Import</button>
-    <button class="btn btn-secondary" onclick="exportYAML()" title="Download the current YAML config as a file">⬇ Export</button>
+    <button class="btn btn-secondary" onclick="importYAML()" title="Import YAML from file">Import</button>
+    <button class="btn btn-secondary" onclick="exportYAML()" title="Download current YAML">Export</button>
     <input type="file" id="yaml-import-input" accept=".yaml,.yml" style="display:none" onchange="onYAMLImportFile(event)">
   </div>
   <div id="editor-status" class="status-bar"></div>
 </div>
 
-<!-- ═══════════════════════ Jobs ═══════════════════════ -->
 <div id="panel-jobs" class="panel">
-  <div class="btn-row" style="margin-bottom:16px;margin-top:0">
-    <button class="btn btn-secondary" onclick="refreshJobs()">↻ Refresh</button>
-    <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--text-muted);cursor:pointer">
+  <div class="btn-row" style="margin-top:0;margin-bottom:10px">
+    <button class="btn btn-secondary" onclick="refreshJobs()">Refresh</button>
+    <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-muted);cursor:pointer">
       <input type="checkbox" id="show-archived" style="width:auto" onchange="refreshJobs()"> Show archived
     </label>
-    <span id="jobs-running-badge" style="font-size:12px;color:var(--yellow);margin-left:auto;display:none">● running — auto-refresh on</span>
+    <span id="jobs-running-badge" style="font-size:12px;color:var(--yellow);margin-left:auto;display:none">running - auto-refresh enabled</span>
   </div>
 
   <div id="job-list" class="job-list">
-    <div class="empty-state">No jobs yet. Run a job from the Quick Start or YAML Editor tab.</div>
+    <div class="empty-state">No jobs yet. Start one from Setup or YAML.</div>
   </div>
 
-  <!-- Job detail -->
-  <div id="job-detail" style="display:none; margin-top:24px;">
+  <div id="job-detail" class="section-card" style="display:none; margin-top:14px;">
     <div class="detail-header">
       <h3 class="section-title" style="margin-bottom:0">
         Job <span id="detail-id"></span><span id="detail-name" style="font-weight:400;color:var(--text-muted)"></span>
-        — <span id="detail-status"></span>
+        - <span id="detail-status"></span>
       </h3>
       <div id="detail-actions" class="btn-row" style="margin-top:0;margin-left:auto"></div>
     </div>
-    <div id="detail-progress-wrap" style="display:none;margin-bottom:12px">
+
+    <div id="detail-progress-wrap" style="display:none;margin-bottom:10px">
       <div class="progress-bar-bg">
         <div class="progress-bar-fill" id="detail-progress-fill" style="width:0%"></div>
       </div>
       <div class="progress-label" id="detail-progress-label"></div>
     </div>
-    <div id="detail-error" class="status-bar error" style="display:none; margin-bottom:12px;"></div>
 
-    <h4 class="section-title" style="font-size:14px;margin-top:4px;margin-bottom:8px;">Live Results Preview <span id="detail-preview-count" style="font-weight:400;color:var(--text-muted)"></span></h4>
+    <div id="detail-error" class="status-bar error" style="display:none; margin-bottom:10px;"></div>
+
+    <h4 class="section-title" style="font-size:13px;margin-top:2px;margin-bottom:6px;">Live Results <span id="detail-preview-count" style="font-weight:400;color:var(--text-muted)"></span></h4>
     <div class="preview-box" id="detail-preview">(no completed records yet)</div>
 
-    <h4 class="section-title" style="font-size:14px;margin-top:16px;margin-bottom:8px;">Execution Logs</h4>
+    <h4 class="section-title" style="font-size:13px;margin-top:12px;margin-bottom:6px;">Execution Logs</h4>
     <div class="log-box" id="detail-logs"></div>
   </div>
 </div>
 
-<!-- ═══════════════════════ Files ═══════════════════════ -->
 <div id="panel-files" class="panel">
-  <div class="btn-row" style="margin-bottom:16px;margin-top:0">
-    <button class="btn btn-secondary" onclick="refreshFiles()">↻ Refresh</button>
-    <span id="files-status" style="font-size:13px;color:var(--text-muted);margin-left:8px"></span>
+  <div class="btn-row" style="margin-top:0;margin-bottom:10px">
+    <button class="btn btn-secondary" onclick="refreshFiles()">Refresh</button>
+    <span id="files-status" style="font-size:12px;color:var(--text-muted);margin-left:8px"></span>
   </div>
 
-  <div class="form-group quick-full">
-    <label>Upload File</label>
-    <div id="files-upload-zone" class="upload-zone">
-      Drop a file here or click to upload
-      <input type="file" id="files-file-input" style="display:none" accept=".csv,.json,.jsonl,.xml">
-      <div id="files-upload-path" class="upload-path" style="display:none"></div>
+  <div class="section-card">
+    <div class="form-group quick-full" style="margin-bottom:0">
+      <label>Upload File</label>
+      <div id="files-upload-zone" class="upload-zone">
+        Drop file here or click to upload
+        <input type="file" id="files-file-input" style="display:none" accept=".csv,.json,.jsonl,.xml">
+        <div id="files-upload-path" class="upload-path" style="display:none"></div>
+      </div>
     </div>
   </div>
 
-  <div class="files-section">
-    <h3>📥 Input Files <span style="font-weight:400;font-size:13px;color:var(--text-muted)">(data/input)</span></h3>
+  <div class="section-card files-section">
+    <h3>Input Files <span style="font-weight:400;font-size:12px;color:var(--text-muted)">(data/input)</span></h3>
     <div id="input-files-list">
-      <div class="empty-state">No input files yet. Upload a file from the Quick Start tab.</div>
+      <div class="empty-state">No input files yet.</div>
     </div>
   </div>
 
-  <div class="files-section">
-    <h3>📤 Output Files <span style="font-weight:400;font-size:13px;color:var(--text-muted)">(data/output)</span></h3>
+  <div class="section-card files-section">
+    <h3>Output Files <span style="font-weight:400;font-size:12px;color:var(--text-muted)">(data/output)</span></h3>
     <div id="output-files-list">
-      <div class="empty-state">No output files yet. Completed jobs will write here when the output path is set to data/output/…</div>
+      <div class="empty-state">No output files yet.</div>
     </div>
   </div>
 
-  <!-- Standing Orders / Watchers -->
-  <div class="files-section">
-    <h3>🔄 Standing Orders <span style="font-weight:400;font-size:13px;color:var(--text-muted)">(auto-process new files matching a pattern)</span></h3>
+  <div class="section-card files-section">
+    <h3>Standing Orders <span style="font-weight:400;font-size:12px;color:var(--text-muted)">(auto-run jobs on incoming files)</span></h3>
     <div id="watchers-table-wrap">
       <div class="empty-state" id="watchers-empty">No standing orders yet.</div>
       <table class="file-table" id="watchers-table" style="display:none">
@@ -1130,27 +1583,25 @@ processing:
         <tbody id="watchers-tbody"></tbody>
       </table>
     </div>
-    <details style="margin-top:12px">
-      <summary style="cursor:pointer;font-size:13px;font-weight:600;color:var(--accent)">+ Add Standing Order</summary>
-      <div class="adv-grid" style="margin-top:12px">
+
+    <details style="margin-top:10px">
+      <summary style="cursor:pointer;font-size:13px;font-weight:600;color:var(--accent)">Add Standing Order</summary>
+      <div class="adv-grid" style="margin-top:10px">
         <div class="form-group">
           <label>Name</label>
-          <input id="w-name" type="text" placeholder="e.g. Nightly product import">
+          <input id="w-name" type="text" placeholder="nightly import">
         </div>
         <div class="form-group">
           <label>Watch Directory</label>
-          <input id="w-dir" type="text" placeholder="e.g. /data/drops">
-          <div class="hint">Absolute path to the directory to watch for new files.</div>
+          <input id="w-dir" type="text" placeholder="/data/drops">
         </div>
         <div class="form-group">
           <label>File Pattern</label>
-          <input id="w-pattern" type="text" placeholder="e.g. PRODUCTS_*.csv">
-          <div class="hint">Glob pattern for file names in the watch directory.</div>
+          <input id="w-pattern" type="text" placeholder="PRODUCTS_*.csv">
         </div>
-        <div class="form-group" style="grid-column:1/-1">
+        <div class="form-group quick-full">
           <label>YAML Config Template</label>
-          <textarea id="w-config" rows="6" placeholder="Paste your llmflow YAML config here. Use {{.InputFile}} where the matched file path should be injected."></textarea>
-          <div class="hint">Use <code>{{.InputFile}}</code> as the input path placeholder — it will be replaced with the actual file path at run time.</div>
+          <textarea id="w-config" rows="6" placeholder="Use {{.InputFile}} where the matched file path should be inserted."></textarea>
         </div>
         <div class="form-group">
           <label><input type="checkbox" id="w-active" checked style="width:auto"> Active immediately</label>
@@ -1163,48 +1614,38 @@ processing:
     </details>
   </div>
 
-  <!-- File Preview Modal -->
-  <div id="file-preview-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:9999;overflow:auto;padding:32px 16px">
-    <div style="max-width:900px;margin:0 auto;background:var(--bg-panel);border:1px solid var(--border);border-radius:10px;padding:24px;position:relative">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
-        <span id="file-preview-title" style="font-size:15px;font-weight:700"></span>
-        <button class="btn btn-secondary btn-sm" onclick="closeFilePreview()">✕ Close</button>
+  <div id="file-preview-modal">
+    <div class="modal-inner">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;gap:10px">
+        <span id="file-preview-title" style="font-size:14px;font-weight:700"></span>
+        <button class="btn btn-secondary btn-sm" onclick="closeFilePreview()">Close</button>
       </div>
       <div id="file-preview-body" style="overflow-x:auto">
-        <div class="empty-state">Loading…</div>
+        <div class="empty-state">Loading...</div>
       </div>
     </div>
   </div>
 </div>
 
-<!-- ═══════════════════════ Guide ═══════════════════════ -->
 <div id="panel-guide" class="panel">
   <div class="section-card">
     <div class="section-card-header">
       <span class="section-card-num">1</span>
-      <span class="section-card-title">How to use llmflow</span>
-      <span class="section-card-desc">A short operational guide for common tasks and UI controls.</span>
+      <span class="section-card-title">Recommended Workflow</span>
+      <span class="section-card-desc">Shortest safe path from input to reliable output.</span>
     </div>
-    <div class="quick-guide" style="margin-bottom:0">
-      <div class="quick-step">
-        <div class="qs-label">Step 1</div>
-        <div class="qs-title">Upload or choose input</div>
-        <div class="qs-desc">Start with a file in <strong>Quick Start</strong> or <strong>Files</strong>. Use the preview to inspect records and exclude columns you do not need.</div>
+    <div class="guide-grid">
+      <div class="guide-item">
+        <h4>1. Upload + inspect</h4>
+        <p>Upload a file, then use preview to exclude irrelevant columns.</p>
       </div>
-      <div class="quick-step">
-        <div class="qs-label">Step 2</div>
-        <div class="qs-title">Describe the task</div>
-        <div class="qs-desc">Write the task in plain English. The AI setup field should describe one job, not several unrelated tasks.</div>
+      <div class="guide-item">
+        <h4>2. Define structure</h4>
+        <p>Use response format + schema to get stable, machine-friendly columns.</p>
       </div>
-      <div class="quick-step">
-        <div class="qs-label">Step 3</div>
-        <div class="qs-title">Choose output shape</div>
-        <div class="qs-desc">Use <em>Include Input in Output</em>, <em>Key Column</em>, <em>Response Fields</em>, and <em>Output Fields</em> to control what gets written.</div>
-      </div>
-      <div class="quick-step">
-        <div class="qs-label">Step 4</div>
-        <div class="qs-title">Run safely</div>
-        <div class="qs-desc">Validate first, then try a Dry Run, and only then start a real job. Check the Jobs tab for progress and errors.</div>
+      <div class="guide-item">
+        <h4>3. Validate + run</h4>
+        <p>Validate config, dry run if needed, then start the real job.</p>
       </div>
     </div>
   </div>
@@ -1212,46 +1653,21 @@ processing:
   <div class="section-card">
     <div class="section-card-header">
       <span class="section-card-num">2</span>
-      <span class="section-card-title">What each field does</span>
-      <span class="section-card-desc">The most important controls in the UI, with plain explanations.</span>
+      <span class="section-card-title">Field Notes</span>
+      <span class="section-card-desc">Controls that matter most.</span>
     </div>
-    <div class="adv-grid">
-      <div class="form-group">
-        <label>Input File</label>
-        <div class="hint">Upload the source data. The file is copied into <code>data/input</code>.</div>
+    <div class="guide-grid">
+      <div class="guide-item">
+        <h4>Include Input In Output</h4>
+        <p>Use <code>key</code> or <code>none</code> to keep output lean.</p>
       </div>
-      <div class="form-group">
-        <label>Input Type</label>
-        <div class="hint">Usually auto-detected. Change only when the automatic detection is wrong.</div>
+      <div class="guide-item">
+        <h4>Response Fields / Output Fields</h4>
+        <p>Response fields guide parsing. Output fields define final column order.</p>
       </div>
-      <div class="form-group">
-        <label>Data Preview</label>
-        <div class="hint">Shows the first rows so you can confirm the structure before running anything.</div>
-      </div>
-      <div class="form-group">
-        <label>Response Field Name</label>
-        <div class="hint">The column that stores the model answer when you only want one output field.</div>
-      </div>
-      <div class="form-group">
-        <label>Include Input in Output</label>
-        <div class="hint">Choose whether the output contains all input columns, only a key column, or no input fields at all.</div>
-      </div>
-      <div class="form-group">
-        <label>Response Fields</label>
-        <div class="hint">A comma-separated list for structured JSON output fields, for example <code>weight, volume, short_expiry</code>.</div>
-      </div>
-      <div class="form-group">
-        <label>Output Fields</label>
-        <div class="hint">Explicitly choose the final columns to keep. This overrides automatic field selection.
-        </div>
-      </div>
-      <div class="form-group">
-        <label>Data Enrichment</label>
-        <div class="hint">Optional pre-processing step that looks up an input column value and appends plain text enrichment before the LLM call.</div>
-      </div>
-      <div class="form-group">
-        <label>Agentic Tools</label>
-        <div class="hint">Lets the LLM call web, code, or SQL tools during processing. Keep it off unless the job really needs it.</div>
+      <div class="guide-item">
+        <h4>Workers</h4>
+        <p>Higher values increase throughput but also provider load.</p>
       </div>
     </div>
   </div>
@@ -1259,78 +1675,27 @@ processing:
   <div class="section-card">
     <div class="section-card-header">
       <span class="section-card-num">3</span>
-      <span class="section-card-title">What each button does</span>
-      <span class="section-card-desc">A quick reference for the actions in the web UI.</span>
+      <span class="section-card-title">Troubleshooting</span>
+      <span class="section-card-desc">Common causes of unexpected output.</span>
     </div>
-    <div class="adv-grid">
-      <div class="form-group">
-        <label>Suggest setup</label>
-        <div class="hint">Asks the assistant to generate a first-pass configuration from your task description.</div>
+    <div class="guide-grid">
+      <div class="guide-item">
+        <h4>Free text instead of JSON</h4>
+        <p>Set response format to JSON and provide a schema.</p>
       </div>
-      <div class="form-group">
-        <label>Generate YAML</label>
-        <div class="hint">Copies the current Quick Start form into the YAML editor.</div>
+      <div class="guide-item">
+        <h4>Missing fields</h4>
+        <p>Check column exclusions and output field overrides.</p>
       </div>
-      <div class="form-group">
-        <label>Validate</label>
-        <div class="hint">Checks whether the current form or YAML config is valid before you run it.</div>
-      </div>
-      <div class="form-group">
-        <label>Run</label>
-        <div class="hint">Starts a real job and calls the configured model or data source.</div>
-      </div>
-      <div class="form-group">
-        <label>Dry Run</label>
-        <div class="hint">Simulates the job without calling the provider. Use this to verify structure and output fields.</div>
-      </div>
-      <div class="form-group">
-        <label>Refresh</label>
-        <div class="hint">Reloads jobs, files, previews, or watcher states from the backend.</div>
-      </div>
-      <div class="form-group">
-        <label>Preview</label>
-        <div class="hint">Opens the first output rows before you download a file.</div>
-      </div>
-      <div class="form-group">
-        <label>Create Standing Order</label>
-        <div class="hint">Adds a watcher that automatically starts jobs for matching files.</div>
-      </div>
-    </div>
-  </div>
-
-  <div class="section-card">
-    <div class="section-card-header">
-      <span class="section-card-num">4</span>
-      <span class="section-card-title">Common mistakes to avoid</span>
-      <span class="section-card-desc">These are the most common reasons a job behaves unexpectedly.</span>
-    </div>
-    <div class="quick-guide" style="margin-bottom:0">
-      <div class="quick-step">
-        <div class="qs-label">1</div>
-        <div class="qs-title">The model returns free text</div>
-        <div class="qs-desc">Make the post prompt explicit. Say that only JSON is allowed if you need structured output.</div>
-      </div>
-      <div class="quick-step">
-        <div class="qs-label">2</div>
-        <div class="qs-title">Too many columns are included</div>
-        <div class="qs-desc">Use the preview to deselect columns that the model does not need. Fewer columns usually means better prompts.</div>
-      </div>
-      <div class="quick-step">
-        <div class="qs-label">3</div>
-        <div class="qs-title">Output is too large</div>
-        <div class="qs-desc">Switch <em>Include Input in Output</em> to <code>key</code> or <code>none</code>.</div>
-      </div>
-      <div class="quick-step">
-        <div class="qs-label">4</div>
-        <div class="qs-title">A watcher does nothing</div>
-        <div class="qs-desc">Check the directory, the pattern, and whether the watcher is active. Files must land in the watched directory, not in a subfolder.</div>
+      <div class="guide-item">
+        <h4>Watcher not firing</h4>
+        <p>Verify watch directory, pattern, and watcher active status.</p>
       </div>
     </div>
   </div>
 </div>
 
 </div><!-- .container -->
-
 <script>
 // ── Tabs ───────────────────────────────────────────────────────────
 /**
@@ -1474,6 +1839,7 @@ async function loadPreview() {
         eColSel.value = columns[0];
       }
     }
+    updateOutputStructureSummary();
   } catch(e) {
     document.getElementById('preview-section').style.display = 'none';
   }
@@ -1515,6 +1881,7 @@ function renderPreviewTable(columns, records) {
   tbody.innerHTML = trRows;
   updateExcludedInfo();
   updateJSONPreview();
+  updateOutputStructureSummary();
 }
 
 /**
@@ -1544,6 +1911,7 @@ function togglePreviewColumn(chk) {
   }
   updateExcludedInfo();
   updateJSONPreview();
+  updateOutputStructureSummary();
 }
 
 /**
@@ -1578,6 +1946,103 @@ function updateExcludedInfo() {
   } else {
     el.textContent = `${excludedColumns.size} column(s) excluded: ${[...excludedColumns].join(', ')}`;
   }
+}
+
+/**
+ * Parses comma-separated field names from an input element.
+ * @param {string} id Input element id.
+ * @returns {string[]} Normalized non-empty field names.
+ */
+function parseCommaFields(id) {
+  const el = document.getElementById(id);
+  const raw = el ? String(el.value || '').trim() : '';
+  if (!raw) return [];
+  return raw.split(',').map(v => v.trim()).filter(Boolean);
+}
+
+/**
+ * Parses field names from the schema textarea.
+ * @returns {string[]} Field names in declaration order.
+ */
+function parseSchemaFields() {
+  const raw = (document.getElementById('q-response-schema').value || '').trim();
+  if (!raw) return [];
+  return raw
+    .split('\n')
+    .map(line => line.trim())
+    .filter(line => line && line.includes(':'))
+    .map(line => line.slice(0, line.indexOf(':')).trim())
+    .filter(Boolean);
+}
+
+/**
+ * Returns unique values while preserving input order.
+ * @param {string[]} values Input values.
+ * @returns {string[]} Unique values.
+ */
+function uniqueList(values) {
+  const seen = new Set();
+  const out = [];
+  for (const value of values) {
+    if (seen.has(value)) continue;
+    seen.add(value);
+    out.push(value);
+  }
+  return out;
+}
+
+/**
+ * Updates the live summary of expected output fields.
+ * @returns {void}
+ */
+function updateOutputStructureSummary() {
+  const el = document.getElementById('output-structure-summary');
+  if (!el) return;
+
+  const includeMode = document.getElementById('q-include-input').value;
+  const responseFormat = (document.getElementById('q-response-format').value || '').trim();
+  const responseField = (document.getElementById('q-response-field').value || 'llm_response').trim() || 'llm_response';
+  const keyCol = (document.getElementById('q-key-column').value || '').trim();
+
+  const outputFields = parseCommaFields('q-output-fields');
+  const responseFields = parseCommaFields('q-response-fields');
+  const schemaFields = parseSchemaFields();
+
+  let sourceLabel = `using response field "${responseField}"`;
+  let fields = [responseField];
+  if (outputFields.length > 0) {
+    sourceLabel = 'using explicit Output Fields';
+    fields = outputFields;
+  } else if (responseFormat && schemaFields.length > 0) {
+    sourceLabel = `using ${responseFormat.toUpperCase()} schema fields + response field`;
+    fields = [...schemaFields, responseField];
+    if (includeMode === 'key' && keyCol) fields = [keyCol, ...fields];
+  } else if (responseFields.length > 0) {
+    sourceLabel = 'using Response Fields';
+    fields = [...responseFields];
+    if (includeMode === 'key' && keyCol) fields = [keyCol, ...fields];
+  }
+  fields = uniqueList(fields);
+
+  let includeLabel = 'input columns: all selected preview columns';
+  if (includeMode === 'none') includeLabel = 'input columns: none';
+  if (includeMode === 'key') includeLabel = keyCol ? `input columns: key only (${keyCol})` : 'input columns: key only';
+
+  if (includeMode === 'all' && previewColumns.length > 0) {
+    const selectedPreviewCols = previewColumns.filter(col => !excludedColumns.has(col));
+    if (selectedPreviewCols.length > 0) {
+      includeLabel = `input columns: ${selectedPreviewCols.length} selected`;
+    }
+  }
+
+  const chips = fields.length > 0
+    ? fields.map(f => `<span class="chip">${escHtml(String(f))}</span>`).join('')
+    : `<span class="chip">${escHtml(responseField)}</span>`;
+
+  el.innerHTML = `
+    <p>${escHtml(includeLabel)}; output mapping ${escHtml(sourceLabel)}.</p>
+    <div class="chips">${chips}</div>
+  `;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────
@@ -2030,6 +2495,7 @@ function onIncludeInputChange() {
       }
     }
   }
+  updateOutputStructureSummary();
 }
 
 // ── File Preview ──────────────────────────────────────────────────
@@ -2788,6 +3254,7 @@ async function suggestConfig() {
     if (s.thinking !== undefined) {
       document.getElementById('q-thinking').checked = !!s.thinking;
     }
+    updateOutputStructureSummary();
     statusEl.textContent = s.notes ? `✓ ${s.notes}` : '✓ Fields configured — review and adjust as needed.';
     statusEl.className = 'suggest-status ok';
     quickFormTouched = true;
@@ -2869,12 +3336,24 @@ function onResponseFormatChange() {
   if (structured) {
     document.getElementById('q-parse-json').value = 'false';
   }
+  updateOutputStructureSummary();
 }
 
 // ── Init ──────────────────────────────────────────────────────────
+['q-response-field', 'q-response-fields', 'q-output-fields', 'q-response-schema'].forEach(id => {
+  const input = document.getElementById(id);
+  if (input) input.addEventListener('input', updateOutputStructureSummary);
+});
+['q-include-input', 'q-key-column', 'q-response-format', 'q-parse-json'].forEach(id => {
+  const input = document.getElementById(id);
+  if (input) input.addEventListener('change', updateOutputStructureSummary);
+});
 setModelSuggestions([]);  // populate select for default provider (openai)
 updateProviderUI(document.getElementById('q-provider').value);
 syncAPIKeyFieldMode();
+onIncludeInputChange();
+onResponseFormatChange();
+updateOutputStructureSummary();
 detectLocalProviders({ autoApply: true });
 </script>
 </body>
