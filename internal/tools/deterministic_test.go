@@ -48,7 +48,7 @@ func TestJSONExtractTool(t *testing.T) {
 		t.Fatalf("json_extract returned error: %v", err)
 	}
 	var got struct {
-		Found bool `json:"found"`
+		Found bool   `json:"found"`
 		Value string `json:"value"`
 	}
 	if err := json.Unmarshal([]byte(out), &got); err != nil {

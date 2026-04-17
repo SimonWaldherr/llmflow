@@ -315,6 +315,9 @@ func (a *App) processRecordsWithSink(
 					a.logger.Error("build prompt failed", "index", j.idx, "error", err)
 					continue
 				}
+				if instr := prompt.FormatInstructions(a.cfg.Processing); instr != "" {
+					userPrompt = userPrompt + "\n\n" + instr
+				}
 
 				var responseText string
 				if len(activeTools) > 0 {
@@ -350,11 +353,10 @@ func (a *App) processRecordsWithSink(
 				}
 				// Always preserve the raw LLM response so reasoning text is never lost.
 				outRec[a.cfg.Processing.ResponseField] = responseText
-				if a.cfg.Processing.ParseJSONResponse {
-					// Additionally extract the last JSON object from the response and
-					// spread its keys into the output record. This supports the
-					// "reasoning + structured output" pattern where the LLM first
-					// reasons in free text and then appends a JSON object.
+				if a.cfg.Processing.ParseJSONResponse || structuredResponseFormat(a.cfg.Processing.ResponseFormat) {
+					// Extract the last JSON object from the response and spread its keys
+					// into the output record. This supports the "thinking + structured output"
+					// pattern where the LLM reasons first, then appends a JSON object.
 					if parsed, ok := extractLastJSON(responseText); ok {
 						for k, v := range parsed {
 							if _, exists := outRec[k]; exists && k != a.cfg.Processing.ResponseField {
@@ -431,6 +433,16 @@ func (a *App) processRecordsWithSink(
 		}
 	}
 	return results, nil
+}
+
+// structuredResponseFormat reports whether the response_format requires the LLM
+// to emit a JSON object that should be parsed and spread into the output record.
+func structuredResponseFormat(format string) bool {
+	switch strings.ToLower(strings.TrimSpace(format)) {
+	case "json", "xml", "csv":
+		return true
+	}
+	return false
 }
 
 // extractLastJSON finds and parses the last JSON object {...} in s.
@@ -895,6 +907,9 @@ func (a *App) processJobs(
 					a.logger.Error("build prompt failed", "index", j.idx, "error", err)
 					continue
 				}
+				if instr := prompt.FormatInstructions(a.cfg.Processing); instr != "" {
+					userPrompt = userPrompt + "\n\n" + instr
+				}
 
 				var responseText string
 				if len(activeTools) > 0 {
@@ -930,9 +945,10 @@ func (a *App) processJobs(
 				}
 				// Always preserve the raw LLM response so reasoning text is never lost.
 				outRec[a.cfg.Processing.ResponseField] = responseText
-				if a.cfg.Processing.ParseJSONResponse {
-					// Additionally extract the last JSON object from the response and
-					// spread its keys into the output record.
+				if a.cfg.Processing.ParseJSONResponse || structuredResponseFormat(a.cfg.Processing.ResponseFormat) {
+					// Extract the last JSON object from the response and spread its keys
+					// into the output record. Supports the "thinking + structured output"
+					// pattern where the LLM reasons first, then appends a JSON object.
 					if parsed, ok := extractLastJSON(responseText); ok {
 						for k, v := range parsed {
 							if _, exists := outRec[k]; exists && k != a.cfg.Processing.ResponseField {

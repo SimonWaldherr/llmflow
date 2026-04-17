@@ -5,9 +5,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>llmflow – Web UI</title>
 <style>
+/* ── Theme definitions ─────────────────────────────────────────── */
 :root {
   --bg: #0d1117;
   --surface: #161b22;
+  --bg-panel: #161b22;
   --border: #30363d;
   --text: #e6edf3;
   --text-muted: #8b949e;
@@ -18,7 +20,81 @@
   --yellow: #d29922;
   --orange: #e3712a;
   --font-mono: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace;
+  --theme-switcher-bg: #21262d;
 }
+[data-theme="light"] {
+  --bg: #ffffff;
+  --surface: #f6f8fa;
+  --bg-panel: #ffffff;
+  --border: #d0d7de;
+  --text: #1f2328;
+  --text-muted: #636c76;
+  --accent: #0969da;
+  --accent-hover: #0550ae;
+  --green: #1a7f37;
+  --red: #cf222e;
+  --yellow: #9a6700;
+  --orange: #bc4c00;
+  --theme-switcher-bg: #eaeef2;
+}
+[data-theme="forest"] {
+  --bg: #0a1a0a;
+  --surface: #0f2a0f;
+  --bg-panel: #0f2a0f;
+  --border: #1e4a1e;
+  --text: #cceacc;
+  --text-muted: #6ea86e;
+  --accent: #3fb950;
+  --accent-hover: #56d364;
+  --green: #56d364;
+  --red: #f85149;
+  --yellow: #d29922;
+  --orange: #e3712a;
+  --theme-switcher-bg: #1a3a1a;
+}
+[data-theme="ocean"] {
+  --bg: #070e1a;
+  --surface: #0c1829;
+  --bg-panel: #0c1829;
+  --border: #1a3558;
+  --text: #bdd5f0;
+  --text-muted: #5a8ab5;
+  --accent: #409eff;
+  --accent-hover: #69b4ff;
+  --green: #00c58e;
+  --red: #f85149;
+  --yellow: #d29922;
+  --orange: #e3712a;
+  --theme-switcher-bg: #112040;
+}
+[data-theme="violet"] {
+  --bg: #12091a;
+  --surface: #1c1030;
+  --bg-panel: #1c1030;
+  --border: #3d1f6a;
+  --text: #e2d9f3;
+  --text-muted: #9b8ec4;
+  --accent: #a78bfa;
+  --accent-hover: #c4b5fd;
+  --green: #34d399;
+  --red: #f87171;
+  --yellow: #fbbf24;
+  --orange: #f97316;
+  --theme-switcher-bg: #2a1850;
+}
+
+/* ── Theme switcher ─────────────────────────────────────────────── */
+.theme-switcher {
+  display: flex; align-items: center; gap: 6px;
+  background: var(--theme-switcher-bg); border: 1px solid var(--border);
+  border-radius: 20px; padding: 4px 10px; font-size: 12px; cursor: pointer;
+}
+.theme-switcher select {
+  background: transparent; border: none; color: var(--text-muted);
+  font-size: 12px; cursor: pointer; padding: 0; width: auto;
+  outline: none;
+}
+.theme-switcher select:focus { outline: none; }
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
@@ -363,13 +439,55 @@ textarea { font-family: var(--font-mono); resize: vertical; }
 .suggest-status { font-size: 12px; margin-top: 8px; min-height: 16px; }
 .suggest-status.ok    { color: var(--green); }
 .suggest-status.error { color: var(--red); }
+
+/* ── Structured output section ──────────────────────────────────── */
+.structured-output-card {
+  background: linear-gradient(135deg, rgba(63,185,80,0.05) 0%, rgba(63,185,80,0.02) 100%);
+  border: 1px solid rgba(63,185,80,0.2); border-radius: 8px; padding: 14px 16px;
+  margin-top: 16px;
+}
+.structured-output-header {
+  display: flex; align-items: center; gap: 8px; margin-bottom: 12px;
+}
+.structured-output-badge {
+  background: rgba(63,185,80,0.15); color: var(--green);
+  font-size: 11px; font-weight: 700; padding: 2px 8px;
+  border-radius: 10px; text-transform: uppercase; letter-spacing: 0.05em;
+}
+.schema-editor {
+  width: 100%; min-height: 80px; font-family: var(--font-mono);
+  font-size: 12px; padding: 10px 12px; resize: vertical;
+  background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+  color: var(--text); line-height: 1.6;
+}
+.schema-editor:focus { outline: none; border-color: var(--green); }
+.thinking-toggle {
+  display: flex; align-items: flex-start; gap: 10px; padding: 10px 14px;
+  background: rgba(167,139,250,0.06); border: 1px solid rgba(167,139,250,0.2);
+  border-radius: 8px; margin-top: 8px;
+}
+.thinking-toggle input[type=checkbox] { width: auto; margin-top: 2px; flex-shrink: 0; }
+.thinking-toggle .thinking-label { font-size: 13px; font-weight: 600; color: var(--text); }
+.thinking-toggle .thinking-desc { font-size: 12px; color: var(--text-muted); margin-top: 3px; }
 </style>
 </head>
 <body>
 
 <header>
   <h1><span>llm</span>flow</h1>
-  <span style="font-size:13px;color:var(--text-muted)">Web UI</span>
+  <div style="display:flex;align-items:center;gap:14px">
+    <div class="theme-switcher">
+      <span style="color:var(--text-muted)">🎨</span>
+      <select id="theme-select" title="Switch theme">
+        <option value="dark">Dark</option>
+        <option value="light">Light</option>
+        <option value="forest">Forest</option>
+        <option value="ocean">Ocean</option>
+        <option value="violet">Violet</option>
+      </select>
+    </div>
+    <span style="font-size:13px;color:var(--text-muted)">Web UI</span>
+  </div>
 </header>
 
 <div class="container">
@@ -416,12 +534,17 @@ textarea { font-family: var(--font-mono); resize: vertical; }
       <div class="pf-arrow">→</div>
       <div class="pf-step">
         <div class="pf-label">④ Post-Prompt</div>
-        <div class="pf-desc">Optional instruction appended after data. Enforce output format here (e.g. "Reply in JSON").</div>
+        <div class="pf-desc">Optional extra instruction. Leave empty when <em>Response Format</em> is set — instructions are injected automatically.</div>
+      </div>
+      <div class="pf-arrow">→</div>
+      <div class="pf-step" style="border-color:rgba(63,185,80,0.4)">
+        <div class="pf-label" style="color:var(--green)">⑤ Format Injection</div>
+        <div class="pf-desc">When <em>Response Format</em> is set, llmflow appends the schema instruction + parses the JSON reply automatically.</div>
       </div>
       <div class="pf-arrow">→</div>
       <div class="pf-step pf-output">
-        <div class="pf-label">⑤ Output</div>
-        <div class="pf-desc">LLM's text response is stored in the <em>Response Field</em> of each output row (default: <code>llm_response</code>).</div>
+        <div class="pf-label">⑥ Output</div>
+        <div class="pf-desc">LLM answer stored in <em>Response Field</em>. With JSON format, each schema key becomes its own output column.</div>
       </div>
     </div>
   </div>
@@ -457,6 +580,7 @@ textarea { font-family: var(--font-mono); resize: vertical; }
         <select id="q-output-type">
           <option value="jsonl">JSONL (JSON Lines)</option>
           <option value="csv">CSV</option>
+          <option value="xml">XML</option>
         </select>
       </div>
     </div>
@@ -497,7 +621,7 @@ textarea { font-family: var(--font-mono); resize: vertical; }
     <div class="ai-assist-bar" style="margin-bottom:0">
       <div class="ai-assist-inner">
         <span class="ai-assist-label">✨ AI Quick Setup</span>
-        <textarea id="q-task" class="ai-assist-input" rows="2" placeholder="Describe the job in one sentence — for example: &#34;Classify each customer ticket as urgent, normal, or low priority and explain why.&#34;"></textarea>
+        <textarea id="q-task" class="ai-assist-input" rows="2" placeholder="Describe the job — e.g.: &quot;For each product (name + description), decide if freight forwarding (Spedition) is needed for shipping and whether an expiry date (MHD) must be tracked. Return spedition_required, versandart, mhd_pflichtig, and a brief reason.&quot;"></textarea>
         <button class="btn btn-accent" onclick="suggestConfig()" id="suggest-btn">Suggest setup</button>
       </div>
       <div id="suggest-status" class="suggest-status"></div>
@@ -617,6 +741,46 @@ textarea { font-family: var(--font-mono); resize: vertical; }
     </div>
 
     </div><!-- .quick-grid -->
+
+    <!-- ── Structured Output ── -->
+    <div class="structured-output-card">
+      <div class="structured-output-header">
+        <span class="structured-output-badge">Structured Output</span>
+        <span style="font-size:13px;color:var(--text-muted)">Define what the LLM must return — instructions are injected automatically.</span>
+      </div>
+      <div class="quick-grid">
+
+      <div class="form-group quick-full">
+        <label>Response Format</label>
+        <select id="q-response-format" onchange="onResponseFormatChange()">
+          <option value="">Text — free-form response (default)</option>
+          <option value="json">JSON — parse and spread fields into output columns</option>
+          <option value="xml">XML — parse JSON, convert to XML output file</option>
+          <option value="csv">CSV — parse JSON, write fields as CSV columns</option>
+        </select>
+        <div class="hint">When set to JSON/XML/CSV, llmflow automatically appends the format instruction to every prompt and parses the LLM's JSON reply. No manual <em>post_prompt</em> needed.</div>
+      </div>
+
+      <div class="form-group quick-full" id="response-schema-group" style="display:none">
+        <label>Response Schema <span style="font-weight:400;color:var(--text-muted)">(optional — one field per line)</span></label>
+        <textarea id="q-response-schema" class="schema-editor" rows="4"
+          placeholder="spedition_required: true or false&#10;versandart: one of: DHL, GLS, UPS, Spedition&#10;mhd_pflichtig: true or false&#10;begruendung: short explanation (one sentence)"></textarea>
+        <div class="hint">Each line: <code>fieldname: type hint or description</code>. These become output columns. Leave empty to let the LLM decide the JSON structure.</div>
+      </div>
+
+      <div id="thinking-group" style="display:none" class="quick-full">
+        <div class="thinking-toggle">
+          <input type="checkbox" id="q-thinking">
+          <div>
+            <div class="thinking-label">Enable Thinking Mode</div>
+            <div class="thinking-desc">The LLM reasons step-by-step in a <code>&lt;thinking&gt;…&lt;/thinking&gt;</code> block before producing the structured output. Improves accuracy for complex decisions (e.g. freight classification, expiry assessment). The full reasoning is stored in the Response Field.</div>
+          </div>
+        </div>
+      </div>
+
+      </div><!-- .quick-grid inside structured-output-card -->
+    </div><!-- .structured-output-card -->
+
   </div><!-- .section-card -->
 
   <details class="adv-processing">
@@ -1699,11 +1863,46 @@ function buildYAMLFromForm() {
   // Response fields → parse_json_response + output_fields
   const responseFieldsList = responseFieldsRaw ? responseFieldsRaw.split(',').map(f => f.trim()).filter(Boolean) : [];
   const parseJSON = document.getElementById('q-parse-json').value;
-  if (parseJSON === 'true' || responseFieldsList.length > 0) yaml += `\n  parse_json_response: true`;
+
+  // ── Structured output (response_format / response_schema / thinking) ──
+  const responseFormat = (document.getElementById('q-response-format').value || '').trim();
+  const responseSchemaRaw = (document.getElementById('q-response-schema').value || '').trim();
+  const thinkingEnabled = document.getElementById('q-thinking').checked;
+
+  if (responseFormat) {
+    yaml += `\n  response_format: ${responseFormat}`;
+    if (thinkingEnabled) yaml += `\n  thinking: true`;
+    if (responseSchemaRaw) {
+      const schemaLines = responseSchemaRaw.split('\n')
+        .map(l => l.trim()).filter(l => l && l.includes(':'));
+      if (schemaLines.length > 0) {
+        yaml += `\n  response_schema:`;
+        for (const line of schemaLines) {
+          const ci = line.indexOf(':');
+          const k = line.slice(0, ci).trim();
+          const v = line.slice(ci + 1).trim();
+          if (k) yaml += `\n    ${k}: "${v.replace(/"/g, '\\"')}"`;
+        }
+      }
+    }
+  } else if (parseJSON === 'true' || responseFieldsList.length > 0) {
+    yaml += `\n  parse_json_response: true`;
+  }
 
   let outputFieldsRaw = (document.getElementById('q-output-fields').value || '').trim();
-  if (!outputFieldsRaw && responseFieldsList.length > 0) {
-    // Auto-derive output_fields from response fields
+
+  // Auto-derive output_fields from schema when response_format is set
+  if (!outputFieldsRaw && responseFormat && responseSchemaRaw) {
+    const schemaFields = responseSchemaRaw.split('\n')
+      .map(l => { const ci = l.indexOf(':'); return ci > 0 ? l.slice(0, ci).trim() : ''; })
+      .filter(Boolean);
+    if (schemaFields.length > 0) {
+      const keyCol = includeMode === 'key' ? document.getElementById('q-key-column').value : '';
+      const allOut = keyCol ? [keyCol, ...schemaFields, responseField] : [...schemaFields, responseField];
+      outputFieldsRaw = allOut.join(', ');
+    }
+  } else if (!outputFieldsRaw && responseFieldsList.length > 0) {
+    // Legacy: auto-derive from response_fields
     const keyCol = includeMode === 'key' ? document.getElementById('q-key-column').value : '';
     const allOut = keyCol ? [keyCol, ...responseFieldsList] : responseFieldsList;
     outputFieldsRaw = allOut.join(', ');
@@ -2577,6 +2776,18 @@ async function suggestConfig() {
     }
     if (s.key_column && document.getElementById('q-key-column')) document.getElementById('q-key-column').value = s.key_column;
     if (s.job_name)         document.getElementById('q-name').value           = s.job_name;
+    // Apply structured output fields
+    if (s.response_format) {
+      document.getElementById('q-response-format').value = s.response_format;
+      onResponseFormatChange();
+    }
+    if (s.response_schema && typeof s.response_schema === 'object') {
+      const lines = Object.entries(s.response_schema).map(([k, v]) => `${k}: ${v}`).join('\n');
+      document.getElementById('q-response-schema').value = lines;
+    }
+    if (s.thinking !== undefined) {
+      document.getElementById('q-thinking').checked = !!s.thinking;
+    }
     statusEl.textContent = s.notes ? `✓ ${s.notes}` : '✓ Fields configured — review and adjust as needed.';
     statusEl.className = 'suggest-status ok';
     quickFormTouched = true;
@@ -2624,6 +2835,41 @@ document.addEventListener('click', e => {
     deleteFile(deleteBtn.dataset.dir || '', deleteBtn.dataset.name || '');
   }
 });
+
+// ── Theme ──────────────────────────────────────────────────────────
+/**
+ * Applies a named theme by setting data-theme on the root element.
+ * @param {string} name Theme key.
+ */
+function applyTheme(name) {
+  document.documentElement.setAttribute('data-theme', name === 'dark' ? '' : name);
+  const sel = document.getElementById('theme-select');
+  if (sel) sel.value = name;
+  try { localStorage.setItem('llmflow-theme', name); } catch(_) {}
+}
+
+(function initTheme() {
+  let saved = 'dark';
+  try { saved = localStorage.getItem('llmflow-theme') || 'dark'; } catch(_) {}
+  applyTheme(saved);
+  const sel = document.getElementById('theme-select');
+  if (sel) sel.addEventListener('change', e => applyTheme(e.target.value));
+})();
+
+// ── Structured output toggles ─────────────────────────────────────
+/**
+ * Shows or hides the schema / thinking controls based on the selected format.
+ */
+function onResponseFormatChange() {
+  const fmt = document.getElementById('q-response-format').value;
+  const structured = !!fmt;
+  document.getElementById('response-schema-group').style.display = structured ? '' : 'none';
+  document.getElementById('thinking-group').style.display = structured ? '' : 'none';
+  // Disable legacy parse_json_response when response_format is used
+  if (structured) {
+    document.getElementById('q-parse-json').value = 'false';
+  }
+}
 
 // ── Init ──────────────────────────────────────────────────────────
 setModelSuggestions([]);  // populate select for default provider (openai)

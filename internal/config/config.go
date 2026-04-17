@@ -192,6 +192,35 @@ type ProcessingConfig struct {
 	// single column from the input record into the output (instead of all columns).
 	// Useful when you want the key identifier alongside new LLM-generated fields.
 	KeyColumn string `json:"key_column" yaml:"key_column"`
+
+	// ResponseFormat declares the structured format the LLM must produce.
+	// When set, llmflow automatically appends format instructions to the prompt
+	// and parses the LLM output accordingly. Supported values:
+	//   "text"  – free-form text (default, no instruction injected)
+	//   "json"  – strict JSON object; keys are spread into the output record
+	//   "xml"   – XML; llmflow asks the LLM for JSON, then converts to XML output
+	//   "csv"   – single CSV row; llmflow asks the LLM for JSON, fields become columns
+	// Setting ResponseFormat to "json", "xml", or "csv" implicitly enables JSON
+	// parsing of the LLM response (equivalent to ParseJSONResponse: true).
+	ResponseFormat string `json:"response_format" yaml:"response_format"`
+
+	// ResponseSchema defines the expected output fields when ResponseFormat is set.
+	// Each key is a field name; the value is a short type hint or description that
+	// is embedded verbatim into the injected format instruction.
+	// Example:
+	//   sentiment:  "one of: positive, neutral, negative"
+	//   confidence: "float between 0.0 and 1.0"
+	// When empty and ResponseFormat is "json"/"xml"/"csv", the LLM is only told
+	// to output a compact JSON object without specifying which fields to include.
+	ResponseSchema map[string]string `json:"response_schema" yaml:"response_schema"`
+
+	// Thinking enables explicit chain-of-thought reasoning before the structured
+	// output. When true, the LLM is instructed to first reason inside a
+	// <thinking>…</thinking> block and then emit the final structured output.
+	// The full raw response (including the thinking block) is stored in
+	// ResponseField; the parsed JSON fields are additionally spread into the record.
+	// Thinking works with any provider and any ResponseFormat.
+	Thinking bool `json:"thinking" yaml:"thinking"`
 }
 
 // CSVConfig configures CSV parsing or writing.
@@ -361,9 +390,14 @@ func (c Config) Validate() error {
 		problems = append(problems, fmt.Errorf("unsupported input.type: %s", c.Input.Type))
 	}
 
-	supportedOutputs := map[string]bool{"csv": true, "jsonl": true, "sqlite": true, "mssql": true}
+	supportedOutputs := map[string]bool{"csv": true, "jsonl": true, "xml": true, "sqlite": true, "mssql": true}
 	if !supportedOutputs[strings.ToLower(c.Output.Type)] {
 		problems = append(problems, fmt.Errorf("unsupported output.type: %s", c.Output.Type))
+	}
+
+	supportedResponseFormats := map[string]bool{"": true, "text": true, "json": true, "xml": true, "csv": true}
+	if !supportedResponseFormats[strings.ToLower(c.Processing.ResponseFormat)] {
+		problems = append(problems, fmt.Errorf("unsupported processing.response_format: %s (must be text, json, xml, or csv)", c.Processing.ResponseFormat))
 	}
 
 	if len(problems) > 0 {

@@ -102,12 +102,12 @@ func textStats(_ context.Context, argsJSON string) (string, error) {
 
 	text := args.Text
 	stats := map[string]any{
-		"characters":  utf8.RuneCountInString(text),
-		"bytes":       len(text),
-		"words":       len(strings.Fields(text)),
-		"lines":       lineCount(text),
-		"paragraphs":  paragraphCount(text),
-		"trimmed":     strings.TrimSpace(text),
+		"characters": utf8.RuneCountInString(text),
+		"bytes":      len(text),
+		"words":      len(strings.Fields(text)),
+		"lines":      lineCount(text),
+		"paragraphs": paragraphCount(text),
+		"trimmed":    strings.TrimSpace(text),
 	}
 	b, err := json.Marshal(stats)
 	if err != nil {
@@ -173,7 +173,7 @@ func regexExtract(_ context.Context, argsJSON string) (string, error) {
 		"group":     group,
 		"count":     len(matches),
 		"matches":   matches,
-		"truncated":  len(rawMatches) >= maxMatches && len(matches) >= maxMatches,
+		"truncated": len(rawMatches) >= maxMatches && len(matches) >= maxMatches,
 	}
 	b, err := json.Marshal(out)
 	if err != nil {

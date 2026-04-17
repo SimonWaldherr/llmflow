@@ -1080,7 +1080,16 @@ type suggestResponse struct {
 	IncludeInputInOutput string `json:"include_input_in_output,omitempty"`
 	KeyColumn            string `json:"key_column,omitempty"`
 	ParseJSONResponse    bool   `json:"parse_json_response,omitempty"`
-	Notes                string `json:"notes,omitempty"`
+	// ResponseFormat instructs the LLM on how to structure its reply and controls
+	// automatic prompt injection + JSON parsing in the pipeline.
+	// Values: "text" (default), "json", "xml", "csv".
+	ResponseFormat string `json:"response_format,omitempty"`
+	// ResponseSchema maps field names to type hints; used together with ResponseFormat.
+	// Example: {"sentiment": "positive, neutral, or negative", "confidence": "0.0–1.0"}
+	ResponseSchema map[string]string `json:"response_schema,omitempty"`
+	// Thinking enables chain-of-thought reasoning before the structured output.
+	Thinking bool   `json:"thinking,omitempty"`
+	Notes    string `json:"notes,omitempty"`
 }
 
 const suggestSystemPrompt = `You are an expert llmflow configuration assistant.
@@ -1094,26 +1103,33 @@ The prompt pipeline per record is:
   input_template → Go template executed per record:
                    {{ toPrettyJSON .record }} renders the full record as JSON,
                    {{ .fieldName }} accesses a specific field.
-  post_prompt    → optional instruction appended after each record (e.g. output format)
-  response_field → the key in the output row where the LLM's answer is stored.
+  post_prompt    → optional extra instruction after the record (leave empty when
+                   response_format is set — llmflow injects format instructions automatically)
+  response_field → the key in the output row where the raw LLM response is stored.
 
-The user will describe a task. Your job is to fill in the five prompt fields and a
-short job_name. Rules:
-- system_prompt: set the LLM's persona and any global constraints.
-- pre_prompt: frame the task or give context (optional – leave empty if not useful).
-- input_template: almost always "{{ toPrettyJSON .record }}" unless the user mentions
-  specific fields, in which case reference them by name.
-- post_prompt: enforce the output format (JSON schema, plain text, etc.) – especially
-  useful when structured output is needed.
-- response_field: a short snake_case key name describing the output (e.g. "sentiment",
-  "summary", "classification").
-- response_fields: when the task produces structured values, return a comma-separated list
-	of JSON field names instead of a single response field.
-- output_fields: if the output should be a clean record, return the final comma-separated
-	column list that should be written to CSV/JSONL.
-- include_input_in_output: choose "all", "key", or "none".
-- key_column: when include_input_in_output is "key", specify the identifier column.
-- parse_json_response: use true when the response is structured JSON.
+Structured output fields (preferred over hand-crafted post_prompt instructions):
+- response_format: one of "text" (default), "json", "xml", "csv".
+  Use "json" whenever the task produces structured key/value output.
+  Use "xml" or "csv" only when the downstream consumer explicitly requires that format.
+  When response_format is "json"/"xml"/"csv", llmflow automatically:
+    • appends the format instruction to the prompt (no post_prompt needed for format)
+    • parses the LLM's JSON response and spreads fields into the output record
+- response_schema: a JSON object mapping field names to short type hints.
+  Example: {"sentiment": "positive, neutral, or negative", "confidence": "float 0.0–1.0"}
+  Leave empty if the task produces a single free-text value.
+- thinking: set to true when the task benefits from step-by-step reasoning before the
+  structured output (e.g. complex classification, multi-criteria decisions). The LLM will
+  reason in a <thinking>…</thinking> block first, then emit the JSON object. The full
+  response (including reasoning) is saved in response_field; parsed JSON keys are also
+  spread into the record.
+
+Other fields:
+- response_fields: comma-separated list of JSON keys produced by the LLM (used only
+  when response_format is not set and post_prompt enforces a manual JSON schema).
+- output_fields: comma-separated list of the final columns to write (restricts output).
+- include_input_in_output: "all", "key", or "none".
+- key_column: when include_input_in_output is "key", the identifier column name.
+- parse_json_response: legacy flag — prefer response_format instead.
 - job_name: ≤ 6 words describing what this job does.
 - notes: one short sentence explaining why the chosen fields fit the task.
 
@@ -1131,13 +1147,16 @@ Respond with ONLY a JSON object — no markdown, no explanation — following th
   "input_template": "...",
   "post_prompt": "...",
   "response_field": "...",
-	"response_fields": "...",
-	"output_fields": "...",
-	"include_input_in_output": "key",
-	"key_column": "...",
-	"parse_json_response": true,
-	"job_name": "...",
-	"notes": "..."
+  "response_format": "json",
+  "response_schema": {"field": "description", ...},
+  "thinking": false,
+  "response_fields": "...",
+  "output_fields": "...",
+  "include_input_in_output": "key",
+  "key_column": "...",
+  "parse_json_response": false,
+  "job_name": "...",
+  "notes": "..."
 }`
 
 func (s *Server) handleSuggest(w http.ResponseWriter, r *http.Request) {
@@ -1237,36 +1256,75 @@ func (s *Server) handleSuggest(w http.ResponseWriter, r *http.Request) {
 
 func buildSuggestFallback(task, currentConfig string) suggestResponse {
 	jobName := buildSuggestJobName(task)
+	taskLow := strings.ToLower(task)
+
 	responseField := "response"
 	responseFields := ""
 	outputFields := ""
-	parseJSONResponse := false
-	if strings.Contains(strings.ToLower(task), "summary") {
+	responseFormat := ""
+	responseSchema := map[string]string(nil)
+	thinking := false
+
+	switch {
+	case strings.Contains(taskLow, "summary") || strings.Contains(taskLow, "zusammenfassung"):
 		responseField = "summary"
-	} else if strings.Contains(strings.ToLower(task), "classif") {
-		responseField = "classification"
+	case strings.Contains(taskLow, "classif") || strings.Contains(taskLow, "klassif"):
+		responseField = "raw_response"
+		responseFormat = "json"
+		responseSchema = map[string]string{
+			"classification": "main classification label",
+			"reason":         "brief explanation (one sentence)",
+		}
 		responseFields = "classification, reason"
 		outputFields = "classification, reason"
-		parseJSONResponse = true
+		thinking = true
+	case strings.Contains(taskLow, "spedition") || strings.Contains(taskLow, "freight") || strings.Contains(taskLow, "versand"):
+		responseField = "raw_response"
+		responseFormat = "json"
+		responseSchema = map[string]string{
+			"spedition_required": "true oder false",
+			"versandart":         "DHL, GLS, UPS, DPD oder Spedition",
+			"mhd_pflichtig":      "true oder false",
+			"begruendung":        "kurze Begründung (ein Satz)",
+		}
+		outputFields = "spedition_required, versandart, mhd_pflichtig, begruendung"
+		thinking = true
+	case strings.Contains(taskLow, "mhd") || strings.Contains(taskLow, "mindesthaltbar") || strings.Contains(taskLow, "expir"):
+		responseField = "raw_response"
+		responseFormat = "json"
+		responseSchema = map[string]string{
+			"mhd_pflichtig": "true oder false",
+			"mhd_hinweis":   "Begründung (ein Satz)",
+		}
+		outputFields = "mhd_pflichtig, mhd_hinweis"
+		thinking = false
 	}
+
 	prePrompt := strings.TrimSpace(task)
 	if prePrompt != "" {
-		prePrompt = "Follow this task: " + prePrompt
+		prePrompt = "Aufgabe: " + prePrompt
 	}
 	inputTemplate := "{{ toPrettyJSON .record }}"
 	if strings.TrimSpace(currentConfig) != "" {
 		inputTemplate = strings.TrimSpace(inputTemplate)
 	}
+	postPrompt := ""
+	if responseFormat == "" {
+		postPrompt = "Return a concise result that matches the task."
+	}
 	return suggestResponse{
 		SystemPrompt:      "You are a helpful data-processing assistant.",
 		PrePrompt:         prePrompt,
 		InputTemplate:     inputTemplate,
-		PostPrompt:        "Return a concise result that matches the task.",
+		PostPrompt:        postPrompt,
 		JobName:           jobName,
 		ResponseField:     responseField,
 		ResponseFields:    responseFields,
 		OutputFields:      outputFields,
-		ParseJSONResponse: parseJSONResponse,
+		ParseJSONResponse: false,
+		ResponseFormat:    responseFormat,
+		ResponseSchema:    responseSchema,
+		Thinking:          thinking,
 		Notes:             "Fallback configuration generated because the LLM request failed.",
 	}
 }

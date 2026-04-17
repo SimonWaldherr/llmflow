@@ -13,6 +13,8 @@ func New(cfg config.OutputConfig) (Writer, error) {
 		return NewCSVWriter(cfg)
 	case "jsonl":
 		return NewJSONLWriter(cfg)
+	case "xml":
+		return NewXMLWriter(cfg)
 	case "sqlite":
 		return NewSQLWriter("sqlite", cfg)
 	case "mssql":
