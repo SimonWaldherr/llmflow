@@ -2,6 +2,7 @@ package prompt
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -48,7 +49,7 @@ func (b *Builder) BuildRaw(record map[string]any) (string, error) {
 	if err := b.tpl.Execute(&body, data); err != nil {
 		return "", fmt.Errorf("render input template: %w", err)
 	}
-	return body.String(), nil
+	return normalizeInputPayload(body.String(), record), nil
 }
 
 // FormatInstructions generates a prompt instruction string based on the
@@ -64,39 +65,29 @@ func (b *Builder) BuildRaw(record map[string]any) (string, error) {
 //   - When ResponseSchema is non-empty the instruction lists every expected field
 //     with its type hint; otherwise only the format is enforced.
 func FormatInstructions(cfg config.ProcessingConfig) string {
-	format := strings.ToLower(strings.TrimSpace(cfg.ResponseFormat))
-	wantStructured := format == "json" || format == "xml" || format == "csv"
-
-	if !wantStructured && !cfg.Thinking {
-		return ""
-	}
+	schema := cfg.EffectiveLLMResponseSchema()
 
 	var b strings.Builder
 
 	if cfg.Thinking {
-		b.WriteString("First, write your reasoning only inside a <thinking>...</thinking> block. " +
-			"After the closing </thinking> tag, output exactly one final answer and nothing else. ")
-		if wantStructured {
-			b.WriteString("The final answer must be")
-		} else {
-			b.WriteString("Do not add any text outside the <thinking> block and the final answer.")
-			return b.String()
-		}
+		b.WriteString("Reason through the task. If you expose reasoning, put it inside a <thinking>...</thinking> block. " +
+			"Then output exactly one final answer and nothing else. ")
+		b.WriteString("The final answer must be")
 	} else {
 		b.WriteString("Output exactly")
 	}
 
 	b.WriteString(" one compact JSON object")
 
-	if len(cfg.ResponseSchema) > 0 {
+	if len(schema) > 0 {
 		b.WriteString(" with exactly these fields and types:\n")
-		keys := make([]string, 0, len(cfg.ResponseSchema))
-		for k := range cfg.ResponseSchema {
+		keys := make([]string, 0, len(schema))
+		for k := range schema {
 			keys = append(keys, k)
 		}
 		sort.Strings(keys)
 		for _, k := range keys {
-			b.WriteString(fmt.Sprintf("  - %s: %s\n", k, cfg.ResponseSchema[k]))
+			b.WriteString(fmt.Sprintf("  - %s: %s\n", k, schema[k]))
 		}
 		b.WriteString("Do not include any keys not listed above. " +
 			"For enum hints like A|B|C, return exactly one listed value.")
@@ -108,13 +99,9 @@ func FormatInstructions(cfg config.ProcessingConfig) string {
 }
 
 func (b *Builder) Build(record map[string]any) (string, error) {
-	var body bytes.Buffer
-	data := map[string]any{"record": record}
-	for k, v := range record {
-		data[k] = v
-	}
-	if err := b.tpl.Execute(&body, data); err != nil {
-		return "", fmt.Errorf("render input template: %w", err)
+	body, err := b.BuildRaw(record)
+	if err != nil {
+		return "", err
 	}
 
 	var out bytes.Buffer
@@ -122,10 +109,32 @@ func (b *Builder) Build(record map[string]any) (string, error) {
 		out.WriteString(b.cfg.PrePrompt)
 		out.WriteString("\n\n")
 	}
-	out.Write(body.Bytes())
+	out.WriteString(body)
 	if b.cfg.PostPrompt != "" {
 		out.WriteString("\n\n")
 		out.WriteString(b.cfg.PostPrompt)
 	}
 	return out.String(), nil
+}
+
+func normalizeInputPayload(rendered string, record map[string]any) string {
+	trimmed := strings.TrimSpace(rendered)
+	if trimmed == "" {
+		return util.PrettyJSON(record)
+	}
+
+	var parsed any
+	if err := json.Unmarshal([]byte(trimmed), &parsed); err == nil {
+		switch parsed.(type) {
+		case map[string]any, []any:
+			return util.PrettyJSON(parsed)
+		default:
+			// Scalars are valid JSON but we keep the transport payload as an object.
+			return util.PrettyJSON(map[string]any{"input": parsed})
+		}
+	}
+
+	// Non-JSON template output is wrapped into a JSON object so record transport
+	// to the model remains JSON-only.
+	return util.PrettyJSON(map[string]any{"input": trimmed})
 }

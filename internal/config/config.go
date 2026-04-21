@@ -171,6 +171,21 @@ type ProcessingConfig struct {
 	IncludeInputInOutput bool   `json:"include_input_in_output" yaml:"include_input_in_output"`
 	ResponseField        string `json:"response_field" yaml:"response_field"`
 	ParseJSONResponse    bool   `json:"parse_json_response" yaml:"parse_json_response"`
+	// StoreRawResponse controls whether response_field is written at all.
+	// Default: true.
+	StoreRawResponse *bool `json:"store_raw_response,omitempty" yaml:"store_raw_response,omitempty"`
+	// IncludeThinkingInResponseField controls whether response_field stores the
+	// full raw model output including <thinking>...</thinking>.
+	// Default: true.
+	// If false and Thinking is enabled, only the final answer part is stored.
+	IncludeThinkingInResponseField *bool `json:"include_thinking_in_response_field,omitempty" yaml:"include_thinking_in_response_field,omitempty"`
+	// DebugField, when set, adds an extra model-generated explanation column to
+	// structured outputs. The field is injected into schema instructions and
+	// validated like all other structured keys.
+	DebugField string `json:"debug_field" yaml:"debug_field"`
+	// DebugFieldHint is the type/format hint for DebugField.
+	// Default: "short explanation in one sentence".
+	DebugFieldHint string `json:"debug_field_hint" yaml:"debug_field_hint"`
 	// StrictOutput controls whether structured output is enforced strictly.
 	// Default: true.
 	// When true, structured responses must contain only the expected JSON payload:
@@ -204,14 +219,13 @@ type ProcessingConfig struct {
 	// ResponseFormat declares the structured format the LLM must produce.
 	// When set, llmflow automatically appends format instructions to the prompt
 	// and parses/validates the LLM output accordingly. Supported values:
-	//   "text"  – free-form text (default, no instruction injected)
+	//   "text"  – single string field in response_field (still returned as JSON object)
 	//   "json"  – strict JSON object; keys are spread into the output record
-	//   "xml"   – XML; llmflow asks the LLM for JSON, then converts to XML output
-	//   "csv"   – single CSV row; llmflow asks the LLM for JSON, fields become columns
-	// Setting ResponseFormat to "json", "xml", or "csv" implicitly enables JSON
-	// parsing of the LLM response (equivalent to ParseJSONResponse: true) and
-	// enforces strict output: exactly one JSON object (or in batch mode an array
-	// of JSON objects), with no extra text outside the structured payload.
+	//   "xml"   – backend converts validated JSON fields to XML output
+	//   "csv"   – backend converts validated JSON fields to CSV columns
+	// llmflow expects JSON from the model for all formats and enforces strict
+	// output by default: exactly one JSON object (or in batch mode an array of
+	// JSON objects), with no extra text outside the structured payload.
 	ResponseFormat string `json:"response_format" yaml:"response_format"`
 
 	// ResponseSchema defines the expected output fields when ResponseFormat is set.
@@ -330,6 +344,17 @@ func (c *Config) ApplyDefaults() {
 	if c.Processing.ResponseField == "" {
 		c.Processing.ResponseField = "response"
 	}
+	if c.Processing.StoreRawResponse == nil {
+		v := true
+		c.Processing.StoreRawResponse = &v
+	}
+	if c.Processing.IncludeThinkingInResponseField == nil {
+		v := true
+		c.Processing.IncludeThinkingInResponseField = &v
+	}
+	if strings.TrimSpace(c.Processing.DebugFieldHint) == "" {
+		c.Processing.DebugFieldHint = "short explanation in one sentence"
+	}
 	if c.Processing.StrictOutput == nil {
 		v := true
 		c.Processing.StrictOutput = &v
@@ -337,9 +362,8 @@ func (c *Config) ApplyDefaults() {
 	if c.Processing.MaxRetries <= 0 {
 		c.Processing.MaxRetries = 3
 	}
-	if c.Input.CSV.Delimiter == "" {
-		c.Input.CSV.Delimiter = ","
-	}
+	// Keep input CSV delimiter empty by default so the reader can auto-detect
+	// comma/semicolon/tab/pipe from the file content.
 	if c.Output.CSV.Delimiter == "" {
 		c.Output.CSV.Delimiter = ","
 	}
@@ -453,4 +477,49 @@ func ResolveSecret(direct, envName string) string {
 		return ""
 	}
 	return os.Getenv(envName)
+}
+
+// EffectiveResponseSchema returns the schema used for prompting and validation.
+// It merges ResponseSchema with optional DebugField.
+func (p ProcessingConfig) EffectiveResponseSchema() map[string]string {
+	if strings.TrimSpace(p.DebugField) == "" {
+		if len(p.ResponseSchema) == 0 {
+			return nil
+		}
+		out := make(map[string]string, len(p.ResponseSchema))
+		for k, v := range p.ResponseSchema {
+			out[k] = v
+		}
+		return out
+	}
+	out := make(map[string]string, len(p.ResponseSchema)+1)
+	for k, v := range p.ResponseSchema {
+		out[k] = v
+	}
+	out[p.DebugField] = p.DebugFieldHint
+	return out
+}
+
+// EffectiveLLMResponseSchema returns the JSON schema contract enforced on the
+// LLM response.
+//
+// llmflow always expects JSON from the model. If no explicit response_schema is
+// configured and no structured/json parsing mode is requested, a fallback schema
+// is generated with a single string field matching response_field.
+func (p ProcessingConfig) EffectiveLLMResponseSchema() map[string]string {
+	schema := p.EffectiveResponseSchema()
+	if len(schema) > 0 {
+		return schema
+	}
+
+	format := strings.ToLower(strings.TrimSpace(p.ResponseFormat))
+	if p.ParseJSONResponse || format == "json" || format == "xml" || format == "csv" {
+		return nil
+	}
+
+	respField := strings.TrimSpace(p.ResponseField)
+	if respField == "" {
+		respField = "response"
+	}
+	return map[string]string{respField: "string"}
 }

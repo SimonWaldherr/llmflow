@@ -29,8 +29,8 @@ func TestBuilderBuildBasic(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(result, "Name: Alice") {
-		t.Fatalf("expected Name: Alice in %q", result)
+	if !strings.Contains(result, `"input"`) || !strings.Contains(result, "Name: Alice") {
+		t.Fatalf("expected wrapped JSON payload, got %q", result)
 	}
 }
 
@@ -47,7 +47,7 @@ func TestBuilderBuildWithPreAndPost(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(result, "Before.") || !strings.Contains(result, "Data: 42") || !strings.HasSuffix(result, "After.") {
+	if !strings.HasPrefix(result, "Before.") || !strings.Contains(result, `"input"`) || !strings.Contains(result, "Data: 42") || !strings.HasSuffix(result, "After.") {
 		t.Fatalf("unexpected prompt: %q", result)
 	}
 }
@@ -106,9 +106,28 @@ func TestFormatInstructions_ThinkingTextOnly(t *testing.T) {
 	got := FormatInstructions(config.ProcessingConfig{
 		ResponseFormat: "text",
 		Thinking:       true,
+		ResponseField:  "answer",
 	})
 
-	if !strings.Contains(got, "Do not add any text outside the <thinking> block and the final answer.") {
+	if !strings.Contains(got, "Then output exactly one final answer and nothing else.") {
 		t.Fatalf("unexpected thinking text instruction: %q", got)
+	}
+	if !strings.Contains(got, "one compact JSON object") || !strings.Contains(got, "answer") {
+		t.Fatalf("expected JSON response contract with fallback schema, got: %q", got)
+	}
+}
+
+func TestFormatInstructions_IncludesDebugField(t *testing.T) {
+	got := FormatInstructions(config.ProcessingConfig{
+		ResponseFormat: "json",
+		ResponseSchema: map[string]string{
+			"versandart": "Paket|Spedition",
+		},
+		DebugField:     "debug_reason",
+		DebugFieldHint: "short reason",
+	})
+
+	if !strings.Contains(got, "debug_reason") {
+		t.Fatalf("expected debug field in format instructions, got: %q", got)
 	}
 }

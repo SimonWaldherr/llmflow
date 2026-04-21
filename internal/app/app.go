@@ -63,7 +63,10 @@ func (a *App) Run(ctx context.Context) error {
 
 	if a.dryRun {
 		a.logger.Info("dry-run mode enabled — no LLM calls will be made")
-		gen = &dryRunGenerator{}
+		gen = &dryRunGenerator{
+			responseField: a.cfg.Processing.ResponseField,
+			schema:        a.cfg.Processing.EffectiveLLMResponseSchema(),
+		}
 	} else {
 		apiKey, err := a.cfg.APIKey()
 		if err != nil {
@@ -228,6 +231,33 @@ type recordJob struct {
 	rec input.Record
 }
 
+func formatLLMErrorWithIO(prefix string, err error, systemPrompt, userPrompt, responseText string) error {
+	return fmt.Errorf(
+		"%s: %w\n----- LLM SYSTEM PROMPT -----\n%s\n----- LLM USER PROMPT -----\n%s\n----- LLM RESPONSE -----\n%s",
+		prefix,
+		err,
+		systemPrompt,
+		userPrompt,
+		responseText,
+	)
+}
+
+func (a *App) logLLMErrorWithIO(msg string, index int, err error, systemPrompt, userPrompt, responseText string) {
+	a.logger.Error(
+		msg,
+		"index",
+		index,
+		"error",
+		err,
+		"llm_system_prompt",
+		systemPrompt,
+		"llm_user_prompt",
+		userPrompt,
+		"llm_response",
+		responseText,
+	)
+}
+
 func (a *App) processRecords(
 	ctx context.Context,
 	gen Generator,
@@ -319,24 +349,32 @@ func (a *App) processRecordsWithSink(
 				if instr := prompt.FormatInstructions(a.cfg.Processing); instr != "" {
 					userPrompt = userPrompt + "\n\n" + instr
 				}
+				systemPrompt := pb.SystemPrompt()
 
 				var responseText string
 				if len(activeTools) > 0 {
-					responseText, err = a.runAgentic(ctx, gen, pb.SystemPrompt(), userPrompt, activeTools, j.idx)
+					responseText, err = a.runAgentic(ctx, gen, systemPrompt, userPrompt, activeTools, j.idx)
 				} else {
-					responseText, err = a.generateWithRetry(ctx, gen, pb.SystemPrompt(), userPrompt)
+					responseText, err = a.generateWithRetry(ctx, gen, systemPrompt, userPrompt)
 				}
 				if err != nil {
+					errWithIO := formatLLMErrorWithIO(
+						fmt.Sprintf("llm call for record %d", j.idx),
+						err,
+						systemPrompt,
+						userPrompt,
+						responseText,
+					)
 					if !a.cfg.Processing.ContinueOnError {
 						mu.Lock()
 						if firstErr == nil {
-							firstErr = fmt.Errorf("llm call for record %d: %w", j.idx, err)
+							firstErr = errWithIO
 							cancel()
 						}
 						mu.Unlock()
 						return
 					}
-					a.logger.Error("llm call failed", "index", j.idx, "error", err)
+					a.logLLMErrorWithIO("llm call failed", j.idx, err, systemPrompt, userPrompt, responseText)
 					continue
 				}
 
@@ -352,21 +390,38 @@ func (a *App) processRecordsWithSink(
 						}
 					}
 				}
-				// Always preserve the raw LLM response so reasoning text is never lost.
-				outRec[a.cfg.Processing.ResponseField] = responseText
-				if a.cfg.Processing.ParseJSONResponse || structuredResponseFormat(a.cfg.Processing.ResponseFormat) {
-					parsed, parseErr := parseJSONResponseFields(responseText, a.cfg.Processing)
+				var parsed map[string]any
+				if requiresJSONOutput(a.cfg.Processing) {
+					var parseErr error
+					parsed, parseErr = parseJSONResponseFields(responseText, a.cfg.Processing)
+					if parseErr != nil && strictOutputEnabled(a.cfg.Processing) {
+						if repaired, repairErr := a.repairStructuredResponse(ctx, gen, responseText); repairErr == nil {
+							if reparsed, reparsedErr := parseJSONResponseFields(repaired, a.cfg.Processing); reparsedErr == nil {
+								responseText = repaired
+								parsed = reparsed
+								parseErr = nil
+								a.logger.Warn("structured response repaired", "index", j.idx)
+							}
+						}
+					}
 					if parseErr != nil {
+						errWithIO := formatLLMErrorWithIO(
+							fmt.Sprintf("invalid structured response for record %d", j.idx),
+							parseErr,
+							systemPrompt,
+							userPrompt,
+							responseText,
+						)
 						if !a.cfg.Processing.ContinueOnError {
 							mu.Lock()
 							if firstErr == nil {
-								firstErr = fmt.Errorf("invalid structured response for record %d: %w", j.idx, parseErr)
+								firstErr = errWithIO
 								cancel()
 							}
 							mu.Unlock()
 							return
 						}
-						a.logger.Error("invalid structured response", "index", j.idx, "error", parseErr)
+						a.logLLMErrorWithIO("invalid structured response", j.idx, parseErr, systemPrompt, userPrompt, responseText)
 						continue
 					}
 					for k, v := range parsed {
@@ -376,6 +431,7 @@ func (a *App) processRecordsWithSink(
 						outRec[k] = v
 					}
 				}
+				storeResponseField(outRec, a.cfg.Processing, responseText, parsed)
 				resultCh <- indexedResult{idx: j.idx, rec: applyOutputFields(outRec, a.cfg.Processing.OutputFields)}
 				cur := int(atomic.AddInt64(&processed, 1))
 				if a.progressFunc != nil {
@@ -445,8 +501,9 @@ func (a *App) processRecordsWithSink(
 	return results, nil
 }
 
-// structuredResponseFormat reports whether the response_format requires the LLM
-// to emit a JSON object that should be parsed and spread into the output record.
+// structuredResponseFormat reports whether response_format requests structured
+// output fields (json/xml/csv). Conversion to xml/csv still happens in backend;
+// the LLM contract remains JSON.
 func structuredResponseFormat(format string) bool {
 	switch strings.ToLower(strings.TrimSpace(format)) {
 	case "json", "xml", "csv":
@@ -455,11 +512,62 @@ func structuredResponseFormat(format string) bool {
 	return false
 }
 
+func requiresJSONOutput(_ config.ProcessingConfig) bool {
+	return true
+}
+
 func strictOutputEnabled(cfg config.ProcessingConfig) bool {
 	if cfg.StrictOutput == nil {
 		return true
 	}
 	return *cfg.StrictOutput
+}
+
+func storeRawResponseEnabled(cfg config.ProcessingConfig) bool {
+	if cfg.StoreRawResponse == nil {
+		return true
+	}
+	return *cfg.StoreRawResponse
+}
+
+func includeThinkingInResponseFieldEnabled(cfg config.ProcessingConfig) bool {
+	if cfg.IncludeThinkingInResponseField == nil {
+		return true
+	}
+	return *cfg.IncludeThinkingInResponseField
+}
+
+func storeResponseField(outRec map[string]any, cfg config.ProcessingConfig, raw string, parsed map[string]any) {
+	if !storeRawResponseEnabled(cfg) || strings.TrimSpace(cfg.ResponseField) == "" {
+		return
+	}
+	if len(parsed) > 0 {
+		if _, exists := parsed[cfg.ResponseField]; exists {
+			// Preserve parsed structured value when it already uses response_field.
+			return
+		}
+	}
+	if !cfg.Thinking || includeThinkingInResponseFieldEnabled(cfg) {
+		outRec[cfg.ResponseField] = raw
+		return
+	}
+	// Hide thinking content while keeping the final answer.
+	if len(parsed) > 0 {
+		if b, err := json.Marshal(parsed); err == nil {
+			outRec[cfg.ResponseField] = string(b)
+			return
+		}
+	}
+	outRec[cfg.ResponseField] = stripThinkingBlock(raw)
+}
+
+func stripThinkingBlock(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	const closeTag = "</thinking>"
+	if idx := strings.Index(trimmed, closeTag); idx >= 0 {
+		return strings.TrimSpace(trimmed[idx+len(closeTag):])
+	}
+	return trimmed
 }
 
 // extractLastJSON finds and parses the last JSON object {...} in s.
@@ -481,16 +589,23 @@ func extractLastJSON(s string) (map[string]any, bool) {
 }
 
 // parseJSONResponseFields extracts structured fields from a model response.
-// In structured mode (response_format json/xml/csv), this is strict:
+// llmflow expects JSON from the model for all modes.
+// In strict mode, response must be exactly one JSON object (optionally after
+// <thinking>...</thinking> when thinking is enabled).
+//
+// In lenient mode (strict_output=false), the last JSON object is extracted from
+// mixed text and schema validation is skipped.
+//
+// Legacy structured mode notes:
+// - response_format json/xml/csv still controls downstream conversion and schema.
+// - xml/csv are backend output transforms; model I/O stays JSON.
+//
+// Strict behavior:
 //   - without thinking: response must be exactly one JSON object
 //   - with thinking: response must start with <thinking>...</thinking> and then
 //     exactly one JSON object
-//
-// When strict_output is false, parsing is lenient for compatibility:
-// the last JSON object is extracted from mixed text and schema validation is
-// skipped.
 func parseJSONResponseFields(responseText string, cfg config.ProcessingConfig) (map[string]any, error) {
-	if !cfg.ParseJSONResponse && !structuredResponseFormat(cfg.ResponseFormat) {
+	if !requiresJSONOutput(cfg) {
 		return nil, nil
 	}
 
@@ -507,10 +622,32 @@ func parseJSONResponseFields(responseText string, cfg config.ProcessingConfig) (
 		return nil, err
 	}
 
-	if err := validateResponseSchema(parsed, cfg.ResponseSchema); err != nil {
+	if err := validateResponseSchema(parsed, cfg.EffectiveLLMResponseSchema()); err != nil {
 		return nil, err
 	}
 	return parsed, nil
+}
+
+func (a *App) repairStructuredResponse(ctx context.Context, gen Generator, raw string) (string, error) {
+	var p strings.Builder
+	p.WriteString("Rewrite the following answer into exactly one valid JSON object.\n")
+	p.WriteString("Return ONLY JSON. No markdown. No explanation.\n")
+	schema := a.cfg.Processing.EffectiveLLMResponseSchema()
+	if len(schema) > 0 {
+		p.WriteString("Use exactly these keys and respect their hints:\n")
+		keys := make([]string, 0, len(schema))
+		for k := range schema {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			p.WriteString(fmt.Sprintf("- %s: %s\n", k, schema[k]))
+		}
+	}
+	p.WriteString("Answer to rewrite:\n")
+	p.WriteString(raw)
+
+	return a.generateWithRetry(ctx, gen, "You are a strict JSON formatter.", p.String())
 }
 
 func extractStrictJSON(responseText string, thinking bool) (map[string]any, error) {
@@ -519,25 +656,26 @@ func extractStrictJSON(responseText string, thinking bool) (map[string]any, erro
 		return nil, fmt.Errorf("response is empty")
 	}
 	if !thinking {
-		return parseStrictJSONObject(trimmed)
+		return parseStrictJSONObjectWithWrappers(trimmed)
 	}
 
 	const openTag = "<thinking>"
 	const closeTag = "</thinking>"
 
-	if !strings.HasPrefix(trimmed, openTag) {
-		return nil, fmt.Errorf("thinking mode requires response to start with %s", openTag)
+	if strings.HasPrefix(trimmed, openTag) {
+		closeIdx := strings.Index(trimmed, closeTag)
+		if closeIdx < 0 {
+			return nil, fmt.Errorf("thinking mode requires a closing %s tag", closeTag)
+		}
+		after := strings.TrimSpace(trimmed[closeIdx+len(closeTag):])
+		if after == "" {
+			return nil, fmt.Errorf("missing final JSON object after %s", closeTag)
+		}
+		return parseStrictJSONObjectWithWrappers(after)
 	}
-	closeIdx := strings.Index(trimmed, closeTag)
-	if closeIdx < 0 {
-		return nil, fmt.Errorf("thinking mode requires a closing %s tag", closeTag)
-	}
-
-	after := strings.TrimSpace(trimmed[closeIdx+len(closeTag):])
-	if after == "" {
-		return nil, fmt.Errorf("missing final JSON object after %s", closeTag)
-	}
-	return parseStrictJSONObject(after)
+	// Some providers do not emit visible <thinking> blocks even when asked.
+	// Accept a direct final JSON object (or common wrappers) in that case.
+	return parseStrictJSONObjectWithWrappers(trimmed)
 }
 
 func parseStrictJSONObject(s string) (map[string]any, error) {
@@ -555,6 +693,38 @@ func parseStrictJSONObject(s string) (map[string]any, error) {
 		return nil, fmt.Errorf("response must contain only one JSON object")
 	}
 	return out, nil
+}
+
+func parseStrictJSONObjectWithWrappers(s string) (map[string]any, error) {
+	if out, err := parseStrictJSONObject(strings.TrimSpace(s)); err == nil {
+		return out, nil
+	}
+	if unwrapped, ok := unwrapMarkdownCodeFence(s); ok {
+		if out, err := parseStrictJSONObject(unwrapped); err == nil {
+			return out, nil
+		}
+	}
+	return nil, fmt.Errorf("invalid JSON object")
+}
+
+func unwrapMarkdownCodeFence(s string) (string, bool) {
+	trimmed := strings.TrimSpace(s)
+	if !strings.HasPrefix(trimmed, "```") {
+		return "", false
+	}
+	nl := strings.IndexByte(trimmed, '\n')
+	if nl < 0 {
+		return "", false
+	}
+	body := strings.TrimSpace(trimmed[nl+1:])
+	if !strings.HasSuffix(body, "```") {
+		return "", false
+	}
+	body = strings.TrimSpace(strings.TrimSuffix(body, "```"))
+	if body == "" {
+		return "", false
+	}
+	return body, true
 }
 
 func parseStrictJSONArray(s string) ([]json.RawMessage, error) {
@@ -971,7 +1141,7 @@ func (a *App) processRecordStreamBatch(
 								o[k] = v
 							}
 						}
-						o[a.cfg.Processing.ResponseField] = ""
+						storeResponseField(o, a.cfg.Processing, "", nil)
 						out[i] = o
 					}
 					outRecs = out
@@ -1069,65 +1239,85 @@ func (a *App) processBatch(
 		rendered[i] = r
 	}
 
-	// Serialise records for the LLM.
-	recsJSON, err := json.MarshalIndent(recs, "", "  ")
+	// Serialise JSON payloads for the LLM.
+	payload := make([]json.RawMessage, len(rendered))
+	for i, r := range rendered {
+		trimmed := strings.TrimSpace(r)
+		if !json.Valid([]byte(trimmed)) {
+			return nil, fmt.Errorf("input_template for record %d did not render valid JSON", startIdx+i)
+		}
+		payload[i] = json.RawMessage(trimmed)
+	}
+	recsJSON, err := json.MarshalIndent(payload, "", "  ")
 	if err != nil {
 		return nil, fmt.Errorf("marshal batch records: %w", err)
 	}
 
 	var userPrompt strings.Builder
-	needsParsedJSON := a.cfg.Processing.ParseJSONResponse || structuredResponseFormat(a.cfg.Processing.ResponseFormat)
 	strictOutput := strictOutputEnabled(a.cfg.Processing)
-	if needsParsedJSON {
-		userPrompt.WriteString(fmt.Sprintf(
-			"Process the following %d records. "+
-				"Return ONLY a valid JSON array containing exactly %d JSON objects, one per record, in the same order.\n",
-			len(recs), len(recs),
-		))
-		if len(a.cfg.Processing.ResponseSchema) > 0 {
-			userPrompt.WriteString("Each object must contain exactly these fields:\n")
-			keys := make([]string, 0, len(a.cfg.Processing.ResponseSchema))
-			for k := range a.cfg.Processing.ResponseSchema {
-				keys = append(keys, k)
-			}
-			sort.Strings(keys)
-			for _, k := range keys {
-				userPrompt.WriteString(fmt.Sprintf("- %s: %s\n", k, a.cfg.Processing.ResponseSchema[k]))
-			}
+	schema := a.cfg.Processing.EffectiveLLMResponseSchema()
+	userPrompt.WriteString(fmt.Sprintf(
+		"Process the following %d records. "+
+			"Return ONLY a valid JSON array containing exactly %d JSON objects, one per record, in the same order.\n",
+		len(recs), len(recs),
+	))
+	if len(schema) > 0 {
+		userPrompt.WriteString("Each object must contain exactly these fields:\n")
+		keys := make([]string, 0, len(schema))
+		for k := range schema {
+			keys = append(keys, k)
 		}
-		if a.cfg.Processing.Thinking {
-			userPrompt.WriteString("Do not include reasoning text. Return only the JSON array.\n")
+		sort.Strings(keys)
+		for _, k := range keys {
+			userPrompt.WriteString(fmt.Sprintf("- %s: %s\n", k, schema[k]))
 		}
-		userPrompt.WriteString("\n")
-	} else {
-		userPrompt.WriteString(fmt.Sprintf(
-			"Process the following %d records. "+
-				"Return ONLY a valid JSON array containing exactly %d string responses, one per record, in the same order.\n\n",
-			len(recs), len(recs),
-		))
 	}
+	if a.cfg.Processing.Thinking {
+		userPrompt.WriteString("Do not include reasoning text. Return only the JSON array.\n")
+	}
+	userPrompt.WriteString("\n")
 	userPrompt.Write(recsJSON)
 	if post := pb.PostPrompt(); post != "" {
 		userPrompt.WriteString("\n\n")
 		userPrompt.WriteString(post)
 	}
 
+	systemPrompt := pb.SystemPrompt()
+	userPromptText := userPrompt.String()
 	a.logger.Info("sending batch to LLM", "startIndex", startIdx, "count", len(recs))
-	responseText, err := a.generateWithRetry(ctx, gen, pb.SystemPrompt(), userPrompt.String())
+	responseText, err := a.generateWithRetry(ctx, gen, systemPrompt, userPromptText)
 	if err != nil {
-		return nil, err
+		return nil, formatLLMErrorWithIO(
+			fmt.Sprintf("llm batch call for records %d-%d", startIdx, startIdx+len(recs)-1),
+			err,
+			systemPrompt,
+			userPromptText,
+			responseText,
+		)
 	}
 
 	// Parse JSON array response.
 	trimmed := strings.TrimSpace(responseText)
 	var responses []json.RawMessage
-	if needsParsedJSON && strictOutput {
+	if strictOutput {
 		responses, err = parseStrictJSONArray(trimmed)
 		if err != nil {
-			return nil, fmt.Errorf("batch response must be exactly one JSON array: %w", err)
+			return nil, formatLLMErrorWithIO(
+				fmt.Sprintf("batch response must be exactly one JSON array for records %d-%d", startIdx, startIdx+len(recs)-1),
+				err,
+				systemPrompt,
+				userPromptText,
+				responseText,
+			)
 		}
 		if len(responses) != len(recs) {
-			return nil, fmt.Errorf("batch response length mismatch: expected %d objects, got %d", len(recs), len(responses))
+			return nil, formatLLMErrorWithIO(
+				fmt.Sprintf("batch response length mismatch: expected %d objects, got %d", len(recs), len(responses)),
+				fmt.Errorf("wrong number of JSON objects in batch response"),
+				systemPrompt,
+				userPromptText,
+				responseText,
+			)
 		}
 	} else {
 		if idx := strings.Index(trimmed, "["); idx >= 0 {
@@ -1138,7 +1328,7 @@ func (a *App) processBatch(
 		}
 	}
 
-	if !needsParsedJSON || !strictOutput {
+	if !strictOutput {
 		if parseErr := json.Unmarshal([]byte(trimmed), &responses); parseErr != nil {
 			a.logger.Warn("batch response is not a JSON array; assigning raw text to all records", "startIndex", startIdx, "error", parseErr)
 			// Fallback: assign entire response to every record.
@@ -1150,7 +1340,7 @@ func (a *App) processBatch(
 						o[k] = v
 					}
 				}
-				o[a.cfg.Processing.ResponseField] = responseText
+				storeResponseField(o, a.cfg.Processing, responseText, nil)
 				outRecs[i] = o
 			}
 			for i := range outRecs {
@@ -1169,53 +1359,49 @@ func (a *App) processBatch(
 			}
 		}
 		if i < len(responses) {
-			if needsParsedJSON && strictOutput {
+			if strictOutput {
 				obj, parseErr := parseStrictJSONObject(string(responses[i]))
 				if parseErr != nil {
-					return nil, fmt.Errorf("batch response item %d is not a JSON object: %w", startIdx+i, parseErr)
+					return nil, formatLLMErrorWithIO(
+						fmt.Sprintf("batch response item %d is not a JSON object", startIdx+i),
+						parseErr,
+						systemPrompt,
+						userPromptText,
+						responseText,
+					)
 				}
-				if schemaErr := validateResponseSchema(obj, a.cfg.Processing.ResponseSchema); schemaErr != nil {
-					return nil, fmt.Errorf("batch response item %d does not match response_schema: %w", startIdx+i, schemaErr)
+				if schemaErr := validateResponseSchema(obj, schema); schemaErr != nil {
+					return nil, formatLLMErrorWithIO(
+						fmt.Sprintf("batch response item %d does not match response_schema", startIdx+i),
+						schemaErr,
+						systemPrompt,
+						userPromptText,
+						responseText,
+					)
 				}
-				o[a.cfg.Processing.ResponseField] = string(responses[i])
+				storeResponseField(o, a.cfg.Processing, string(responses[i]), obj)
 				for k, v := range obj {
 					o[k] = v
 				}
 				outRecs[i] = o
 				continue
 			}
-			if needsParsedJSON {
-				var obj map[string]any
-				if err := json.Unmarshal(responses[i], &obj); err == nil {
-					o[a.cfg.Processing.ResponseField] = string(responses[i])
-					for k, v := range obj {
-						o[k] = v
-					}
-					outRecs[i] = o
-					continue
+			var obj map[string]any
+			if err := json.Unmarshal(responses[i], &obj); err == nil {
+				storeResponseField(o, a.cfg.Processing, string(responses[i]), obj)
+				for k, v := range obj {
+					o[k] = v
 				}
-			}
-
-			// Try to unmarshal as string first, then as object.
-			var s string
-			if err := json.Unmarshal(responses[i], &s); err == nil {
-				o[a.cfg.Processing.ResponseField] = s
 			} else {
-				var obj map[string]any
-				if err := json.Unmarshal(responses[i], &obj); err == nil {
-					// Always preserve the raw JSON so the reasoning text is not lost.
-					o[a.cfg.Processing.ResponseField] = string(responses[i])
-					if a.cfg.Processing.ParseJSONResponse {
-						for k, v := range obj {
-							o[k] = v
-						}
-					}
+				var s string
+				if err := json.Unmarshal(responses[i], &s); err == nil {
+					storeResponseField(o, a.cfg.Processing, s, nil)
 				} else {
-					o[a.cfg.Processing.ResponseField] = string(responses[i])
+					storeResponseField(o, a.cfg.Processing, string(responses[i]), nil)
 				}
 			}
 		} else {
-			o[a.cfg.Processing.ResponseField] = ""
+			storeResponseField(o, a.cfg.Processing, "", nil)
 		}
 		outRecs[i] = o
 	}
@@ -1299,24 +1485,32 @@ func (a *App) processJobs(
 				if instr := prompt.FormatInstructions(a.cfg.Processing); instr != "" {
 					userPrompt = userPrompt + "\n\n" + instr
 				}
+				systemPrompt := pb.SystemPrompt()
 
 				var responseText string
 				if len(activeTools) > 0 {
-					responseText, err = a.runAgentic(ctx, gen, pb.SystemPrompt(), userPrompt, activeTools, j.idx)
+					responseText, err = a.runAgentic(ctx, gen, systemPrompt, userPrompt, activeTools, j.idx)
 				} else {
-					responseText, err = a.generateWithRetry(ctx, gen, pb.SystemPrompt(), userPrompt)
+					responseText, err = a.generateWithRetry(ctx, gen, systemPrompt, userPrompt)
 				}
 				if err != nil {
+					errWithIO := formatLLMErrorWithIO(
+						fmt.Sprintf("llm call for record %d", j.idx),
+						err,
+						systemPrompt,
+						userPrompt,
+						responseText,
+					)
 					if !a.cfg.Processing.ContinueOnError {
 						mu.Lock()
 						if firstErr == nil {
-							firstErr = fmt.Errorf("llm call for record %d: %w", j.idx, err)
+							firstErr = errWithIO
 							cancel()
 						}
 						mu.Unlock()
 						return
 					}
-					a.logger.Error("llm call failed", "index", j.idx, "error", err)
+					a.logLLMErrorWithIO("llm call failed", j.idx, err, systemPrompt, userPrompt, responseText)
 					continue
 				}
 
@@ -1332,21 +1526,38 @@ func (a *App) processJobs(
 						}
 					}
 				}
-				// Always preserve the raw LLM response so reasoning text is never lost.
-				outRec[a.cfg.Processing.ResponseField] = responseText
-				if a.cfg.Processing.ParseJSONResponse || structuredResponseFormat(a.cfg.Processing.ResponseFormat) {
-					parsed, parseErr := parseJSONResponseFields(responseText, a.cfg.Processing)
+				var parsed map[string]any
+				if requiresJSONOutput(a.cfg.Processing) {
+					var parseErr error
+					parsed, parseErr = parseJSONResponseFields(responseText, a.cfg.Processing)
+					if parseErr != nil && strictOutputEnabled(a.cfg.Processing) {
+						if repaired, repairErr := a.repairStructuredResponse(ctx, gen, responseText); repairErr == nil {
+							if reparsed, reparsedErr := parseJSONResponseFields(repaired, a.cfg.Processing); reparsedErr == nil {
+								responseText = repaired
+								parsed = reparsed
+								parseErr = nil
+								a.logger.Warn("structured response repaired", "index", j.idx)
+							}
+						}
+					}
 					if parseErr != nil {
+						errWithIO := formatLLMErrorWithIO(
+							fmt.Sprintf("invalid structured response for record %d", j.idx),
+							parseErr,
+							systemPrompt,
+							userPrompt,
+							responseText,
+						)
 						if !a.cfg.Processing.ContinueOnError {
 							mu.Lock()
 							if firstErr == nil {
-								firstErr = fmt.Errorf("invalid structured response for record %d: %w", j.idx, parseErr)
+								firstErr = errWithIO
 								cancel()
 							}
 							mu.Unlock()
 							return
 						}
-						a.logger.Error("invalid structured response", "index", j.idx, "error", parseErr)
+						a.logLLMErrorWithIO("invalid structured response", j.idx, parseErr, systemPrompt, userPrompt, responseText)
 						continue
 					}
 					for k, v := range parsed {
@@ -1356,6 +1567,7 @@ func (a *App) processJobs(
 						outRec[k] = v
 					}
 				}
+				storeResponseField(outRec, a.cfg.Processing, responseText, parsed)
 				resultCh <- indexedResult{idx: j.idx, rec: applyOutputFields(outRec, a.cfg.Processing.OutputFields)}
 				cur := int(atomic.AddInt64(&processed, 1))
 				if a.progressFunc != nil {
@@ -1580,11 +1792,42 @@ func (a *App) generateWithRetry(ctx context.Context, gen Generator, systemPrompt
 	return "", lastErr
 }
 
-// dryRunGenerator returns a placeholder instead of calling an LLM.
-type dryRunGenerator struct{}
+// dryRunGenerator returns a placeholder JSON response instead of calling an LLM.
+type dryRunGenerator struct {
+	responseField string
+	schema        map[string]string
+}
 
 func (d *dryRunGenerator) Generate(_ context.Context, _, _ string) (string, error) {
-	return "[dry-run]", nil
+	out := map[string]any{}
+	for k, hint := range d.schema {
+		out[k] = placeholderValueForHint(hint)
+	}
+	if len(out) == 0 {
+		key := strings.TrimSpace(d.responseField)
+		if key == "" {
+			key = "response"
+		}
+		out[key] = "[dry-run]"
+	}
+	b, err := json.Marshal(out)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}
+
+func placeholderValueForHint(hint string) any {
+	h := strings.ToLower(strings.TrimSpace(hint))
+	switch {
+	case strings.Contains(h, "bool"):
+		return false
+	case strings.Contains(h, "int"), strings.Contains(h, "integer"):
+		return 0
+	case strings.Contains(h, "float"), strings.Contains(h, "number"), strings.Contains(h, "double"):
+		return 0
+	}
+	return "[dry-run]"
 }
 
 // jsonUnmarshalParams parses the raw JSON bytes of a tool's parameter schema

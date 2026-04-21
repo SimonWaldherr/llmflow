@@ -93,7 +93,7 @@ func TestApp_WithDryRun_Override(t *testing.T) {
 func TestProcessRecords_SingleWorker(t *testing.T) {
 	cfg := baseConfig(t)
 	a := New(cfg, newTestLogger())
-	gen := &fakeGenerator{response: "ok"}
+	gen := &fakeGenerator{response: `{"result":"ok"}`}
 	pb := newTestPromptBuilder(t)
 
 	records := []map[string]any{{"name": "Alice"}, {"name": "Bob"}}
@@ -112,7 +112,7 @@ func TestProcessRecords_SingleWorker(t *testing.T) {
 func TestProcessRecords_MultiWorker(t *testing.T) {
 	cfg := baseConfig(t)
 	a := New(cfg, newTestLogger())
-	gen := &fakeGenerator{response: "ok"}
+	gen := &fakeGenerator{response: `{"result":"ok"}`}
 	pb := newTestPromptBuilder(t)
 
 	records := make([]map[string]any, 10)
@@ -164,7 +164,7 @@ func TestProcessRecords_StopOnError(t *testing.T) {
 func TestProcessRecords_ResultCallback(t *testing.T) {
 	cfg := baseConfig(t)
 	a := New(cfg, newTestLogger())
-	gen := &fakeGenerator{response: "ok"}
+	gen := &fakeGenerator{response: `{"result":"ok"}`}
 	pb := newTestPromptBuilder(t)
 
 	var got int

@@ -122,14 +122,65 @@ func TestApplyDefaults(t *testing.T) {
 	if c.Processing.ResponseField != "response" {
 		t.Fatal("expected default response field")
 	}
+	if c.Processing.StoreRawResponse == nil || !*c.Processing.StoreRawResponse {
+		t.Fatal("expected store_raw_response default to true")
+	}
+	if c.Processing.IncludeThinkingInResponseField == nil || !*c.Processing.IncludeThinkingInResponseField {
+		t.Fatal("expected include_thinking_in_response_field default to true")
+	}
+	if c.Processing.DebugFieldHint == "" {
+		t.Fatal("expected default debug_field_hint")
+	}
 	if c.Processing.StrictOutput == nil || !*c.Processing.StrictOutput {
 		t.Fatal("expected strict_output default to true")
 	}
-	if c.Input.CSV.Delimiter != "," {
-		t.Fatal("expected default input delimiter")
+	if c.Input.CSV.Delimiter != "" {
+		t.Fatal("expected default input delimiter to be empty (auto-detect)")
 	}
 	if c.Output.CSV.Delimiter != "," {
 		t.Fatal("expected default output delimiter")
+	}
+}
+
+func TestEffectiveResponseSchema(t *testing.T) {
+	p := ProcessingConfig{
+		ResponseSchema: map[string]string{"versandart": "Paket|Spedition"},
+		DebugField:     "debug_reason",
+		DebugFieldHint: "short reason",
+	}
+	got := p.EffectiveResponseSchema()
+	if len(got) != 2 {
+		t.Fatalf("expected 2 schema keys, got %d", len(got))
+	}
+	if got["debug_reason"] != "short reason" {
+		t.Fatalf("unexpected debug schema hint: %q", got["debug_reason"])
+	}
+}
+
+func TestEffectiveLLMResponseSchema_FallbackToResponseField(t *testing.T) {
+	p := ProcessingConfig{
+		ResponseField: "llm_response",
+	}
+	got := p.EffectiveLLMResponseSchema()
+	if len(got) != 1 {
+		t.Fatalf("expected 1 schema key, got %d", len(got))
+	}
+	if got["llm_response"] != "string" {
+		t.Fatalf("unexpected fallback schema: %#v", got)
+	}
+}
+
+func TestEffectiveLLMResponseSchema_UsesExplicitSchema(t *testing.T) {
+	p := ProcessingConfig{
+		ResponseField:  "llm_response",
+		ResponseSchema: map[string]string{"versandart": "KEP|Palette"},
+	}
+	got := p.EffectiveLLMResponseSchema()
+	if len(got) != 1 {
+		t.Fatalf("expected 1 schema key, got %d", len(got))
+	}
+	if got["versandart"] != "KEP|Palette" {
+		t.Fatalf("unexpected explicit schema: %#v", got)
 	}
 }
 

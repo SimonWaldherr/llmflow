@@ -112,6 +112,27 @@ func TestCSVReaderCustomDelimiter(t *testing.T) {
 	}
 }
 
+func TestCSVReaderAutoDetectDelimiter(t *testing.T) {
+	p := writeTempCSV(t, "data.csv", "name;city\nAlice;Berlin\n")
+	r, err := NewCSVReader(config.InputConfig{
+		Type: "csv",
+		Path: p,
+		CSV:  config.CSVConfig{HasHeader: true}, // Delimiter intentionally empty.
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+
+	recs, err := r.ReadAll(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(recs) != 1 || recs[0]["city"] != "Berlin" {
+		t.Fatalf("unexpected records: %#v", recs)
+	}
+}
+
 func TestCSVReaderVariableFieldCounts(t *testing.T) {
 	p := writeTempCSV(t, "data.csv", "name,age,city\nAlice,30\nBob,25,Berlin,extra\n")
 	r, err := NewCSVReader(config.InputConfig{

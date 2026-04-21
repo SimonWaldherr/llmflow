@@ -886,6 +886,22 @@ textarea {
   margin-bottom: 12px;
 }
 
+.ui-mode-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+
+.ui-mode-row label {
+  margin: 0;
+}
+
+#panel-quick.ui-simple .ui-expert-only {
+  display: none !important;
+}
+
 .tools-section summary,
 .adv-processing summary {
   list-style: none;
@@ -1048,7 +1064,7 @@ textarea {
 </div>
 
 <div id="panel-quick" class="panel active">
-  <div class="section-card">
+  <div id="quick-card-intro" class="section-card">
     <div class="section-card-header">
       <span class="section-card-num">0</span>
       <span class="section-card-title">How It Flows</span>
@@ -1068,11 +1084,15 @@ textarea {
         <span>Validate first, then run and monitor job progress live.</span>
       </div>
     </div>
+    <div class="ui-mode-row">
+      <button id="ui-mode-toggle" class="btn btn-secondary btn-sm" type="button">Switch to Pro Mode</button>
+      <span class="hint" id="ui-mode-hint">Simple mode active: only core settings are shown.</span>
+    </div>
   </div>
 
-  <div class="section-card">
+  <div id="quick-card-input" class="section-card">
     <div class="section-card-header">
-      <span class="section-card-num">1</span>
+      <span class="section-card-num">2</span>
       <span class="section-card-title">Input</span>
       <span class="section-card-desc">Select the source file and format.</span>
     </div>
@@ -1126,9 +1146,9 @@ textarea {
     </div>
   </div>
 
-  <div class="section-card">
+  <div id="quick-card-task" class="section-card">
     <div class="section-card-header">
-      <span class="section-card-num">2</span>
+      <span class="section-card-num">3</span>
       <span class="section-card-title">Task</span>
       <span class="section-card-desc">Describe the desired transformation and auto-fill settings.</span>
     </div>
@@ -1142,9 +1162,9 @@ textarea {
     </div>
   </div>
 
-  <div class="section-card">
+  <div id="quick-card-provider" class="section-card">
     <div class="section-card-header">
-      <span class="section-card-num">3</span>
+      <span class="section-card-num">1</span>
       <span class="section-card-title">Provider And Prompts</span>
       <span class="section-card-desc">Control model selection and prompt pipeline.</span>
     </div>
@@ -1179,17 +1199,17 @@ textarea {
         <input id="q-baseurl" type="text" placeholder="Provider default if empty">
       </div>
 
-      <hr class="section-sep quick-full">
+      <hr class="section-sep quick-full ui-expert-only">
 
-      <div class="form-group quick-full">
+      <div class="form-group quick-full ui-expert-only">
         <label>System Prompt</label>
         <textarea id="q-system" rows="3" placeholder="You are a helpful data-processing assistant. Respond concisely."></textarea>
       </div>
-      <div class="form-group quick-full">
+      <div class="form-group quick-full ui-expert-only">
         <label>Pre-Prompt (optional)</label>
         <textarea id="q-pre" rows="2" placeholder="Analyze this record:"></textarea>
       </div>
-      <div class="form-group quick-full">
+      <div class="form-group quick-full ui-expert-only">
         <label>Input Template</label>
         <textarea id="q-template" rows="4" placeholder="{{ toPrettyJSON .record }}"></textarea>
         <div class="hint">
@@ -1200,21 +1220,21 @@ textarea {
           Example (selected fields): <code>Name: {{ .Name }}&#10;Description: {{ .Description }}</code>
         </div>
       </div>
-      <div class="form-group quick-full">
+      <div class="form-group quick-full ui-expert-only">
         <label>Post-Prompt (optional)</label>
         <textarea id="q-post" rows="2" placeholder='Reply with only JSON: {"sentiment":"positive|negative|neutral"}'></textarea>
       </div>
     </div>
   </div>
 
-  <div class="section-card">
+  <div id="quick-card-output" class="section-card">
     <div class="section-card-header">
       <span class="section-card-num">4</span>
       <span class="section-card-title">Output And Processing</span>
       <span class="section-card-desc">Define output fields and execution behavior.</span>
     </div>
 
-    <div class="quick-grid">
+    <div class="quick-grid ui-expert-only">
       <div class="form-group">
         <label>Response Field</label>
         <input id="q-response-field" type="text" value="llm_response">
@@ -1252,10 +1272,10 @@ textarea {
         <div class="form-group quick-full">
           <label>Response Format</label>
           <select id="q-response-format" onchange="onResponseFormatChange()">
-            <option value="">Text (free-form)</option>
+            <option value="">JSON object (single response field)</option>
             <option value="json">JSON (recommended)</option>
-            <option value="xml">XML output</option>
-            <option value="csv">CSV output</option>
+            <option value="xml">XML output (backend conversion)</option>
+            <option value="csv">CSV output (backend conversion)</option>
           </select>
         </div>
 
@@ -1263,8 +1283,16 @@ textarea {
           <label>Schema (optional, one field per line)</label>
           <textarea id="q-response-schema" class="schema-editor" rows="4" placeholder="needs_freight: true|false&#10;shipping_type: DHL|UPS|Forwarder&#10;reason: short sentence"></textarea>
         </div>
+        <div class="form-group ui-expert-only" id="debug-field-group" style="display:none">
+          <label>Debug Field (optional)</label>
+          <input id="q-debug-field" type="text" placeholder="debug_reason">
+        </div>
+        <div class="form-group ui-expert-only" id="debug-hint-group" style="display:none">
+          <label>Debug Field Hint</label>
+          <input id="q-debug-field-hint" type="text" value="short explanation in one sentence">
+        </div>
 
-        <div id="thinking-group" style="display:none" class="quick-full">
+        <div id="thinking-group" style="display:none" class="quick-full ui-expert-only">
           <div class="thinking-toggle">
             <input type="checkbox" id="q-thinking">
             <div>
@@ -1282,7 +1310,7 @@ textarea {
     </div>
   </div>
 
-  <details class="adv-processing">
+  <details class="adv-processing ui-expert-only">
     <summary>Advanced Settings</summary>
     <div class="adv-grid" style="margin-top:10px">
       <div class="form-group">
@@ -1326,6 +1354,20 @@ textarea {
         </select>
       </div>
       <div class="form-group">
+        <label>Store Raw Response</label>
+        <select id="q-store-raw-response">
+          <option value="true">Enabled (default)</option>
+          <option value="false">Disabled</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Include Thinking In Response Field</label>
+        <select id="q-include-thinking-response">
+          <option value="true">Enabled (default)</option>
+          <option value="false">Disabled (final answer only)</option>
+        </select>
+      </div>
+      <div class="form-group">
         <label>Response Fields (CSV)</label>
         <input id="q-response-fields" type="text" placeholder="weight, volume, needs_freight">
       </div>
@@ -1347,7 +1389,7 @@ textarea {
     </div>
   </details>
 
-  <details id="tools-section" class="tools-section">
+  <details id="tools-section" class="tools-section ui-expert-only">
     <summary>Agentic Tools (optional)</summary>
     <div class="tools-grid" style="margin-top:10px">
       <div class="tool-card">
@@ -1426,7 +1468,7 @@ textarea {
     </div>
   </details>
 
-  <details class="tools-section" id="enrich-section">
+  <details class="tools-section ui-expert-only" id="enrich-section">
     <summary>Data Enrichment (optional)</summary>
     <div class="adv-grid" style="margin-top:10px">
       <div class="form-group">
@@ -2012,19 +2054,22 @@ function updateOutputStructureSummary() {
   const keyCol = (document.getElementById('q-key-column').value || '').trim();
   const parseJSON = (document.getElementById('q-parse-json').value || 'false').trim() === 'true';
   const strictOutput = (document.getElementById('q-strict-output').value || 'true').trim() === 'true';
+  const storeRawResponse = (document.getElementById('q-store-raw-response').value || 'true').trim() === 'true';
 
   const outputFields = parseCommaFields('q-output-fields');
   const responseFields = parseCommaFields('q-response-fields');
   const schemaFields = parseSchemaFields();
 
-  let sourceLabel = `using response field "${responseField}"`;
-  let fields = [responseField];
+  let sourceLabel = storeRawResponse
+    ? `using response field "${responseField}"`
+    : 'without response field (store_raw_response=false)';
+  let fields = storeRawResponse ? [responseField] : [];
   if (outputFields.length > 0) {
     sourceLabel = 'using explicit Output Fields';
     fields = outputFields;
   } else if (responseFormat && schemaFields.length > 0) {
     sourceLabel = `using ${responseFormat.toUpperCase()} schema fields + response field`;
-    fields = [...schemaFields, responseField];
+    fields = storeRawResponse ? [...schemaFields, responseField] : [...schemaFields];
     if (includeMode === 'key' && keyCol) fields = [keyCol, ...fields];
   } else if (responseFields.length > 0) {
     sourceLabel = 'using Response Fields';
@@ -2046,7 +2091,7 @@ function updateOutputStructureSummary() {
 
   const chips = fields.length > 0
     ? fields.map(f => `<span class="chip">${escHtml(String(f))}</span>`).join('')
-    : `<span class="chip">${escHtml(responseField)}</span>`;
+    : `<span class="chip">${escHtml(storeRawResponse ? responseField : 'no response field')}</span>`;
 
   const strictLabel = (responseFormat || parseJSON)
     ? (strictOutput ? 'strict contract: enabled' : 'strict contract: disabled (legacy)')
@@ -2347,11 +2392,19 @@ function buildYAMLFromForm() {
   const responseSchemaRaw = (document.getElementById('q-response-schema').value || '').trim();
   const thinkingEnabled = document.getElementById('q-thinking').checked;
   const strictOutput = (document.getElementById('q-strict-output').value || 'true').trim();
+  const debugField = (document.getElementById('q-debug-field').value || '').trim();
+  const debugFieldHint = (document.getElementById('q-debug-field-hint').value || '').trim() || 'short explanation in one sentence';
+  const storeRawResponse = (document.getElementById('q-store-raw-response').value || 'true').trim();
+  const includeThinkingInResponse = (document.getElementById('q-include-thinking-response').value || 'true').trim();
 
   if (responseFormat) {
     yaml += `\n  response_format: ${responseFormat}`;
     if (thinkingEnabled) yaml += `\n  thinking: true`;
     if (strictOutput === 'false') yaml += `\n  strict_output: false`;
+    if (debugField) {
+      yaml += `\n  debug_field: ${debugField}`;
+      yaml += `\n  debug_field_hint: "${debugFieldHint.replace(/"/g, '\\"')}"`;
+    }
     if (responseSchemaRaw) {
       const schemaLines = responseSchemaRaw.split('\n')
         .map(l => l.trim()).filter(l => l && l.includes(':'));
@@ -2368,7 +2421,13 @@ function buildYAMLFromForm() {
   } else if (parseJSON === 'true' || responseFieldsList.length > 0) {
     yaml += `\n  parse_json_response: true`;
     if (strictOutput === 'false') yaml += `\n  strict_output: false`;
+    if (debugField) {
+      yaml += `\n  debug_field: ${debugField}`;
+      yaml += `\n  debug_field_hint: "${debugFieldHint.replace(/"/g, '\\"')}"`;
+    }
   }
+  if (storeRawResponse === 'false') yaml += `\n  store_raw_response: false`;
+  if (includeThinkingInResponse === 'false') yaml += `\n  include_thinking_in_response_field: false`;
 
   let outputFieldsRaw = (document.getElementById('q-output-fields').value || '').trim();
 
@@ -2377,9 +2436,11 @@ function buildYAMLFromForm() {
     const schemaFields = responseSchemaRaw.split('\n')
       .map(l => { const ci = l.indexOf(':'); return ci > 0 ? l.slice(0, ci).trim() : ''; })
       .filter(Boolean);
+    if (debugField && !schemaFields.includes(debugField)) schemaFields.push(debugField);
     if (schemaFields.length > 0) {
       const keyCol = includeMode === 'key' ? document.getElementById('q-key-column').value : '';
-      const allOut = keyCol ? [keyCol, ...schemaFields, responseField] : [...schemaFields, responseField];
+      const base = keyCol ? [keyCol, ...schemaFields] : [...schemaFields];
+      const allOut = storeRawResponse === 'false' ? base : [...base, responseField];
       outputFieldsRaw = allOut.join(', ');
     }
   } else if (!outputFieldsRaw && responseFieldsList.length > 0) {
@@ -2981,6 +3042,8 @@ async function deleteJob(id) {
 // ── Detect local providers ────────────────────────────────────────
 const detectedProviders = new Map();
 let quickFormTouched = false;
+const QUICK_PROVIDER_PREFS_KEY = 'llmflow-quick-provider-prefs-v1';
+let savedProviderPrefs = null;
 
 /**
  * Returns a display label for a provider name.
@@ -3015,6 +3078,7 @@ function getModelValue() {
 function onModelSelectChange() {
   const isCustom = document.getElementById('q-model').value === '__custom__';
   document.getElementById('q-model-custom').style.display = isCustom ? 'block' : 'none';
+  saveProviderPrefs();
 }
 /**
  * Shows or hides fields that only apply to cloud providers.
@@ -3024,6 +3088,77 @@ function onModelSelectChange() {
 function updateProviderUI(provider) {
   const isLocal = provider === 'ollama' || provider === 'lmstudio';
   document.querySelectorAll('.q-cloud-only').forEach(el => { el.style.display = isLocal ? 'none' : ''; });
+}
+
+function loadProviderPrefs() {
+  try {
+    const raw = localStorage.getItem(QUICK_PROVIDER_PREFS_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return null;
+    return parsed;
+  } catch(_) {
+    return null;
+  }
+}
+
+function saveProviderPrefs() {
+  const provider = document.getElementById('q-provider').value;
+  const baseURL = document.getElementById('q-baseurl').value;
+  const timeout = document.getElementById('q-timeout').value;
+  const model = getModelValue();
+  savedProviderPrefs = {
+    provider,
+    model,
+    base_url: baseURL,
+    timeout,
+  };
+  try { localStorage.setItem(QUICK_PROVIDER_PREFS_KEY, JSON.stringify(savedProviderPrefs)); } catch(_) {}
+}
+
+function setPreferredModel(modelName) {
+  const sel = document.getElementById('q-model');
+  const custom = document.getElementById('q-model-custom');
+  if (!modelName) return false;
+  const hasExact = [...sel.options].some(o => o.value === modelName);
+  if (hasExact) {
+    sel.value = modelName;
+    return true;
+  }
+  if ([...sel.options].some(o => o.value === '__custom__')) {
+    sel.value = '__custom__';
+    custom.value = modelName;
+    return true;
+  }
+  return false;
+}
+
+function applySavedProviderPrefs() {
+  savedProviderPrefs = loadProviderPrefs();
+  if (!savedProviderPrefs) return false;
+
+  const providerEl = document.getElementById('q-provider');
+  const provider = (savedProviderPrefs.provider || '').trim();
+  if (!provider || ![...providerEl.options].some(o => o.value === provider)) {
+    return false;
+  }
+
+  providerEl.value = provider;
+  applyProviderDefaults(provider);
+
+  if (typeof savedProviderPrefs.base_url === 'string' && savedProviderPrefs.base_url.trim()) {
+    document.getElementById('q-baseurl').value = savedProviderPrefs.base_url;
+  }
+  if (typeof savedProviderPrefs.timeout === 'string' && savedProviderPrefs.timeout.trim()) {
+    document.getElementById('q-timeout').value = savedProviderPrefs.timeout;
+  }
+  if (typeof savedProviderPrefs.model === 'string' && savedProviderPrefs.model.trim()) {
+    setPreferredModel(savedProviderPrefs.model.trim());
+    onModelSelectChange();
+  }
+
+  quickFormTouched = true;
+  return true;
 }
 
 /**
@@ -3090,8 +3225,16 @@ function setModelSuggestions(models) {
   custom.value = '__custom__'; custom.textContent = '— Custom model name —';
   sel.appendChild(custom);
   // Restore previous selection if still in list
-  if (prev && prev !== '__custom__' && merged.includes(prev)) sel.value = prev;
-  else sel.value = merged[0] || '__custom__';
+  const savedForProvider = (savedProviderPrefs && savedProviderPrefs.provider === provider && typeof savedProviderPrefs.model === 'string')
+    ? savedProviderPrefs.model.trim()
+    : '';
+  if (savedForProvider && setPreferredModel(savedForProvider)) {
+    // keep saved model
+  } else if (prev && prev !== '__custom__' && merged.includes(prev)) {
+    sel.value = prev;
+  } else {
+    sel.value = merged[0] || '__custom__';
+  }
   hint.textContent = '';
   onModelSelectChange();
 }
@@ -3150,6 +3293,7 @@ function applyDetected(info, { markTouched=true } = {}) {
   syncAPIKeyFieldMode();
   setModelSuggestions(info.models || []);
   updateProviderUI(info.provider);
+  saveProviderPrefs();
 }
 
 /**
@@ -3217,6 +3361,7 @@ async function suggestConfig() {
     model = detected.models[0];
     setModelSuggestions(detected.models);
     document.getElementById('q-model').value = model;
+    onModelSelectChange();
     statusEl.textContent = `Using loaded model ${model} instead of ${selectedModel} for ${providerLabel(provider)}.`;
     statusEl.className = 'suggest-status';
   }
@@ -3251,8 +3396,16 @@ async function suggestConfig() {
     if (s.response_field)   document.getElementById('q-response-field').value = s.response_field;
     if (s.response_fields)  document.getElementById('q-response-fields').value = s.response_fields;
     if (s.output_fields)    document.getElementById('q-output-fields').value   = s.output_fields;
+    if (s.output_type) {
+      const outTypeEl = document.getElementById('q-output-type');
+      if (outTypeEl && [...outTypeEl.options].some(o => o.value === s.output_type)) {
+        outTypeEl.value = s.output_type;
+      }
+    }
     if (s.parse_json_response !== undefined) document.getElementById('q-parse-json').value = s.parse_json_response ? 'true' : 'false';
     if (s.strict_output !== undefined) document.getElementById('q-strict-output').value = s.strict_output ? 'true' : 'false';
+    if (s.store_raw_response !== undefined) document.getElementById('q-store-raw-response').value = s.store_raw_response ? 'true' : 'false';
+    if (s.include_thinking_in_response_field !== undefined) document.getElementById('q-include-thinking-response').value = s.include_thinking_in_response_field ? 'true' : 'false';
     if (s.include_input_in_output) {
       document.getElementById('q-include-input').value = s.include_input_in_output;
       onIncludeInputChange();
@@ -3268,6 +3421,8 @@ async function suggestConfig() {
       const lines = Object.entries(s.response_schema).map(([k, v]) => `${k}: ${v}`).join('\n');
       document.getElementById('q-response-schema').value = lines;
     }
+    if (s.debug_field) document.getElementById('q-debug-field').value = s.debug_field;
+    if (s.debug_field_hint) document.getElementById('q-debug-field-hint').value = s.debug_field_hint;
     if (s.thinking !== undefined) {
       document.getElementById('q-thinking').checked = !!s.thinking;
     }
@@ -3291,14 +3446,20 @@ document.getElementById('model-refresh').addEventListener('click', () => loadMod
 document.getElementById('q-provider').addEventListener('change', e => {
   quickFormTouched = true;
   applyProviderDefaults(e.target.value);
+  saveProviderPrefs();
 });
 
-['q-model-custom','q-baseurl','q-apikey'].forEach(id =>
+['q-model-custom','q-baseurl'].forEach(id =>
   document.getElementById(id).addEventListener('input', () => {
     quickFormTouched = true;
-    if (id === 'q-apikey') syncAPIKeyFieldMode();
+    saveProviderPrefs();
   })
 );
+document.getElementById('q-apikey').addEventListener('input', () => {
+  quickFormTouched = true;
+  syncAPIKeyFieldMode();
+});
+document.getElementById('q-timeout').addEventListener('input', saveProviderPrefs);
 
 document.getElementById('t-sql-query').addEventListener('change', e =>
   document.getElementById('t-sql-extra').classList.toggle('show', e.target.checked)
@@ -3340,6 +3501,38 @@ function applyTheme(name) {
   if (sel) sel.addEventListener('change', e => applyTheme(e.target.value));
 })();
 
+// ── UI mode (simple / expert) ────────────────────────────────────
+function applyUIMode(mode) {
+  const panel = document.getElementById('panel-quick');
+  const toggleBtn = document.getElementById('ui-mode-toggle');
+  const hint = document.getElementById('ui-mode-hint');
+  const effective = mode === 'expert' ? 'expert' : 'simple';
+  if (!panel) return;
+  const simple = effective === 'simple';
+  panel.classList.toggle('ui-simple', simple);
+  if (simple) {
+    panel.querySelectorAll('details.ui-expert-only').forEach(d => { d.open = false; });
+  }
+  if (toggleBtn) {
+    toggleBtn.textContent = simple ? 'Switch to Pro Mode' : 'Switch to Simple Mode';
+  }
+  if (hint) {
+    hint.textContent = simple
+      ? 'Simple mode active: only core settings are shown.'
+      : 'Pro mode active: all prompt and advanced controls are visible.';
+  }
+}
+
+function reorderQuickSections() {
+  const panel = document.getElementById('panel-quick');
+  const intro = document.getElementById('quick-card-intro');
+  const provider = document.getElementById('quick-card-provider');
+  if (!panel || !intro || !provider) return;
+  if (intro.nextElementSibling !== provider) {
+    panel.insertBefore(provider, intro.nextElementSibling);
+  }
+}
+
 // ── Structured output toggles ─────────────────────────────────────
 /**
  * Shows or hides the schema / thinking controls based on the selected format.
@@ -3348,6 +3541,8 @@ function onResponseFormatChange() {
   const fmt = document.getElementById('q-response-format').value;
   const structured = !!fmt;
   document.getElementById('response-schema-group').style.display = structured ? '' : 'none';
+  document.getElementById('debug-field-group').style.display = structured ? '' : 'none';
+  document.getElementById('debug-hint-group').style.display = structured ? '' : 'none';
   document.getElementById('thinking-group').style.display = structured ? '' : 'none';
   // Disable legacy parse_json_response when response_format is used
   if (structured) {
@@ -3357,20 +3552,30 @@ function onResponseFormatChange() {
 }
 
 // ── Init ──────────────────────────────────────────────────────────
-['q-response-field', 'q-response-fields', 'q-output-fields', 'q-response-schema'].forEach(id => {
+['q-response-field', 'q-response-fields', 'q-output-fields', 'q-response-schema', 'q-debug-field', 'q-debug-field-hint'].forEach(id => {
   const input = document.getElementById(id);
   if (input) input.addEventListener('input', updateOutputStructureSummary);
 });
-['q-include-input', 'q-key-column', 'q-response-format', 'q-parse-json', 'q-strict-output'].forEach(id => {
+['q-include-input', 'q-key-column', 'q-response-format', 'q-parse-json', 'q-strict-output', 'q-store-raw-response', 'q-include-thinking-response'].forEach(id => {
   const input = document.getElementById(id);
   if (input) input.addEventListener('change', updateOutputStructureSummary);
 });
-setModelSuggestions([]);  // populate select for default provider (openai)
+const restoredProviderPrefs = applySavedProviderPrefs();
+if (!restoredProviderPrefs) {
+  applyProviderDefaults(document.getElementById('q-provider').value);
+}
 updateProviderUI(document.getElementById('q-provider').value);
 syncAPIKeyFieldMode();
 onIncludeInputChange();
 onResponseFormatChange();
 updateOutputStructureSummary();
+reorderQuickSections();
+document.getElementById('ui-mode-toggle').addEventListener('click', () => {
+  const panel = document.getElementById('panel-quick');
+  const toExpert = panel ? panel.classList.contains('ui-simple') : true;
+  applyUIMode(toExpert ? 'expert' : 'simple');
+});
+applyUIMode('simple');
 detectLocalProviders({ autoApply: true });
 </script>
 </body>

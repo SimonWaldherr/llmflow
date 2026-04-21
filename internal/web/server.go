@@ -1069,17 +1069,20 @@ type suggestRequest struct {
 }
 
 type suggestResponse struct {
-	SystemPrompt         string `json:"system_prompt"`
-	PrePrompt            string `json:"pre_prompt"`
-	InputTemplate        string `json:"input_template"`
-	PostPrompt           string `json:"post_prompt"`
-	JobName              string `json:"job_name"`
-	ResponseField        string `json:"response_field"`
-	ResponseFields       string `json:"response_fields,omitempty"`
-	OutputFields         string `json:"output_fields,omitempty"`
-	IncludeInputInOutput string `json:"include_input_in_output,omitempty"`
-	KeyColumn            string `json:"key_column,omitempty"`
-	ParseJSONResponse    bool   `json:"parse_json_response,omitempty"`
+	SystemPrompt                   string `json:"system_prompt"`
+	PrePrompt                      string `json:"pre_prompt"`
+	InputTemplate                  string `json:"input_template"`
+	PostPrompt                     string `json:"post_prompt"`
+	JobName                        string `json:"job_name"`
+	OutputType                     string `json:"output_type,omitempty"`
+	ResponseField                  string `json:"response_field"`
+	ResponseFields                 string `json:"response_fields,omitempty"`
+	OutputFields                   string `json:"output_fields,omitempty"`
+	IncludeInputInOutput           string `json:"include_input_in_output,omitempty"`
+	KeyColumn                      string `json:"key_column,omitempty"`
+	ParseJSONResponse              bool   `json:"parse_json_response,omitempty"`
+	StoreRawResponse               *bool  `json:"store_raw_response,omitempty"`
+	IncludeThinkingInResponseField *bool  `json:"include_thinking_in_response_field,omitempty"`
 	// ResponseFormat instructs the LLM on how to structure its reply and controls
 	// automatic prompt injection + JSON parsing in the pipeline.
 	// Values: "text" (default), "json", "xml", "csv".
@@ -1087,6 +1090,8 @@ type suggestResponse struct {
 	// ResponseSchema maps field names to type hints; used together with ResponseFormat.
 	// Example: {"sentiment": "positive, neutral, or negative", "confidence": "0.0–1.0"}
 	ResponseSchema map[string]string `json:"response_schema,omitempty"`
+	DebugField     string            `json:"debug_field,omitempty"`
+	DebugFieldHint string            `json:"debug_field_hint,omitempty"`
 	// Thinking enables chain-of-thought reasoning before the structured output.
 	Thinking bool `json:"thinking,omitempty"`
 	// StrictOutput enables strict output contract enforcement.
@@ -1102,21 +1107,24 @@ back to an output file.
 
 The prompt pipeline per record is:
   system_prompt  → sent once as the LLM role / global instructions (NOT per record)
-  pre_prompt     → optional text prepended before each record's rendered data
+  pre_prompt     → optional task/context text prepended before each record's rendered data
   input_template → Go template executed per record:
                    {{ toPrettyJSON .record }} renders the full record as JSON,
                    {{ .fieldName }} accesses a specific field.
-  post_prompt    → optional extra instruction after the record (leave empty when
-                   response_format is set — llmflow injects format instructions automatically)
+  post_prompt    → optional extra instruction after the record.
+                   IMPORTANT: do not put output-format instructions here.
+                   Use response_format/output_type fields instead.
   response_field → the key in the output row where the raw LLM response is stored.
 
 Structured output fields (preferred over hand-crafted post_prompt instructions):
-- response_format: one of "text" (default), "json", "xml", "csv".
+- LLM I/O contract is always JSON:
+    • each input record is sent as JSON
+    • model must return exactly one JSON object per record
+- response_format: one of "text", "json", "xml", "csv".
+  "text" means a single string field in response_field (still JSON object).
   Use "json" whenever the task produces structured key/value output.
   Use "xml" or "csv" only when the downstream consumer explicitly requires that format.
-  When response_format is "json"/"xml"/"csv", llmflow automatically:
-    • appends the format instruction to the prompt (no post_prompt needed for format)
-    • parses the LLM's JSON response and spreads fields into the output record
+  XML/CSV are backend conversions from validated JSON fields.
 - response_schema: a JSON object mapping field names to short type hints.
   Example: {"sentiment": "positive, neutral, or negative", "confidence": "float 0.0–1.0"}
   Leave empty if the task produces a single free-text value.
@@ -1129,14 +1137,23 @@ Structured output fields (preferred over hand-crafted post_prompt instructions):
   Only set false when backwards-compatibility with mixed text+JSON responses is required.
 
 Other fields:
+- output_type: one of "jsonl", "csv", or "xml" for the output file writer.
+  If the task says "Ausgabe als CSV/XML/JSONL", set this field, not pre/post prompt text.
 - response_fields: comma-separated list of JSON keys produced by the LLM (used only
   when response_format is not set and post_prompt enforces a manual JSON schema).
 - output_fields: comma-separated list of the final columns to write (restricts output).
 - include_input_in_output: "all", "key", or "none".
 - key_column: when include_input_in_output is "key", the identifier column name.
 - parse_json_response: legacy flag — prefer response_format instead.
+- store_raw_response: default true. If false, response_field is omitted.
+- include_thinking_in_response_field: default true. If false and thinking=true,
+  response_field includes only final answer (without <thinking>...</thinking>).
+- debug_field / debug_field_hint: optional extra explanation column for testing.
 - job_name: ≤ 6 words describing what this job does.
 - notes: one short sentence explaining why the chosen fields fit the task.
+
+Never encode output-format requirements as prompt text like
+"reply as CSV", "output XML", "only JSON". Put them into response_format/output_type.
 
 When a current config is supplied, treat it as the baseline and only change fields that
 improve the task. Be deliberate about every field: provider/model/base_url only when the
@@ -1151,10 +1168,15 @@ Respond with ONLY a JSON object — no markdown, no explanation — following th
   "pre_prompt": "...",
   "input_template": "...",
   "post_prompt": "...",
+  "output_type": "jsonl",
   "response_field": "...",
   "response_format": "json",
   "response_schema": {"field": "description", ...},
+  "debug_field": "debug_reason",
+  "debug_field_hint": "short explanation in one sentence",
   "thinking": false,
+  "store_raw_response": true,
+  "include_thinking_in_response_field": false,
   "strict_output": true,
   "response_fields": "...",
   "output_fields": "...",
@@ -1242,22 +1264,265 @@ func (s *Server) handleSuggest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Strip markdown code fences if the model wrapped the JSON anyway.
-	raw = strings.TrimSpace(raw)
-	if idx := strings.Index(raw, "{"); idx > 0 {
-		raw = raw[idx:]
-	}
-	if idx := strings.LastIndex(raw, "}"); idx >= 0 && idx < len(raw)-1 {
-		raw = raw[:idx+1]
-	}
-
-	var sr suggestResponse
-	if err := json.Unmarshal([]byte(raw), &sr); err != nil {
-		writeJSON(w, http.StatusInternalServerError, apiResponse{Error: "could not parse LLM response as JSON: " + err.Error()})
+	sr, err := parseSuggestResponse(raw)
+	if err != nil {
+		// Keep the UX resilient: fall back to a deterministic template instead
+		// of returning a hard 500 if the model emits malformed JSON.
+		fallback := buildSuggestFallback(req.Task, req.Config)
+		fallback.Notes = "Fallback configuration used because suggestion JSON could not be parsed."
+		writeJSON(w, http.StatusOK, apiResponse{OK: true, Data: fallback})
 		return
 	}
+	sr = normalizeSuggestResponse(req.Task, sr)
 
 	writeJSON(w, http.StatusOK, apiResponse{OK: true, Data: sr})
+}
+
+func normalizeSuggestResponse(task string, sr suggestResponse) suggestResponse {
+	// Never keep output-format directives in prompt text; map them to config fields.
+	taskFormat, taskOutputType := detectFormatHints(task)
+	promptFormat, promptOutputType := detectFormatHints(sr.PrePrompt + "\n" + sr.PostPrompt)
+	sr.PrePrompt = stripFormatInstructionLines(sr.PrePrompt)
+	sr.PostPrompt = stripFormatInstructionLines(sr.PostPrompt)
+
+	if strings.TrimSpace(sr.ResponseFormat) == "" {
+		if taskFormat != "" {
+			sr.ResponseFormat = taskFormat
+		} else if promptFormat != "" {
+			sr.ResponseFormat = promptFormat
+		}
+	}
+	if strings.TrimSpace(sr.OutputType) == "" {
+		if taskOutputType != "" {
+			sr.OutputType = taskOutputType
+		} else if promptOutputType != "" {
+			sr.OutputType = promptOutputType
+		}
+	}
+	if strings.TrimSpace(sr.OutputType) == "" {
+		switch strings.ToLower(strings.TrimSpace(sr.ResponseFormat)) {
+		case "csv", "xml":
+			sr.OutputType = strings.ToLower(strings.TrimSpace(sr.ResponseFormat))
+		}
+	}
+	switch strings.ToLower(strings.TrimSpace(sr.OutputType)) {
+	case "csv", "xml", "jsonl":
+		sr.OutputType = strings.ToLower(strings.TrimSpace(sr.OutputType))
+	default:
+		sr.OutputType = ""
+	}
+
+	taskLow := strings.ToLower(task)
+	isShippingKEP := (strings.Contains(taskLow, "kep") || strings.Contains(taskLow, "paket")) &&
+		(strings.Contains(taskLow, "palette") || strings.Contains(taskLow, "spedition"))
+	if !isShippingKEP {
+		return sr
+	}
+
+	// KEP-vs-Palette is a classification task; keep LLM output in strict JSON.
+	sr.ResponseFormat = "json"
+	if sr.ResponseSchema == nil {
+		sr.ResponseSchema = map[string]string{}
+	}
+	if _, ok := sr.ResponseSchema["versandart"]; !ok {
+		sr.ResponseSchema["versandart"] = "KEP|Palette"
+	}
+
+	// Ensure key + predicted label are present in final output.
+	outLow := strings.ToLower(sr.OutputFields)
+	if strings.TrimSpace(sr.OutputFields) == "" || strings.TrimSpace(outLow) == "bk_product" {
+		sr.OutputFields = "BK_Product, versandart"
+	}
+	if strings.Contains(taskLow, "bk_product") || strings.Contains(taskLow, "schl") || strings.Contains(taskLow, "key") {
+		sr.IncludeInputInOutput = "key"
+		sr.KeyColumn = "BK_Product"
+	}
+
+	// Deterministic, clean output by default for structured classification.
+	if sr.StrictOutput == nil {
+		v := true
+		sr.StrictOutput = &v
+	}
+	if sr.StoreRawResponse == nil {
+		v := false
+		sr.StoreRawResponse = &v
+	}
+	if sr.IncludeThinkingInResponseField == nil {
+		v := false
+		sr.IncludeThinkingInResponseField = &v
+	}
+	return sr
+}
+
+func detectFormatHints(text string) (responseFormat, outputType string) {
+	low := strings.ToLower(text)
+
+	// Specific before generic.
+	if strings.Contains(low, "jsonl") || strings.Contains(low, "json lines") || strings.Contains(low, "json-lines") {
+		outputType = "jsonl"
+	}
+	if strings.Contains(low, "csv") || strings.Contains(low, "kommagetrennt") {
+		responseFormat = "csv"
+		outputType = "csv"
+	}
+	if strings.Contains(low, "xml") {
+		responseFormat = "xml"
+		outputType = "xml"
+	}
+	if responseFormat == "" && strings.Contains(low, "json") {
+		responseFormat = "json"
+	}
+	return responseFormat, outputType
+}
+
+func stripFormatInstructionLines(s string) string {
+	lines := strings.Split(strings.TrimSpace(s), "\n")
+	out := make([]string, 0, len(lines))
+	for _, line := range lines {
+		if !isFormatInstructionLine(line) {
+			out = append(out, line)
+		}
+	}
+	return strings.TrimSpace(strings.Join(out, "\n"))
+}
+
+func isFormatInstructionLine(line string) bool {
+	l := strings.ToLower(strings.TrimSpace(line))
+	if l == "" {
+		return false
+	}
+	hasFormatToken := strings.Contains(l, "csv") ||
+		strings.Contains(l, "xml") ||
+		strings.Contains(l, "json") ||
+		strings.Contains(l, "jsonl") ||
+		strings.Contains(l, "format")
+	if !hasFormatToken {
+		return false
+	}
+	hasOutputVerb := strings.Contains(l, "output") ||
+		strings.Contains(l, "ausgabe") ||
+		strings.Contains(l, "return") ||
+		strings.Contains(l, "reply") ||
+		strings.Contains(l, "antwort")
+	return hasOutputVerb
+}
+
+func parseSuggestResponse(raw string) (suggestResponse, error) {
+	var sr suggestResponse
+	obj, err := extractFirstJSONObject(raw)
+	if err != nil {
+		return sr, err
+	}
+	if err := json.Unmarshal([]byte(obj), &sr); err == nil {
+		return sr, nil
+	}
+
+	repaired := escapeJSONControlCharsInStrings(obj)
+	if err := json.Unmarshal([]byte(repaired), &sr); err != nil {
+		return sr, err
+	}
+	return sr, nil
+}
+
+func extractFirstJSONObject(raw string) (string, error) {
+	s := strings.TrimSpace(raw)
+	start := strings.IndexByte(s, '{')
+	if start < 0 {
+		return "", fmt.Errorf("no JSON object found")
+	}
+
+	inString := false
+	escaped := false
+	depth := 0
+	objStart := -1
+
+	for i := start; i < len(s); i++ {
+		c := s[i]
+		if inString {
+			if escaped {
+				escaped = false
+				continue
+			}
+			if c == '\\' {
+				escaped = true
+				continue
+			}
+			if c == '"' {
+				inString = false
+			}
+			continue
+		}
+
+		switch c {
+		case '"':
+			inString = true
+		case '{':
+			if depth == 0 {
+				objStart = i
+			}
+			depth++
+		case '}':
+			if depth == 0 {
+				continue
+			}
+			depth--
+			if depth == 0 && objStart >= 0 {
+				return s[objStart : i+1], nil
+			}
+		}
+	}
+	return "", fmt.Errorf("incomplete JSON object")
+}
+
+func escapeJSONControlCharsInStrings(s string) string {
+	var b strings.Builder
+	b.Grow(len(s) + 16)
+
+	inString := false
+	escaped := false
+
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if !inString {
+			b.WriteByte(c)
+			if c == '"' {
+				inString = true
+			}
+			continue
+		}
+
+		if escaped {
+			b.WriteByte(c)
+			escaped = false
+			continue
+		}
+
+		switch c {
+		case '\\':
+			b.WriteByte(c)
+			escaped = true
+		case '"':
+			b.WriteByte(c)
+			inString = false
+		case '\n':
+			b.WriteString(`\n`)
+		case '\r':
+			if i+1 < len(s) && s[i+1] == '\n' {
+				i++
+			}
+			b.WriteString(`\n`)
+		case '\t':
+			b.WriteString(`\t`)
+		default:
+			if c < 0x20 {
+				_, _ = fmt.Fprintf(&b, "\\u%04x", c)
+			} else {
+				b.WriteByte(c)
+			}
+		}
+	}
+
+	return b.String()
 }
 
 func buildSuggestFallback(task, currentConfig string) suggestResponse {
@@ -1266,15 +1531,40 @@ func buildSuggestFallback(task, currentConfig string) suggestResponse {
 
 	responseField := "response"
 	responseFields := ""
+	outputType := ""
 	outputFields := ""
+	includeInputInOutput := ""
+	keyColumn := ""
 	responseFormat := ""
 	responseSchema := map[string]string(nil)
+	debugField := ""
+	debugFieldHint := ""
 	thinking := false
 	var strictOutput *bool
+	var storeRawResponse *bool
+	var includeThinkingInResponseField *bool
+	taskFormat, taskOutputType := detectFormatHints(task)
 
 	switch {
 	case strings.Contains(taskLow, "summary") || strings.Contains(taskLow, "zusammenfassung"):
 		responseField = "summary"
+	case (strings.Contains(taskLow, "kep") || strings.Contains(taskLow, "paket")) &&
+		(strings.Contains(taskLow, "palette") || strings.Contains(taskLow, "spedition")):
+		responseField = "raw_response"
+		responseFormat = "json"
+		responseSchema = map[string]string{
+			"versandart": "KEP|Palette",
+		}
+		outputFields = "BK_Product, versandart"
+		v := true
+		strictOutput = &v
+		f := false
+		includeThinkingInResponseField = &f
+		storeRawResponse = &f
+		if strings.Contains(taskLow, "bk_product") || strings.Contains(taskLow, "schl") || strings.Contains(taskLow, "key") {
+			includeInputInOutput = "key"
+			keyColumn = "BK_Product"
+		}
 	case strings.Contains(taskLow, "classif") || strings.Contains(taskLow, "klassif"):
 		responseField = "raw_response"
 		responseFormat = "json"
@@ -1287,6 +1577,9 @@ func buildSuggestFallback(task, currentConfig string) suggestResponse {
 		thinking = true
 		v := true
 		strictOutput = &v
+		storeRawResponse = &v
+		f := false
+		includeThinkingInResponseField = &f
 	case strings.Contains(taskLow, "spedition") || strings.Contains(taskLow, "freight") || strings.Contains(taskLow, "versand"):
 		responseField = "raw_response"
 		responseFormat = "json"
@@ -1300,6 +1593,9 @@ func buildSuggestFallback(task, currentConfig string) suggestResponse {
 		thinking = true
 		v := true
 		strictOutput = &v
+		storeRawResponse = &v
+		f := false
+		includeThinkingInResponseField = &f
 	case strings.Contains(taskLow, "mhd") || strings.Contains(taskLow, "mindesthaltbar") || strings.Contains(taskLow, "expir"):
 		responseField = "raw_response"
 		responseFormat = "json"
@@ -1311,9 +1607,25 @@ func buildSuggestFallback(task, currentConfig string) suggestResponse {
 		thinking = false
 		v := true
 		strictOutput = &v
+		storeRawResponse = &v
+	}
+	if responseFormat == "" && taskFormat != "" {
+		responseFormat = taskFormat
+	}
+	if outputType == "" && taskOutputType != "" {
+		outputType = taskOutputType
+	}
+	if outputType == "" {
+		switch responseFormat {
+		case "csv", "xml":
+			outputType = responseFormat
+		}
 	}
 
-	prePrompt := strings.TrimSpace(task)
+	prePrompt := strings.TrimSpace(stripFormatInstructionLines(task))
+	if prePrompt == "" {
+		prePrompt = "Bearbeite den Datensatz gemäß der Aufgabe."
+	}
 	if prePrompt != "" {
 		prePrompt = "Aufgabe: " + prePrompt
 	}
@@ -1326,20 +1638,27 @@ func buildSuggestFallback(task, currentConfig string) suggestResponse {
 		postPrompt = "Return a concise result that matches the task."
 	}
 	return suggestResponse{
-		SystemPrompt:      "You are a helpful data-processing assistant.",
-		PrePrompt:         prePrompt,
-		InputTemplate:     inputTemplate,
-		PostPrompt:        postPrompt,
-		JobName:           jobName,
-		ResponseField:     responseField,
-		ResponseFields:    responseFields,
-		OutputFields:      outputFields,
-		ParseJSONResponse: false,
-		ResponseFormat:    responseFormat,
-		ResponseSchema:    responseSchema,
-		Thinking:          thinking,
-		StrictOutput:      strictOutput,
-		Notes:             "Fallback configuration generated because the LLM request failed.",
+		SystemPrompt:                   "You are a helpful data-processing assistant.",
+		PrePrompt:                      prePrompt,
+		InputTemplate:                  inputTemplate,
+		PostPrompt:                     postPrompt,
+		JobName:                        jobName,
+		OutputType:                     outputType,
+		ResponseField:                  responseField,
+		ResponseFields:                 responseFields,
+		OutputFields:                   outputFields,
+		IncludeInputInOutput:           includeInputInOutput,
+		KeyColumn:                      keyColumn,
+		ParseJSONResponse:              false,
+		StoreRawResponse:               storeRawResponse,
+		ResponseFormat:                 responseFormat,
+		ResponseSchema:                 responseSchema,
+		DebugField:                     debugField,
+		DebugFieldHint:                 debugFieldHint,
+		Thinking:                       thinking,
+		IncludeThinkingInResponseField: includeThinkingInResponseField,
+		StrictOutput:                   strictOutput,
+		Notes:                          "Fallback configuration generated because the LLM request failed.",
 	}
 }
 
