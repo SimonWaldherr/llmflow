@@ -2,6 +2,8 @@ package web
 
 import "testing"
 
+func boolPtr(v bool) *bool { return &v }
+
 func TestBuildSuggestFallback_ShippingKEPPalette(t *testing.T) {
 	task := "Bitte entscheide für BK_Product ob KEP-Paket oder Palette-Spedition nötig ist."
 	got := buildSuggestFallback(task, "")
@@ -48,8 +50,8 @@ func TestNormalizeSuggestResponse_ShippingTask(t *testing.T) {
 	if got.ResponseSchema["versandart"] != "KEP|Palette" {
 		t.Fatalf("response_schema.versandart=%q, want KEP|Palette", got.ResponseSchema["versandart"])
 	}
-	if got.OutputFields != "BK_Product, versandart" {
-		t.Fatalf("output_fields=%q, want BK_Product, versandart", got.OutputFields)
+	if got.OutputFields != "BK_Product, versandart, debug_reason" {
+		t.Fatalf("output_fields=%q, want BK_Product, versandart, debug_reason", got.OutputFields)
 	}
 	if got.IncludeInputInOutput != "key" || got.KeyColumn != "BK_Product" {
 		t.Fatalf("unexpected key output settings: mode=%q key=%q", got.IncludeInputInOutput, got.KeyColumn)
@@ -93,5 +95,48 @@ func TestBuildSuggestFallback_DetectsOutputTypeFromTask(t *testing.T) {
 	}
 	if got.PrePrompt == "Aufgabe: Bitte Ausgabe als CSV mit BK_Product" {
 		t.Fatalf("expected format instruction to be removed from pre_prompt, got %q", got.PrePrompt)
+	}
+}
+
+func TestNormalizeSuggestResponse_RemovesRawAndAliasFromOutputFields(t *testing.T) {
+	sr := suggestResponse{
+		ResponseFormat: "json",
+		ResponseField:  "llm_response",
+		ResponseSchema: map[string]string{
+			"debug_reason":    "one sentence",
+			"shipping_method": "KEP|Palette",
+			"versandart":      "KEP|Palette",
+		},
+		OutputFields:     "debug_reason, llm_response, shipping_method, versandart",
+		StoreRawResponse: boolPtr(false),
+	}
+	got := normalizeSuggestResponse("Classify shipping method", sr)
+
+	if _, ok := got.ResponseSchema["shipping_method"]; ok {
+		t.Fatalf("expected shipping_method alias to be removed from response_schema: %#v", got.ResponseSchema)
+	}
+	if got.OutputFields != "debug_reason, versandart" {
+		t.Fatalf("output_fields=%q, want debug_reason, versandart", got.OutputFields)
+	}
+}
+
+func TestNormalizeSuggestResponse_ShippingPresetProducesLeanColumns(t *testing.T) {
+	sr := suggestResponse{
+		ResponseFormat: "json",
+		ResponseField:  "llm_response",
+		ResponseSchema: map[string]string{
+			"debug_reason":    "one sentence",
+			"shipping_method": "KEP|Palette",
+		},
+		OutputFields:     "debug_reason, llm_response, shipping_method, versandart",
+		StoreRawResponse: boolPtr(true),
+	}
+	got := normalizeSuggestResponse("Entscheide für BK_Product zwischen KEP Paket und Palette Spedition", sr)
+
+	if got.StoreRawResponse == nil || *got.StoreRawResponse {
+		t.Fatalf("expected store_raw_response=false, got %v", got.StoreRawResponse)
+	}
+	if got.OutputFields != "BK_Product, versandart, debug_reason" {
+		t.Fatalf("output_fields=%q, want BK_Product, versandart, debug_reason", got.OutputFields)
 	}
 }

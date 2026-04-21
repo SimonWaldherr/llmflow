@@ -3322,8 +3322,7 @@ function applyProviderDefaults(provider) {
       document.getElementById('q-model-hint').textContent = `Loaded ${det.models.length} local model(s) from ${providerLabel(provider)}.`;
     } else {
       setModelSuggestions(PROVIDER_MODELS[provider] || []);
-      document.getElementById('q-model-hint').textContent = 'Loading local models…';
-      void loadModels();
+      document.getElementById('q-model-hint').textContent = 'Using cached/default local models. Click "Load" to refresh.';
     }
     return;
   }
@@ -3708,7 +3707,8 @@ document.getElementById('ui-mode-toggle').addEventListener('click', () => {
   applyUIMode(toExpert ? 'expert' : 'simple');
 });
 applyUIMode('simple');
-detectLocalProviders({ autoApply: true });
+// Do not auto-refresh provider/model lists on every page load.
+// Refresh is user-triggered via the explicit buttons.
 </script>
 </body>
 </html>

@@ -220,6 +220,40 @@ func TestHandleModelsOpenAICompatible(t *testing.T) {
 	}
 }
 
+func TestHandleModelsLMStudioWithoutAPIKey(t *testing.T) {
+	providerServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/models" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "" {
+			t.Fatalf("unexpected auth header for local provider: %q", got)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"data": []map[string]string{
+				{"id": "local-model-a"},
+			},
+		})
+	}))
+	t.Cleanup(providerServer.Close)
+
+	reqBody := map[string]string{
+		"provider": config.ProviderLMStudio,
+		"base_url": providerServer.URL,
+	}
+	body, err := json.Marshal(reqBody)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/models", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	(&Server{}).handleModels(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+}
+
 func TestFilesAPI(t *testing.T) {
 	root := t.TempDir()
 	inputDir := filepath.Join(root, "input")

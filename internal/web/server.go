@@ -420,7 +420,11 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 	if apiKey == "" && apiCfg.APIKeyEnv != "" {
 		apiKey = strings.TrimSpace(os.Getenv(apiCfg.APIKeyEnv))
 	}
-	if apiKey == "" {
+	nokeyProviders := map[string]bool{
+		config.ProviderOllama:   true,
+		config.ProviderLMStudio: true,
+	}
+	if apiKey == "" && !nokeyProviders[strings.ToLower(apiCfg.Provider)] {
 		if apiCfg.APIKeyEnv != "" {
 			writeJSON(w, http.StatusBadRequest, apiResponse{Error: fmt.Sprintf("API key env var %q is not set; set it on the server before loading models", apiCfg.APIKeyEnv)})
 		} else {
@@ -1312,46 +1316,164 @@ func normalizeSuggestResponse(task string, sr suggestResponse) suggestResponse {
 		sr.OutputType = ""
 	}
 
+	// Normalize common field aliases so output columns stay clean.
+	sr = normalizeSuggestedFieldAliases(sr)
+
+	// For structured outputs, prefer deterministic columns and hide raw JSON
+	// unless explicitly requested by the suggestion.
+	formatLow := strings.ToLower(strings.TrimSpace(sr.ResponseFormat))
+	isStructured := formatLow == "json" || formatLow == "csv" || formatLow == "xml"
+	if isStructured {
+		if sr.StrictOutput == nil {
+			v := true
+			sr.StrictOutput = &v
+		}
+		if len(sr.ResponseSchema) > 0 {
+			v := false
+			sr.StoreRawResponse = &v
+		} else if sr.StoreRawResponse == nil {
+			v := false
+			sr.StoreRawResponse = &v
+		}
+		if sr.IncludeThinkingInResponseField == nil {
+			v := false
+			sr.IncludeThinkingInResponseField = &v
+		}
+	}
+
 	taskLow := strings.ToLower(task)
 	isShippingKEP := (strings.Contains(taskLow, "kep") || strings.Contains(taskLow, "paket")) &&
 		(strings.Contains(taskLow, "palette") || strings.Contains(taskLow, "spedition"))
-	if !isShippingKEP {
-		return sr
-	}
-
-	// KEP-vs-Palette is a classification task; keep LLM output in strict JSON.
-	sr.ResponseFormat = "json"
-	if sr.ResponseSchema == nil {
-		sr.ResponseSchema = map[string]string{}
-	}
-	if _, ok := sr.ResponseSchema["versandart"]; !ok {
+	if isShippingKEP {
+		// KEP-vs-Palette is a classification task; keep LLM output in strict JSON.
+		sr.ResponseFormat = "json"
+		if sr.ResponseSchema == nil {
+			sr.ResponseSchema = map[string]string{}
+		}
 		sr.ResponseSchema["versandart"] = "KEP|Palette"
+		delete(sr.ResponseSchema, "shipping_method")
+
+		// Ensure key + predicted label are present in final output.
+		if strings.Contains(taskLow, "bk_product") || strings.Contains(taskLow, "schl") || strings.Contains(taskLow, "key") {
+			sr.IncludeInputInOutput = "key"
+			sr.KeyColumn = "BK_Product"
+		}
+		fields := []string{}
+		if strings.EqualFold(strings.TrimSpace(sr.IncludeInputInOutput), "key") && strings.TrimSpace(sr.KeyColumn) != "" {
+			fields = append(fields, sr.KeyColumn)
+		}
+		fields = append(fields, "versandart")
+		if _, ok := sr.ResponseSchema["debug_reason"]; ok {
+			fields = append(fields, "debug_reason")
+		}
+		sr.OutputFields = strings.Join(uniqueCSVFields(fields), ", ")
+
+		vFalse := false
+		sr.StoreRawResponse = &vFalse
+		sr.IncludeThinkingInResponseField = &vFalse
 	}
 
-	// Ensure key + predicted label are present in final output.
-	outLow := strings.ToLower(sr.OutputFields)
-	if strings.TrimSpace(sr.OutputFields) == "" || strings.TrimSpace(outLow) == "bk_product" {
-		sr.OutputFields = "BK_Product, versandart"
-	}
-	if strings.Contains(taskLow, "bk_product") || strings.Contains(taskLow, "schl") || strings.Contains(taskLow, "key") {
-		sr.IncludeInputInOutput = "key"
-		sr.KeyColumn = "BK_Product"
+	// Keep OutputFields consistent with schema aliases and raw-response setting.
+	if len(sr.ResponseSchema) > 0 {
+		outputFields := parseCSVFields(sr.OutputFields)
+		if len(outputFields) == 0 {
+			outputFields = deriveOutputFieldsFromSuggest(sr)
+		}
+		outputFields = filterOutputFieldsByRawResponse(sr, outputFields)
+		if len(outputFields) > 0 {
+			sr.OutputFields = strings.Join(uniqueCSVFields(outputFields), ", ")
+		}
 	}
 
-	// Deterministic, clean output by default for structured classification.
-	if sr.StrictOutput == nil {
-		v := true
-		sr.StrictOutput = &v
-	}
-	if sr.StoreRawResponse == nil {
-		v := false
-		sr.StoreRawResponse = &v
-	}
-	if sr.IncludeThinkingInResponseField == nil {
-		v := false
-		sr.IncludeThinkingInResponseField = &v
-	}
 	return sr
+}
+
+func normalizeSuggestedFieldAliases(sr suggestResponse) suggestResponse {
+	if len(sr.ResponseSchema) > 0 {
+		if hint, ok := sr.ResponseSchema["shipping_method"]; ok {
+			if _, exists := sr.ResponseSchema["versandart"]; !exists {
+				sr.ResponseSchema["versandart"] = hint
+			}
+			delete(sr.ResponseSchema, "shipping_method")
+		}
+	}
+	sr.ResponseFields = strings.Join(uniqueCSVFields(parseCSVFields(sr.ResponseFields)), ", ")
+	sr.OutputFields = strings.Join(uniqueCSVFields(parseCSVFields(sr.OutputFields)), ", ")
+	return sr
+}
+
+func deriveOutputFieldsFromSuggest(sr suggestResponse) []string {
+	fields := []string{}
+	if strings.EqualFold(strings.TrimSpace(sr.IncludeInputInOutput), "key") && strings.TrimSpace(sr.KeyColumn) != "" {
+		fields = append(fields, strings.TrimSpace(sr.KeyColumn))
+	}
+	keys := make([]string, 0, len(sr.ResponseSchema))
+	for k := range sr.ResponseSchema {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	fields = append(fields, keys...)
+
+	if sr.StoreRawResponse != nil && *sr.StoreRawResponse {
+		resp := strings.TrimSpace(sr.ResponseField)
+		if resp != "" {
+			fields = append(fields, resp)
+		}
+	}
+	return fields
+}
+
+func parseCSVFields(raw string) []string {
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		v := strings.TrimSpace(p)
+		if v == "" {
+			continue
+		}
+		// Normalize known aliases.
+		if strings.EqualFold(v, "shipping_method") {
+			v = "versandart"
+		}
+		out = append(out, v)
+	}
+	return out
+}
+
+func uniqueCSVFields(fields []string) []string {
+	seen := make(map[string]struct{}, len(fields))
+	out := make([]string, 0, len(fields))
+	for _, f := range fields {
+		v := strings.TrimSpace(f)
+		if v == "" {
+			continue
+		}
+		key := strings.ToLower(v)
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, v)
+	}
+	return out
+}
+
+func filterOutputFieldsByRawResponse(sr suggestResponse, fields []string) []string {
+	if sr.StoreRawResponse == nil || *sr.StoreRawResponse {
+		return fields
+	}
+	resp := strings.TrimSpace(sr.ResponseField)
+	if resp == "" {
+		resp = "llm_response"
+	}
+	out := make([]string, 0, len(fields))
+	for _, f := range fields {
+		if strings.EqualFold(strings.TrimSpace(f), resp) {
+			continue
+		}
+		out = append(out, f)
+	}
+	return out
 }
 
 func detectFormatHints(text string) (responseFormat, outputType string) {
