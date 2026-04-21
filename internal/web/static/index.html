@@ -910,6 +910,17 @@ textarea {
   font-weight: 650;
 }
 
+.preset-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.preset-row select {
+  min-width: 320px;
+}
+
 .tools-section summary::before,
 .adv-processing summary::before {
   content: "+";
@@ -1313,6 +1324,22 @@ textarea {
   <details class="adv-processing ui-expert-only">
     <summary>Advanced Settings</summary>
     <div class="adv-grid" style="margin-top:10px">
+      <div class="form-group quick-full">
+        <label>Advanced Presets</label>
+        <div class="preset-row">
+          <select id="q-advanced-preset">
+            <option value="">— choose preset —</option>
+            <option value="full_csv">Full Output as CSV</option>
+            <option value="full_json">Full Output as JSON</option>
+            <option value="key_ai_csv">Only Key + AI-generated Columns as CSV</option>
+            <option value="key_ai_json">Only Key + AI-generated Columns as JSON</option>
+            <option value="key_struct_csv">Only Key + Structured AI Columns as CSV (hide raw)</option>
+            <option value="key_struct_json">Only Key + Structured AI Columns as JSON (hide raw)</option>
+          </select>
+          <button type="button" class="btn btn-secondary btn-sm" id="apply-advanced-preset">Apply Preset</button>
+        </div>
+        <div class="hint" id="advanced-preset-status"></div>
+      </div>
       <div class="form-group">
         <label>Rate Limit (RPM)</label>
         <input id="q-rpm" type="number" value="60" min="0">
@@ -2575,6 +2602,106 @@ function onIncludeInputChange() {
   updateOutputStructureSummary();
 }
 
+function selectPreferredKeyColumn() {
+  const keySel = document.getElementById('q-key-column');
+  if (!keySel || keySel.options.length === 0) return '';
+
+  const preferred = ['BK_Product', 'product_id', 'productid', 'sku', 'article', 'id'];
+  const options = [...keySel.options].map(o => ({ value: o.value, low: String(o.value || '').toLowerCase() }));
+  for (const pref of preferred) {
+    const lowPref = pref.toLowerCase();
+    const found = options.find(o => o.low === lowPref);
+    if (found) {
+      keySel.value = found.value;
+      return found.value;
+    }
+  }
+
+  if (keySel.value) return keySel.value;
+  keySel.value = keySel.options[0].value;
+  return keySel.value;
+}
+
+function applyAdvancedPreset() {
+  const preset = (document.getElementById('q-advanced-preset').value || '').trim();
+  if (!preset) return;
+
+  const outputTypeEl = document.getElementById('q-output-type');
+  const includeInputEl = document.getElementById('q-include-input');
+  const storeRawEl = document.getElementById('q-store-raw-response');
+  const outputFieldsEl = document.getElementById('q-output-fields');
+  const statusEl = document.getElementById('advanced-preset-status');
+  const responseFormat = (document.getElementById('q-response-format').value || '').trim();
+  const hasSchema = parseSchemaFields().length > 0;
+  const hasResponseFields = parseCommaFields('q-response-fields').length > 0;
+
+  let status = '';
+  switch (preset) {
+    case 'full_csv':
+      outputTypeEl.value = 'csv';
+      includeInputEl.value = 'all';
+      storeRawEl.value = 'true';
+      outputFieldsEl.value = '';
+      status = 'Applied: full output as CSV.';
+      break;
+    case 'full_json':
+      outputTypeEl.value = 'jsonl';
+      includeInputEl.value = 'all';
+      storeRawEl.value = 'true';
+      outputFieldsEl.value = '';
+      status = 'Applied: full output as JSON (JSONL).';
+      break;
+    case 'key_ai_csv':
+      outputTypeEl.value = 'csv';
+      includeInputEl.value = 'key';
+      onIncludeInputChange();
+      selectPreferredKeyColumn();
+      storeRawEl.value = 'true';
+      outputFieldsEl.value = '';
+      status = 'Applied: key + AI columns as CSV.';
+      break;
+    case 'key_ai_json':
+      outputTypeEl.value = 'jsonl';
+      includeInputEl.value = 'key';
+      onIncludeInputChange();
+      selectPreferredKeyColumn();
+      storeRawEl.value = 'true';
+      outputFieldsEl.value = '';
+      status = 'Applied: key + AI columns as JSON.';
+      break;
+    case 'key_struct_csv':
+      outputTypeEl.value = 'csv';
+      includeInputEl.value = 'key';
+      onIncludeInputChange();
+      selectPreferredKeyColumn();
+      storeRawEl.value = 'false';
+      outputFieldsEl.value = '';
+      status = 'Applied: key + structured AI columns as CSV (raw hidden).';
+      if (!responseFormat && !hasSchema && !hasResponseFields) {
+        status += ' Note: add schema/response fields to avoid key-only output.';
+      }
+      break;
+    case 'key_struct_json':
+      outputTypeEl.value = 'jsonl';
+      includeInputEl.value = 'key';
+      onIncludeInputChange();
+      selectPreferredKeyColumn();
+      storeRawEl.value = 'false';
+      outputFieldsEl.value = '';
+      status = 'Applied: key + structured AI columns as JSON (raw hidden).';
+      if (!responseFormat && !hasSchema && !hasResponseFields) {
+        status += ' Note: add schema/response fields to avoid key-only output.';
+      }
+      break;
+    default:
+      return;
+  }
+
+  onIncludeInputChange();
+  updateOutputStructureSummary();
+  if (statusEl) statusEl.textContent = status;
+}
+
 // ── File Preview ──────────────────────────────────────────────────
 /**
  * Opens the file preview modal and loads the first rows of a file.
@@ -3460,6 +3587,11 @@ document.getElementById('q-apikey').addEventListener('input', () => {
   syncAPIKeyFieldMode();
 });
 document.getElementById('q-timeout').addEventListener('input', saveProviderPrefs);
+document.getElementById('apply-advanced-preset').addEventListener('click', applyAdvancedPreset);
+document.getElementById('q-advanced-preset').addEventListener('change', () => {
+  const statusEl = document.getElementById('advanced-preset-status');
+  if (statusEl) statusEl.textContent = '';
+});
 
 document.getElementById('t-sql-query').addEventListener('change', e =>
   document.getElementById('t-sql-extra').classList.toggle('show', e.target.checked)
