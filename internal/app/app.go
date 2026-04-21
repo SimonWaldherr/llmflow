@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"sort"
 	"strings"
 	"sync"
@@ -354,16 +355,25 @@ func (a *App) processRecordsWithSink(
 				// Always preserve the raw LLM response so reasoning text is never lost.
 				outRec[a.cfg.Processing.ResponseField] = responseText
 				if a.cfg.Processing.ParseJSONResponse || structuredResponseFormat(a.cfg.Processing.ResponseFormat) {
-					// Extract the last JSON object from the response and spread its keys
-					// into the output record. This supports the "thinking + structured output"
-					// pattern where the LLM reasons first, then appends a JSON object.
-					if parsed, ok := extractLastJSON(responseText); ok {
-						for k, v := range parsed {
-							if _, exists := outRec[k]; exists && k != a.cfg.Processing.ResponseField {
-								a.logger.Warn("parse_json_response: JSON key conflicts with existing field, overwriting", "key", k, "index", j.idx)
+					parsed, parseErr := parseJSONResponseFields(responseText, a.cfg.Processing)
+					if parseErr != nil {
+						if !a.cfg.Processing.ContinueOnError {
+							mu.Lock()
+							if firstErr == nil {
+								firstErr = fmt.Errorf("invalid structured response for record %d: %w", j.idx, parseErr)
+								cancel()
 							}
-							outRec[k] = v
+							mu.Unlock()
+							return
 						}
+						a.logger.Error("invalid structured response", "index", j.idx, "error", parseErr)
+						continue
+					}
+					for k, v := range parsed {
+						if _, exists := outRec[k]; exists && k != a.cfg.Processing.ResponseField {
+							a.logger.Warn("parse_json_response: JSON key conflicts with existing field, overwriting", "key", k, "index", j.idx)
+						}
+						outRec[k] = v
 					}
 				}
 				resultCh <- indexedResult{idx: j.idx, rec: applyOutputFields(outRec, a.cfg.Processing.OutputFields)}
@@ -445,6 +455,13 @@ func structuredResponseFormat(format string) bool {
 	return false
 }
 
+func strictOutputEnabled(cfg config.ProcessingConfig) bool {
+	if cfg.StrictOutput == nil {
+		return true
+	}
+	return *cfg.StrictOutput
+}
+
 // extractLastJSON finds and parses the last JSON object {...} in s.
 func extractLastJSON(s string) (map[string]any, bool) {
 	end := strings.LastIndex(s, "}")
@@ -461,6 +478,314 @@ func extractLastJSON(s string) (map[string]any, bool) {
 		}
 	}
 	return nil, false
+}
+
+// parseJSONResponseFields extracts structured fields from a model response.
+// In structured mode (response_format json/xml/csv), this is strict:
+//   - without thinking: response must be exactly one JSON object
+//   - with thinking: response must start with <thinking>...</thinking> and then
+//     exactly one JSON object
+//
+// When strict_output is false, parsing is lenient for compatibility:
+// the last JSON object is extracted from mixed text and schema validation is
+// skipped.
+func parseJSONResponseFields(responseText string, cfg config.ProcessingConfig) (map[string]any, error) {
+	if !cfg.ParseJSONResponse && !structuredResponseFormat(cfg.ResponseFormat) {
+		return nil, nil
+	}
+
+	if !strictOutputEnabled(cfg) {
+		parsed, ok := extractLastJSON(responseText)
+		if !ok {
+			return nil, nil
+		}
+		return parsed, nil
+	}
+
+	parsed, err := extractStrictJSON(responseText, cfg.Thinking)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := validateResponseSchema(parsed, cfg.ResponseSchema); err != nil {
+		return nil, err
+	}
+	return parsed, nil
+}
+
+func extractStrictJSON(responseText string, thinking bool) (map[string]any, error) {
+	trimmed := strings.TrimSpace(responseText)
+	if trimmed == "" {
+		return nil, fmt.Errorf("response is empty")
+	}
+	if !thinking {
+		return parseStrictJSONObject(trimmed)
+	}
+
+	const openTag = "<thinking>"
+	const closeTag = "</thinking>"
+
+	if !strings.HasPrefix(trimmed, openTag) {
+		return nil, fmt.Errorf("thinking mode requires response to start with %s", openTag)
+	}
+	closeIdx := strings.Index(trimmed, closeTag)
+	if closeIdx < 0 {
+		return nil, fmt.Errorf("thinking mode requires a closing %s tag", closeTag)
+	}
+
+	after := strings.TrimSpace(trimmed[closeIdx+len(closeTag):])
+	if after == "" {
+		return nil, fmt.Errorf("missing final JSON object after %s", closeTag)
+	}
+	return parseStrictJSONObject(after)
+}
+
+func parseStrictJSONObject(s string) (map[string]any, error) {
+	dec := json.NewDecoder(strings.NewReader(s))
+	dec.UseNumber()
+	var out map[string]any
+	if err := dec.Decode(&out); err != nil {
+		return nil, fmt.Errorf("invalid JSON object: %w", err)
+	}
+	if out == nil {
+		out = map[string]any{}
+	}
+	var trailing any
+	if err := dec.Decode(&trailing); err != io.EOF {
+		return nil, fmt.Errorf("response must contain only one JSON object")
+	}
+	return out, nil
+}
+
+func parseStrictJSONArray(s string) ([]json.RawMessage, error) {
+	dec := json.NewDecoder(strings.NewReader(s))
+	var out []json.RawMessage
+	if err := dec.Decode(&out); err != nil {
+		return nil, fmt.Errorf("invalid JSON array: %w", err)
+	}
+	var trailing any
+	if err := dec.Decode(&trailing); err != io.EOF {
+		return nil, fmt.Errorf("response must contain only one JSON array")
+	}
+	return out, nil
+}
+
+func validateResponseSchema(parsed map[string]any, schema map[string]string) error {
+	if len(schema) == 0 {
+		return nil
+	}
+
+	var missing []string
+	for k := range schema {
+		if _, ok := parsed[k]; !ok {
+			missing = append(missing, k)
+		}
+	}
+	var extra []string
+	for k := range parsed {
+		if _, ok := schema[k]; !ok {
+			extra = append(extra, k)
+		}
+	}
+	if len(missing) > 0 || len(extra) > 0 {
+		sort.Strings(missing)
+		sort.Strings(extra)
+		parts := make([]string, 0, 2)
+		if len(missing) > 0 {
+			parts = append(parts, "missing: "+strings.Join(missing, ", "))
+		}
+		if len(extra) > 0 {
+			parts = append(parts, "extra: "+strings.Join(extra, ", "))
+		}
+		return fmt.Errorf("response JSON keys do not match response_schema (%s)", strings.Join(parts, "; "))
+	}
+
+	keys := make([]string, 0, len(schema))
+	for k := range schema {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		if err := validateSchemaValue(k, parsed[k], schema[k]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateSchemaValue(field string, value any, hint string) error {
+	kind, enumValues := inferSchemaConstraint(hint)
+	switch kind {
+	case "enum":
+		s, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("field %q must be a string enum (%s)", field, strings.Join(enumValues, "|"))
+		}
+		for _, allowed := range enumValues {
+			if s == allowed {
+				return nil
+			}
+		}
+		return fmt.Errorf("field %q must be one of %s", field, strings.Join(enumValues, "|"))
+	case "bool":
+		if _, ok := value.(bool); !ok {
+			return fmt.Errorf("field %q must be boolean", field)
+		}
+	case "int":
+		if !isIntegerValue(value) {
+			return fmt.Errorf("field %q must be integer", field)
+		}
+	case "number":
+		if !isNumberValue(value) {
+			return fmt.Errorf("field %q must be number", field)
+		}
+	case "string":
+		if _, ok := value.(string); !ok {
+			return fmt.Errorf("field %q must be string", field)
+		}
+	case "array":
+		if _, ok := value.([]any); !ok {
+			return fmt.Errorf("field %q must be array", field)
+		}
+	case "object":
+		if _, ok := value.(map[string]any); !ok {
+			return fmt.Errorf("field %q must be object", field)
+		}
+	}
+	return nil
+}
+
+func inferSchemaConstraint(hint string) (kind string, enumValues []string) {
+	trimmed := strings.TrimSpace(hint)
+	if trimmed == "" {
+		return "any", nil
+	}
+	if values, ok := parseEnumValues(trimmed); ok {
+		return "enum", values
+	}
+
+	lower := strings.ToLower(trimmed)
+	tokens := splitHintTokens(lower)
+
+	containsToken := func(target string) bool {
+		for _, t := range tokens {
+			if t == target {
+				return true
+			}
+		}
+		return false
+	}
+
+	switch {
+	case containsToken("bool"), containsToken("boolean"):
+		return "bool", nil
+	case containsToken("int"), containsToken("integer"), containsToken("int32"), containsToken("int64"):
+		return "int", nil
+	case containsToken("number"), containsToken("float"), containsToken("double"), containsToken("decimal"):
+		return "number", nil
+	case containsToken("string"), containsToken("str"), containsToken("text"):
+		return "string", nil
+	case containsToken("array"), containsToken("list"), containsToken("slice"):
+		return "array", nil
+	case containsToken("object"), containsToken("map"), containsToken("json"):
+		return "object", nil
+	default:
+		return "any", nil
+	}
+}
+
+func splitHintTokens(s string) []string {
+	return strings.FieldsFunc(s, func(r rune) bool {
+		return (r < 'a' || r > 'z') && (r < '0' || r > '9')
+	})
+}
+
+func parseEnumValues(hint string) ([]string, bool) {
+	if strings.Contains(hint, "|") {
+		values := splitAndNormalize(hint, "|")
+		if len(values) >= 2 {
+			return values, true
+		}
+	}
+
+	lower := strings.ToLower(hint)
+	idx := strings.Index(lower, "one of")
+	if idx < 0 {
+		return nil, false
+	}
+	rest := strings.TrimSpace(hint[idx+len("one of"):])
+	rest = strings.TrimLeft(rest, ": ")
+	if rest == "" {
+		return nil, false
+	}
+	switch {
+	case strings.Contains(rest, ","):
+		if values := splitAndNormalize(rest, ","); len(values) >= 2 {
+			return values, true
+		}
+	case strings.Contains(rest, "|"):
+		if values := splitAndNormalize(rest, "|"); len(values) >= 2 {
+			return values, true
+		}
+	case strings.Contains(rest, "/"):
+		if values := splitAndNormalize(rest, "/"); len(values) >= 2 {
+			return values, true
+		}
+	}
+	return nil, false
+}
+
+func splitAndNormalize(raw string, sep string) []string {
+	parts := strings.Split(raw, sep)
+	seen := map[string]struct{}{}
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		v := strings.TrimSpace(strings.Trim(p, `"'`))
+		if v == "" {
+			continue
+		}
+		if _, exists := seen[v]; exists {
+			continue
+		}
+		seen[v] = struct{}{}
+		out = append(out, v)
+	}
+	return out
+}
+
+func isIntegerValue(v any) bool {
+	switch n := v.(type) {
+	case int, int8, int16, int32, int64:
+		return true
+	case uint, uint8, uint16, uint32, uint64:
+		return true
+	case float64:
+		return math.Trunc(n) == n
+	case json.Number:
+		if _, err := n.Int64(); err == nil {
+			return true
+		}
+		f, err := n.Float64()
+		return err == nil && math.Trunc(f) == f
+	default:
+		return false
+	}
+}
+
+func isNumberValue(v any) bool {
+	switch n := v.(type) {
+	case int, int8, int16, int32, int64:
+		return true
+	case uint, uint8, uint16, uint32, uint64:
+		return true
+	case float64:
+		return !math.IsNaN(n) && !math.IsInf(n, 0)
+	case json.Number:
+		_, err := n.Float64()
+		return err == nil
+	default:
+		return false
+	}
 }
 
 // applyOutputFields restricts rec to only the fields listed in fields.
@@ -751,11 +1076,36 @@ func (a *App) processBatch(
 	}
 
 	var userPrompt strings.Builder
-	userPrompt.WriteString(fmt.Sprintf(
-		"Process the following %d records. "+
-			"Return ONLY a valid JSON array containing exactly %d string responses, one per record, in the same order.\n\n",
-		len(recs), len(recs),
-	))
+	needsParsedJSON := a.cfg.Processing.ParseJSONResponse || structuredResponseFormat(a.cfg.Processing.ResponseFormat)
+	strictOutput := strictOutputEnabled(a.cfg.Processing)
+	if needsParsedJSON {
+		userPrompt.WriteString(fmt.Sprintf(
+			"Process the following %d records. "+
+				"Return ONLY a valid JSON array containing exactly %d JSON objects, one per record, in the same order.\n",
+			len(recs), len(recs),
+		))
+		if len(a.cfg.Processing.ResponseSchema) > 0 {
+			userPrompt.WriteString("Each object must contain exactly these fields:\n")
+			keys := make([]string, 0, len(a.cfg.Processing.ResponseSchema))
+			for k := range a.cfg.Processing.ResponseSchema {
+				keys = append(keys, k)
+			}
+			sort.Strings(keys)
+			for _, k := range keys {
+				userPrompt.WriteString(fmt.Sprintf("- %s: %s\n", k, a.cfg.Processing.ResponseSchema[k]))
+			}
+		}
+		if a.cfg.Processing.Thinking {
+			userPrompt.WriteString("Do not include reasoning text. Return only the JSON array.\n")
+		}
+		userPrompt.WriteString("\n")
+	} else {
+		userPrompt.WriteString(fmt.Sprintf(
+			"Process the following %d records. "+
+				"Return ONLY a valid JSON array containing exactly %d string responses, one per record, in the same order.\n\n",
+			len(recs), len(recs),
+		))
+	}
 	userPrompt.Write(recsJSON)
 	if post := pb.PostPrompt(); post != "" {
 		userPrompt.WriteString("\n\n")
@@ -770,32 +1120,44 @@ func (a *App) processBatch(
 
 	// Parse JSON array response.
 	trimmed := strings.TrimSpace(responseText)
-	if idx := strings.Index(trimmed, "["); idx >= 0 {
-		trimmed = trimmed[idx:]
-	}
-	if idx := strings.LastIndex(trimmed, "]"); idx >= 0 {
-		trimmed = trimmed[:idx+1]
+	var responses []json.RawMessage
+	if needsParsedJSON && strictOutput {
+		responses, err = parseStrictJSONArray(trimmed)
+		if err != nil {
+			return nil, fmt.Errorf("batch response must be exactly one JSON array: %w", err)
+		}
+		if len(responses) != len(recs) {
+			return nil, fmt.Errorf("batch response length mismatch: expected %d objects, got %d", len(recs), len(responses))
+		}
+	} else {
+		if idx := strings.Index(trimmed, "["); idx >= 0 {
+			trimmed = trimmed[idx:]
+		}
+		if idx := strings.LastIndex(trimmed, "]"); idx >= 0 {
+			trimmed = trimmed[:idx+1]
+		}
 	}
 
-	var responses []json.RawMessage
-	if err := json.Unmarshal([]byte(trimmed), &responses); err != nil {
-		a.logger.Warn("batch response is not a JSON array; assigning raw text to all records", "startIndex", startIdx, "error", err)
-		// Fallback: assign entire response to every record.
-		outRecs := make([]map[string]any, len(recs))
-		for i, rec := range recs {
-			o := map[string]any{}
-			if a.cfg.Processing.IncludeInputInOutput {
-				for k, v := range rec {
-					o[k] = v
+	if !needsParsedJSON || !strictOutput {
+		if parseErr := json.Unmarshal([]byte(trimmed), &responses); parseErr != nil {
+			a.logger.Warn("batch response is not a JSON array; assigning raw text to all records", "startIndex", startIdx, "error", parseErr)
+			// Fallback: assign entire response to every record.
+			outRecs := make([]map[string]any, len(recs))
+			for i, rec := range recs {
+				o := map[string]any{}
+				if a.cfg.Processing.IncludeInputInOutput {
+					for k, v := range rec {
+						o[k] = v
+					}
 				}
+				o[a.cfg.Processing.ResponseField] = responseText
+				outRecs[i] = o
 			}
-			o[a.cfg.Processing.ResponseField] = responseText
-			outRecs[i] = o
+			for i := range outRecs {
+				outRecs[i] = applyOutputFields(outRecs[i], a.cfg.Processing.OutputFields)
+			}
+			return outRecs, nil
 		}
-		for i := range outRecs {
-			outRecs[i] = applyOutputFields(outRecs[i], a.cfg.Processing.OutputFields)
-		}
-		return outRecs, nil
 	}
 
 	outRecs := make([]map[string]any, len(recs))
@@ -807,6 +1169,33 @@ func (a *App) processBatch(
 			}
 		}
 		if i < len(responses) {
+			if needsParsedJSON && strictOutput {
+				obj, parseErr := parseStrictJSONObject(string(responses[i]))
+				if parseErr != nil {
+					return nil, fmt.Errorf("batch response item %d is not a JSON object: %w", startIdx+i, parseErr)
+				}
+				if schemaErr := validateResponseSchema(obj, a.cfg.Processing.ResponseSchema); schemaErr != nil {
+					return nil, fmt.Errorf("batch response item %d does not match response_schema: %w", startIdx+i, schemaErr)
+				}
+				o[a.cfg.Processing.ResponseField] = string(responses[i])
+				for k, v := range obj {
+					o[k] = v
+				}
+				outRecs[i] = o
+				continue
+			}
+			if needsParsedJSON {
+				var obj map[string]any
+				if err := json.Unmarshal(responses[i], &obj); err == nil {
+					o[a.cfg.Processing.ResponseField] = string(responses[i])
+					for k, v := range obj {
+						o[k] = v
+					}
+					outRecs[i] = o
+					continue
+				}
+			}
+
 			// Try to unmarshal as string first, then as object.
 			var s string
 			if err := json.Unmarshal(responses[i], &s); err == nil {
@@ -946,16 +1335,25 @@ func (a *App) processJobs(
 				// Always preserve the raw LLM response so reasoning text is never lost.
 				outRec[a.cfg.Processing.ResponseField] = responseText
 				if a.cfg.Processing.ParseJSONResponse || structuredResponseFormat(a.cfg.Processing.ResponseFormat) {
-					// Extract the last JSON object from the response and spread its keys
-					// into the output record. Supports the "thinking + structured output"
-					// pattern where the LLM reasons first, then appends a JSON object.
-					if parsed, ok := extractLastJSON(responseText); ok {
-						for k, v := range parsed {
-							if _, exists := outRec[k]; exists && k != a.cfg.Processing.ResponseField {
-								a.logger.Warn("parse_json_response: JSON key conflicts with existing field, overwriting", "key", k, "index", j.idx)
+					parsed, parseErr := parseJSONResponseFields(responseText, a.cfg.Processing)
+					if parseErr != nil {
+						if !a.cfg.Processing.ContinueOnError {
+							mu.Lock()
+							if firstErr == nil {
+								firstErr = fmt.Errorf("invalid structured response for record %d: %w", j.idx, parseErr)
+								cancel()
 							}
-							outRec[k] = v
+							mu.Unlock()
+							return
 						}
+						a.logger.Error("invalid structured response", "index", j.idx, "error", parseErr)
+						continue
+					}
+					for k, v := range parsed {
+						if _, exists := outRec[k]; exists && k != a.cfg.Processing.ResponseField {
+							a.logger.Warn("parse_json_response: JSON key conflicts with existing field, overwriting", "key", k, "index", j.idx)
+						}
+						outRec[k] = v
 					}
 				}
 				resultCh <- indexedResult{idx: j.idx, rec: applyOutputFields(outRec, a.cfg.Processing.OutputFields)}

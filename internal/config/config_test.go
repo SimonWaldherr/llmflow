@@ -122,11 +122,43 @@ func TestApplyDefaults(t *testing.T) {
 	if c.Processing.ResponseField != "response" {
 		t.Fatal("expected default response field")
 	}
+	if c.Processing.StrictOutput == nil || !*c.Processing.StrictOutput {
+		t.Fatal("expected strict_output default to true")
+	}
 	if c.Input.CSV.Delimiter != "," {
 		t.Fatal("expected default input delimiter")
 	}
 	if c.Output.CSV.Delimiter != "," {
 		t.Fatal("expected default output delimiter")
+	}
+}
+
+func TestLoadYAML_StrictOutputFalse(t *testing.T) {
+	t.Setenv("TEST_KEY", "secret")
+	content := `
+api:
+  base_url: https://api.example.com/v1
+  api_key_env: TEST_KEY
+  model: gpt-test
+prompt:
+  input_template: "{{ .record }}"
+input:
+  type: csv
+output:
+  type: jsonl
+processing:
+  strict_output: false
+`
+	p := writeTempFile(t, "cfg-strict-false.yaml", content)
+	cfg, err := Load(p)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Processing.StrictOutput == nil {
+		t.Fatal("expected strict_output to be set")
+	}
+	if *cfg.Processing.StrictOutput {
+		t.Fatal("expected strict_output=false from config")
 	}
 }
 

@@ -1088,8 +1088,11 @@ type suggestResponse struct {
 	// Example: {"sentiment": "positive, neutral, or negative", "confidence": "0.0–1.0"}
 	ResponseSchema map[string]string `json:"response_schema,omitempty"`
 	// Thinking enables chain-of-thought reasoning before the structured output.
-	Thinking bool   `json:"thinking,omitempty"`
-	Notes    string `json:"notes,omitempty"`
+	Thinking bool `json:"thinking,omitempty"`
+	// StrictOutput enables strict output contract enforcement.
+	// Default is true in llmflow; set to false only for legacy compatibility.
+	StrictOutput *bool  `json:"strict_output,omitempty"`
+	Notes        string `json:"notes,omitempty"`
 }
 
 const suggestSystemPrompt = `You are an expert llmflow configuration assistant.
@@ -1122,6 +1125,8 @@ Structured output fields (preferred over hand-crafted post_prompt instructions):
   reason in a <thinking>…</thinking> block first, then emit the JSON object. The full
   response (including reasoning) is saved in response_field; parsed JSON keys are also
   spread into the record.
+- strict_output: default true. Keeps structured output strict and deterministic.
+  Only set false when backwards-compatibility with mixed text+JSON responses is required.
 
 Other fields:
 - response_fields: comma-separated list of JSON keys produced by the LLM (used only
@@ -1150,6 +1155,7 @@ Respond with ONLY a JSON object — no markdown, no explanation — following th
   "response_format": "json",
   "response_schema": {"field": "description", ...},
   "thinking": false,
+  "strict_output": true,
   "response_fields": "...",
   "output_fields": "...",
   "include_input_in_output": "key",
@@ -1264,6 +1270,7 @@ func buildSuggestFallback(task, currentConfig string) suggestResponse {
 	responseFormat := ""
 	responseSchema := map[string]string(nil)
 	thinking := false
+	var strictOutput *bool
 
 	switch {
 	case strings.Contains(taskLow, "summary") || strings.Contains(taskLow, "zusammenfassung"):
@@ -1278,6 +1285,8 @@ func buildSuggestFallback(task, currentConfig string) suggestResponse {
 		responseFields = "classification, reason"
 		outputFields = "classification, reason"
 		thinking = true
+		v := true
+		strictOutput = &v
 	case strings.Contains(taskLow, "spedition") || strings.Contains(taskLow, "freight") || strings.Contains(taskLow, "versand"):
 		responseField = "raw_response"
 		responseFormat = "json"
@@ -1289,6 +1298,8 @@ func buildSuggestFallback(task, currentConfig string) suggestResponse {
 		}
 		outputFields = "spedition_required, versandart, mhd_pflichtig, begruendung"
 		thinking = true
+		v := true
+		strictOutput = &v
 	case strings.Contains(taskLow, "mhd") || strings.Contains(taskLow, "mindesthaltbar") || strings.Contains(taskLow, "expir"):
 		responseField = "raw_response"
 		responseFormat = "json"
@@ -1298,6 +1309,8 @@ func buildSuggestFallback(task, currentConfig string) suggestResponse {
 		}
 		outputFields = "mhd_pflichtig, mhd_hinweis"
 		thinking = false
+		v := true
+		strictOutput = &v
 	}
 
 	prePrompt := strings.TrimSpace(task)
@@ -1325,6 +1338,7 @@ func buildSuggestFallback(task, currentConfig string) suggestResponse {
 		ResponseFormat:    responseFormat,
 		ResponseSchema:    responseSchema,
 		Thinking:          thinking,
+		StrictOutput:      strictOutput,
 		Notes:             "Fallback configuration generated because the LLM request failed.",
 	}
 }

@@ -81,3 +81,34 @@ func TestBuilderTemplateExecError(t *testing.T) {
 		t.Fatal("expected template execution error")
 	}
 }
+
+func TestFormatInstructions_StrictStructuredWithThinking(t *testing.T) {
+	got := FormatInstructions(config.ProcessingConfig{
+		ResponseFormat: "json",
+		Thinking:       true,
+		ResponseSchema: map[string]string{
+			"classification": "A|B|C",
+		},
+	})
+
+	if !strings.Contains(got, "<thinking>...</thinking>") {
+		t.Fatalf("expected thinking block instruction, got: %q", got)
+	}
+	if !strings.Contains(got, "one compact JSON object") {
+		t.Fatalf("expected strict single-object instruction, got: %q", got)
+	}
+	if !strings.Contains(got, "A|B|C") {
+		t.Fatalf("expected enum hint to be present, got: %q", got)
+	}
+}
+
+func TestFormatInstructions_ThinkingTextOnly(t *testing.T) {
+	got := FormatInstructions(config.ProcessingConfig{
+		ResponseFormat: "text",
+		Thinking:       true,
+	})
+
+	if !strings.Contains(got, "Do not add any text outside the <thinking> block and the final answer.") {
+		t.Fatalf("unexpected thinking text instruction: %q", got)
+	}
+}

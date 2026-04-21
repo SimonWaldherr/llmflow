@@ -1246,7 +1246,7 @@ textarea {
     <div class="structured-output-card">
       <div class="structured-output-header">
         <span class="structured-output-badge">Structured Output</span>
-        <span style="font-size:12px;color:var(--text-muted)">Use this when you want deterministic columns.</span>
+        <span style="font-size:12px;color:var(--text-muted)">Use this for deterministic columns and strict output contracts.</span>
       </div>
       <div class="quick-grid">
         <div class="form-group quick-full">
@@ -1269,7 +1269,7 @@ textarea {
             <input type="checkbox" id="q-thinking">
             <div>
               <div class="thinking-label">Enable Thinking Mode</div>
-              <div class="thinking-desc">Adds a reasoning block before the structured answer for harder decisions.</div>
+              <div class="thinking-desc">Adds a reasoning block before the structured answer for harder decisions (strict mode keeps the final JSON contract exact).</div>
             </div>
           </div>
         </div>
@@ -1316,6 +1316,13 @@ textarea {
         <select id="q-parse-json">
           <option value="false">Disabled</option>
           <option value="true">Enabled</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Strict Structured Output</label>
+        <select id="q-strict-output">
+          <option value="true">Enabled (default)</option>
+          <option value="false">Disabled (legacy compatibility)</option>
         </select>
       </div>
       <div class="form-group">
@@ -2003,6 +2010,8 @@ function updateOutputStructureSummary() {
   const responseFormat = (document.getElementById('q-response-format').value || '').trim();
   const responseField = (document.getElementById('q-response-field').value || 'llm_response').trim() || 'llm_response';
   const keyCol = (document.getElementById('q-key-column').value || '').trim();
+  const parseJSON = (document.getElementById('q-parse-json').value || 'false').trim() === 'true';
+  const strictOutput = (document.getElementById('q-strict-output').value || 'true').trim() === 'true';
 
   const outputFields = parseCommaFields('q-output-fields');
   const responseFields = parseCommaFields('q-response-fields');
@@ -2039,8 +2048,12 @@ function updateOutputStructureSummary() {
     ? fields.map(f => `<span class="chip">${escHtml(String(f))}</span>`).join('')
     : `<span class="chip">${escHtml(responseField)}</span>`;
 
+  const strictLabel = (responseFormat || parseJSON)
+    ? (strictOutput ? 'strict contract: enabled' : 'strict contract: disabled (legacy)')
+    : 'strict contract: n/a';
+
   el.innerHTML = `
-    <p>${escHtml(includeLabel)}; output mapping ${escHtml(sourceLabel)}.</p>
+    <p>${escHtml(includeLabel)}; output mapping ${escHtml(sourceLabel)}; ${escHtml(strictLabel)}.</p>
     <div class="chips">${chips}</div>
   `;
 }
@@ -2333,10 +2346,12 @@ function buildYAMLFromForm() {
   const responseFormat = (document.getElementById('q-response-format').value || '').trim();
   const responseSchemaRaw = (document.getElementById('q-response-schema').value || '').trim();
   const thinkingEnabled = document.getElementById('q-thinking').checked;
+  const strictOutput = (document.getElementById('q-strict-output').value || 'true').trim();
 
   if (responseFormat) {
     yaml += `\n  response_format: ${responseFormat}`;
     if (thinkingEnabled) yaml += `\n  thinking: true`;
+    if (strictOutput === 'false') yaml += `\n  strict_output: false`;
     if (responseSchemaRaw) {
       const schemaLines = responseSchemaRaw.split('\n')
         .map(l => l.trim()).filter(l => l && l.includes(':'));
@@ -2352,6 +2367,7 @@ function buildYAMLFromForm() {
     }
   } else if (parseJSON === 'true' || responseFieldsList.length > 0) {
     yaml += `\n  parse_json_response: true`;
+    if (strictOutput === 'false') yaml += `\n  strict_output: false`;
   }
 
   let outputFieldsRaw = (document.getElementById('q-output-fields').value || '').trim();
@@ -3236,6 +3252,7 @@ async function suggestConfig() {
     if (s.response_fields)  document.getElementById('q-response-fields').value = s.response_fields;
     if (s.output_fields)    document.getElementById('q-output-fields').value   = s.output_fields;
     if (s.parse_json_response !== undefined) document.getElementById('q-parse-json').value = s.parse_json_response ? 'true' : 'false';
+    if (s.strict_output !== undefined) document.getElementById('q-strict-output').value = s.strict_output ? 'true' : 'false';
     if (s.include_input_in_output) {
       document.getElementById('q-include-input').value = s.include_input_in_output;
       onIncludeInputChange();
@@ -3344,7 +3361,7 @@ function onResponseFormatChange() {
   const input = document.getElementById(id);
   if (input) input.addEventListener('input', updateOutputStructureSummary);
 });
-['q-include-input', 'q-key-column', 'q-response-format', 'q-parse-json'].forEach(id => {
+['q-include-input', 'q-key-column', 'q-response-format', 'q-parse-json', 'q-strict-output'].forEach(id => {
   const input = document.getElementById(id);
   if (input) input.addEventListener('change', updateOutputStructureSummary);
 });

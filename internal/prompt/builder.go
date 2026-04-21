@@ -57,7 +57,7 @@ func (b *Builder) BuildRaw(record map[string]any) (string, error) {
 //
 // Rules:
 //   - Returns "" when ResponseFormat is empty or "text" AND Thinking is false.
-//   - When Thinking is true, the LLM is asked to reason inside <thinking>…</thinking>
+//   - When Thinking is true, the LLM is asked to reason inside <thinking>...</thinking>
 //     before producing the final output.
 //   - When ResponseFormat is "json", "xml", or "csv", the LLM is asked to emit
 //     a compact JSON object (conversion to XML/CSV happens in the output layer).
@@ -74,22 +74,22 @@ func FormatInstructions(cfg config.ProcessingConfig) string {
 	var b strings.Builder
 
 	if cfg.Thinking {
-		b.WriteString("First, reason through the problem step by step inside a <thinking>…</thinking> block. " +
-			"After the closing </thinking> tag, ")
+		b.WriteString("First, write your reasoning only inside a <thinking>...</thinking> block. " +
+			"After the closing </thinking> tag, output exactly one final answer and nothing else. ")
 		if wantStructured {
-			b.WriteString("output ONLY")
+			b.WriteString("The final answer must be")
 		} else {
-			b.WriteString("write your final answer.")
+			b.WriteString("Do not add any text outside the <thinking> block and the final answer.")
 			return b.String()
 		}
 	} else {
-		b.WriteString("Output ONLY")
+		b.WriteString("Output exactly")
 	}
 
-	b.WriteString(" a compact JSON object")
+	b.WriteString(" one compact JSON object")
 
 	if len(cfg.ResponseSchema) > 0 {
-		b.WriteString(" with exactly these fields:\n")
+		b.WriteString(" with exactly these fields and types:\n")
 		keys := make([]string, 0, len(cfg.ResponseSchema))
 		for k := range cfg.ResponseSchema {
 			keys = append(keys, k)
@@ -98,9 +98,10 @@ func FormatInstructions(cfg config.ProcessingConfig) string {
 		for _, k := range keys {
 			b.WriteString(fmt.Sprintf("  - %s: %s\n", k, cfg.ResponseSchema[k]))
 		}
-		b.WriteString("Do not include any keys not listed above.")
+		b.WriteString("Do not include any keys not listed above. " +
+			"For enum hints like A|B|C, return exactly one listed value.")
 	} else {
-		b.WriteString(". Do not include any other text outside the JSON object.")
+		b.WriteString(". Do not include any text before or after the JSON object.")
 	}
 
 	return b.String()

@@ -171,10 +171,18 @@ type ProcessingConfig struct {
 	IncludeInputInOutput bool   `json:"include_input_in_output" yaml:"include_input_in_output"`
 	ResponseField        string `json:"response_field" yaml:"response_field"`
 	ParseJSONResponse    bool   `json:"parse_json_response" yaml:"parse_json_response"`
-	ContinueOnError      bool   `json:"continue_on_error" yaml:"continue_on_error"`
-	Workers              int    `json:"workers" yaml:"workers"`
-	MaxRetries           int    `json:"max_retries" yaml:"max_retries"`
-	DryRun               bool   `json:"dry_run" yaml:"dry_run"`
+	// StrictOutput controls whether structured output is enforced strictly.
+	// Default: true.
+	// When true, structured responses must contain only the expected JSON payload:
+	//   - per-record: exactly one JSON object (or <thinking>...</thinking> + JSON object)
+	//   - batch mode: exactly one JSON array with one JSON object per record
+	// When false, llmflow falls back to lenient parsing for compatibility and tries
+	// to extract JSON from mixed text responses.
+	StrictOutput    *bool `json:"strict_output,omitempty" yaml:"strict_output,omitempty"`
+	ContinueOnError bool  `json:"continue_on_error" yaml:"continue_on_error"`
+	Workers         int   `json:"workers" yaml:"workers"`
+	MaxRetries      int   `json:"max_retries" yaml:"max_retries"`
+	DryRun          bool  `json:"dry_run" yaml:"dry_run"`
 	// BatchSize controls how many input records are sent to the LLM in a single
 	// request. 0 or 1 means one record per request (default). When > 1 the
 	// records are serialised as a JSON array and the LLM is expected to return
@@ -195,23 +203,30 @@ type ProcessingConfig struct {
 
 	// ResponseFormat declares the structured format the LLM must produce.
 	// When set, llmflow automatically appends format instructions to the prompt
-	// and parses the LLM output accordingly. Supported values:
+	// and parses/validates the LLM output accordingly. Supported values:
 	//   "text"  – free-form text (default, no instruction injected)
 	//   "json"  – strict JSON object; keys are spread into the output record
 	//   "xml"   – XML; llmflow asks the LLM for JSON, then converts to XML output
 	//   "csv"   – single CSV row; llmflow asks the LLM for JSON, fields become columns
 	// Setting ResponseFormat to "json", "xml", or "csv" implicitly enables JSON
-	// parsing of the LLM response (equivalent to ParseJSONResponse: true).
+	// parsing of the LLM response (equivalent to ParseJSONResponse: true) and
+	// enforces strict output: exactly one JSON object (or in batch mode an array
+	// of JSON objects), with no extra text outside the structured payload.
 	ResponseFormat string `json:"response_format" yaml:"response_format"`
 
 	// ResponseSchema defines the expected output fields when ResponseFormat is set.
-	// Each key is a field name; the value is a short type hint or description that
-	// is embedded verbatim into the injected format instruction.
+	// Each key is a field name; the value is a short type hint or description.
+	// Hints are embedded into the injected format instruction and also validated
+	// server-side for common types/enums.
 	// Example:
 	//   sentiment:  "one of: positive, neutral, negative"
 	//   confidence: "float between 0.0 and 1.0"
+	// Recognized type hints include: bool/boolean, int/integer, float/number,
+	// string, object/map/json, array/list, and enum forms like "A|B|C" or
+	// "one of: A, B, C".
+	// When non-empty, the response JSON must contain exactly these keys.
 	// When empty and ResponseFormat is "json"/"xml"/"csv", the LLM is only told
-	// to output a compact JSON object without specifying which fields to include.
+	// to output a compact JSON object; key set is not restricted.
 	ResponseSchema map[string]string `json:"response_schema" yaml:"response_schema"`
 
 	// Thinking enables explicit chain-of-thought reasoning before the structured
@@ -314,6 +329,10 @@ func (c *Config) ApplyDefaults() {
 	}
 	if c.Processing.ResponseField == "" {
 		c.Processing.ResponseField = "response"
+	}
+	if c.Processing.StrictOutput == nil {
+		v := true
+		c.Processing.StrictOutput = &v
 	}
 	if c.Processing.MaxRetries <= 0 {
 		c.Processing.MaxRetries = 3
