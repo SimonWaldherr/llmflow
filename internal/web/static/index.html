@@ -1155,6 +1155,10 @@ textarea {
       <div style="font-size:12px;font-weight:600;color:var(--text-muted);margin-bottom:6px">Prompt Input Sample (record #1)</div>
       <pre id="preview-json-sample" style="margin:0;padding:10px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:8px;font-size:11px;line-height:1.5;overflow-x:auto;white-space:pre-wrap;color:var(--text)"></pre>
     </div>
+    <div id="output-record-preview-wrap" style="margin-top:10px;display:none">
+      <div style="font-size:12px;font-weight:600;color:var(--text-muted);margin-bottom:6px">Expected Output Record Sample</div>
+      <pre id="output-record-sample" style="margin:0;padding:10px;background:var(--bg-secondary);border:1px solid color-mix(in srgb,var(--green) 35%,var(--border));border-radius:8px;font-size:11px;line-height:1.5;overflow-x:auto;white-space:pre-wrap;color:var(--text)"></pre>
+    </div>
   </div>
 
   <div id="quick-card-task" class="section-card">
@@ -1303,14 +1307,19 @@ textarea {
           <input id="q-debug-field-hint" type="text" value="short explanation in one sentence">
         </div>
 
-        <div id="thinking-group" style="display:none" class="quick-full ui-expert-only">
+        <div id="thinking-group" class="quick-full">
           <div class="thinking-toggle">
             <input type="checkbox" id="q-thinking">
             <div>
               <div class="thinking-label">Enable Thinking Mode</div>
-              <div class="thinking-desc">Adds a reasoning block before the structured answer for harder decisions (strict mode keeps the final JSON contract exact).</div>
+              <div class="thinking-desc">Adds a step-by-step reasoning block before the final answer — works with all modern models. The LLM reasons inside <code>&lt;thinking&gt;…&lt;/thinking&gt;</code>, then emits the JSON object.</div>
             </div>
           </div>
+        </div>
+
+        <div id="llm-response-preview-wrap" class="quick-full" style="display:none">
+          <div style="font-size:12px;font-weight:600;color:var(--text-muted);margin-bottom:6px">Expected LLM Response Sample</div>
+          <pre id="llm-response-sample" style="margin:0;padding:10px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:8px;font-size:11px;line-height:1.5;overflow-x:auto;white-space:pre-wrap;color:var(--text)"></pre>
         </div>
       </div>
 
@@ -1958,6 +1967,8 @@ function renderPreviewTable(columns, records) {
   updateExcludedInfo();
   updateJSONPreview();
   updateOutputStructureSummary();
+  updateLLMResponseSample();
+  updateOutputRecordSample();
 }
 
 /**
@@ -1988,6 +1999,7 @@ function togglePreviewColumn(chk) {
   updateExcludedInfo();
   updateJSONPreview();
   updateOutputStructureSummary();
+  updateOutputRecordSample();
 }
 
 /**
@@ -2009,6 +2021,7 @@ function updateJSONPreview() {
     }
   }
   el.textContent = JSON.stringify(filtered, null, 2);
+  updateOutputRecordSample();
 }
 
 /**
@@ -2128,6 +2141,152 @@ function updateOutputStructureSummary() {
     <p>${escHtml(includeLabel)}; output mapping ${escHtml(sourceLabel)}; ${escHtml(strictLabel)}.</p>
     <div class="chips">${chips}</div>
   `;
+}
+
+// ── Output Preview Helpers ────────────────────────────────────────
+
+/**
+ * Returns an example value for a schema hint string.
+ * @param {string} hint Type hint from the response schema.
+ * @returns {*}
+ */
+function getExampleValue(hint) {
+  const h = (hint || '').trim();
+  const low = h.toLowerCase();
+  // Enum with pipe separator: A|B|C → first value
+  if (h.includes('|')) return h.split('|')[0].trim();
+  // "one of: A, B, C" / "one of A/B/C"
+  const oneOfMatch = low.match(/^one of[: ]+(.+)/);
+  if (oneOfMatch) {
+    const vals = oneOfMatch[1].split(/[,|\/]/).map(v => v.trim()).filter(Boolean);
+    if (vals.length > 0) return vals[0];
+  }
+  // Boolean types
+  if (low === 'bool' || low === 'boolean') return true;
+  if (low.includes('true') && low.includes('false')) return true;
+  // Integer types
+  if (low === 'int' || low === 'integer') return 0;
+  // Float/number types
+  if (low === 'float' || low === 'number' || low === 'double') return 0.0;
+  // String type
+  if (low === 'string' || low === 'str' || low === 'text') return '<string>';
+  // Fallback: annotated placeholder
+  return `<${h || 'value'}>`;
+}
+
+/**
+ * Builds an example JSON object from the current response schema textarea.
+ * @returns {object|null} Example object or null when schema is empty.
+ */
+function buildSchemaExample() {
+  const schemaRaw = (document.getElementById('q-response-schema').value || '').trim();
+  if (!schemaRaw) return null;
+  const example = {};
+  for (const line of schemaRaw.split('\n')) {
+    const ci = line.indexOf(':');
+    if (ci < 0) continue;
+    const k = line.slice(0, ci).trim();
+    const v = line.slice(ci + 1).trim();
+    if (k) example[k] = getExampleValue(v);
+  }
+  return Object.keys(example).length > 0 ? example : null;
+}
+
+/**
+ * Updates the "Expected LLM Response Sample" preview in the structured output card.
+ * @returns {void}
+ */
+function updateLLMResponseSample() {
+  const wrapEl = document.getElementById('llm-response-preview-wrap');
+  const el = document.getElementById('llm-response-sample');
+  if (!wrapEl || !el) return;
+
+  const responseFormat = (document.getElementById('q-response-format').value || '').trim();
+  const thinking = document.getElementById('q-thinking').checked;
+  const example = buildSchemaExample();
+
+  // Only show when there is something concrete to preview
+  if (!example && !responseFormat && !thinking) {
+    wrapEl.style.display = 'none';
+    return;
+  }
+
+  wrapEl.style.display = '';
+  let jsonText;
+  if (example) {
+    jsonText = JSON.stringify(example, null, 2);
+  } else {
+    jsonText = '{\n  /* LLM returns a JSON object */\n}';
+  }
+
+  el.textContent = thinking
+    ? '<thinking>\n  ...step-by-step reasoning...\n</thinking>\n\n' + jsonText
+    : jsonText;
+}
+
+/**
+ * Updates the "Expected Output Record Sample" preview in the Data Preview section.
+ * @returns {void}
+ */
+function updateOutputRecordSample() {
+  const wrapEl = document.getElementById('output-record-preview-wrap');
+  const el = document.getElementById('output-record-sample');
+  if (!wrapEl || !el) return;
+
+  const includeMode = document.getElementById('q-include-input').value;
+  const responseField = (document.getElementById('q-response-field').value || 'llm_response').trim() || 'llm_response';
+  const storeRaw = (document.getElementById('q-store-raw-response').value || 'true') === 'true';
+  const thinking = document.getElementById('q-thinking').checked;
+  const keyCol = (document.getElementById('q-key-column').value || '').trim();
+  const example = buildSchemaExample();
+
+  // Require at least an uploaded file or a schema to show something meaningful
+  if (!uploadedPath && includeMode !== 'none' && !example) {
+    wrapEl.style.display = 'none';
+    return;
+  }
+
+  const rec = {};
+
+  // Include input fields based on mode
+  if (includeMode === 'all' && previewRecords.length > 0) {
+    const inputRec = previewRecords[0];
+    for (const col of previewColumns) {
+      if (!excludedColumns.has(col)) {
+        rec[col] = inputRec[col] !== undefined ? inputRec[col] : null;
+      }
+    }
+  } else if (includeMode === 'key' && keyCol) {
+    if (previewRecords.length > 0 && previewRecords[0][keyCol] !== undefined) {
+      rec[keyCol] = previewRecords[0][keyCol];
+    } else {
+      rec[keyCol] = '<key_value>';
+    }
+  }
+
+  // Add schema fields from LLM output
+  if (example) {
+    for (const [k, v] of Object.entries(example)) {
+      rec[k] = v;
+    }
+  }
+
+  // Add raw response field when applicable
+  if (storeRaw && responseField) {
+    if (example && Object.keys(example).length > 0) {
+      rec[responseField] = thinking ? '<thinking>...</thinking>\n{...}' : '{...}';
+    } else {
+      rec[responseField] = '<llm response>';
+    }
+  }
+
+  if (Object.keys(rec).length === 0) {
+    wrapEl.style.display = 'none';
+    return;
+  }
+
+  wrapEl.style.display = '';
+  el.textContent = JSON.stringify(rec, null, 2);
 }
 
 // ── Helpers ───────────────────────────────────────────────────────
@@ -2445,6 +2604,10 @@ function buildYAMLFromForm() {
         }
       }
     }
+  } else if (thinkingEnabled) {
+    // thinking works independently of response_format
+    yaml += `\n  thinking: true`;
+    if (strictOutput === 'false') yaml += `\n  strict_output: false`;
   } else if (parseJSON === 'true' || responseFieldsList.length > 0) {
     yaml += `\n  parse_json_response: true`;
     if (strictOutput === 'false') yaml += `\n  strict_output: false`;
@@ -3553,6 +3716,8 @@ async function suggestConfig() {
       document.getElementById('q-thinking').checked = !!s.thinking;
     }
     updateOutputStructureSummary();
+    updateLLMResponseSample();
+    updateOutputRecordSample();
     statusEl.textContent = s.notes ? `✓ ${s.notes}` : '✓ Fields configured — review and adjust as needed.';
     statusEl.className = 'suggest-status ok';
     quickFormTouched = true;
@@ -3674,22 +3839,37 @@ function onResponseFormatChange() {
   document.getElementById('response-schema-group').style.display = structured ? '' : 'none';
   document.getElementById('debug-field-group').style.display = structured ? '' : 'none';
   document.getElementById('debug-hint-group').style.display = structured ? '' : 'none';
-  document.getElementById('thinking-group').style.display = structured ? '' : 'none';
+  // Thinking is always available — independent of response_format and model choice.
+  document.getElementById('thinking-group').style.display = '';
   // Disable legacy parse_json_response when response_format is used
   if (structured) {
     document.getElementById('q-parse-json').value = 'false';
   }
   updateOutputStructureSummary();
+  updateLLMResponseSample();
+  updateOutputRecordSample();
 }
 
 // ── Init ──────────────────────────────────────────────────────────
 ['q-response-field', 'q-response-fields', 'q-output-fields', 'q-response-schema', 'q-debug-field', 'q-debug-field-hint'].forEach(id => {
   const input = document.getElementById(id);
-  if (input) input.addEventListener('input', updateOutputStructureSummary);
+  if (input) input.addEventListener('input', () => {
+    updateOutputStructureSummary();
+    updateLLMResponseSample();
+    updateOutputRecordSample();
+  });
 });
 ['q-include-input', 'q-key-column', 'q-response-format', 'q-parse-json', 'q-strict-output', 'q-store-raw-response', 'q-include-thinking-response'].forEach(id => {
   const input = document.getElementById(id);
-  if (input) input.addEventListener('change', updateOutputStructureSummary);
+  if (input) input.addEventListener('change', () => {
+    updateOutputStructureSummary();
+    updateLLMResponseSample();
+    updateOutputRecordSample();
+  });
+});
+document.getElementById('q-thinking').addEventListener('change', () => {
+  updateLLMResponseSample();
+  updateOutputRecordSample();
 });
 const restoredProviderPrefs = applySavedProviderPrefs();
 if (!restoredProviderPrefs) {
@@ -3700,6 +3880,8 @@ syncAPIKeyFieldMode();
 onIncludeInputChange();
 onResponseFormatChange();
 updateOutputStructureSummary();
+updateLLMResponseSample();
+updateOutputRecordSample();
 reorderQuickSections();
 document.getElementById('ui-mode-toggle').addEventListener('click', () => {
   const panel = document.getElementById('panel-quick');
