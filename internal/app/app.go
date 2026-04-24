@@ -350,6 +350,13 @@ func (a *App) processRecordsWithSink(
 					userPrompt = userPrompt + "\n\n" + instr
 				}
 				systemPrompt := pb.SystemPrompt()
+				if sysNote := prompt.FormatSystemNote(a.cfg.Processing); sysNote != "" {
+					if strings.TrimSpace(systemPrompt) != "" {
+						systemPrompt = strings.TrimSpace(systemPrompt) + "\n\n" + sysNote
+					} else {
+						systemPrompt = sysNote
+					}
+				}
 
 				var responseText string
 				if len(activeTools) > 0 {
@@ -629,25 +636,12 @@ func parseJSONResponseFields(responseText string, cfg config.ProcessingConfig) (
 }
 
 func (a *App) repairStructuredResponse(ctx context.Context, gen Generator, raw string) (string, error) {
-	var p strings.Builder
-	p.WriteString("Rewrite the following answer into exactly one valid JSON object.\n")
-	p.WriteString("Return ONLY JSON. No markdown. No explanation.\n")
 	schema := a.cfg.Processing.EffectiveLLMResponseSchema()
-	if len(schema) > 0 {
-		p.WriteString("Use exactly these keys and respect their hints:\n")
-		keys := make([]string, 0, len(schema))
-		for k := range schema {
-			keys = append(keys, k)
-		}
-		sort.Strings(keys)
-		for _, k := range keys {
-			p.WriteString(fmt.Sprintf("- %s: %s\n", k, schema[k]))
-		}
-	}
-	p.WriteString("Answer to rewrite:\n")
-	p.WriteString(raw)
-
-	return a.generateWithRetry(ctx, gen, "You are a strict JSON formatter.", p.String())
+	return a.generateWithRetry(
+		ctx, gen,
+		"You are a strict JSON formatter. Always respond with a single valid JSON object — no markdown, no code fences, no explanation.",
+		prompt.RepairPrompt(schema, raw),
+	)
 }
 
 func extractStrictJSON(responseText string, thinking bool) (map[string]any, error) {
@@ -1486,6 +1480,13 @@ func (a *App) processJobs(
 					userPrompt = userPrompt + "\n\n" + instr
 				}
 				systemPrompt := pb.SystemPrompt()
+				if sysNote := prompt.FormatSystemNote(a.cfg.Processing); sysNote != "" {
+					if strings.TrimSpace(systemPrompt) != "" {
+						systemPrompt = strings.TrimSpace(systemPrompt) + "\n\n" + sysNote
+					} else {
+						systemPrompt = sysNote
+					}
+				}
 
 				var responseText string
 				if len(activeTools) > 0 {
