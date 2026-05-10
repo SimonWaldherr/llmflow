@@ -103,6 +103,7 @@ type ToolsCodeConfig struct {
 // Provider constants for well-known LLM providers.
 const (
 	ProviderOpenAI    = "openai"
+	ProviderAzure     = "azure"
 	ProviderGemini    = "gemini"
 	ProviderOllama    = "ollama"
 	ProviderLMStudio  = "lmstudio"
@@ -112,10 +113,13 @@ const (
 
 // APIConfig contains provider-specific connection settings.
 type APIConfig struct {
-	// Provider selects the API dialect. One of: openai, gemini, ollama, lmstudio, anthropic, generic.
+	// Provider selects the API dialect. One of: openai, azure, gemini, ollama, lmstudio, anthropic, generic.
 	// Defaults to "openai" when empty.
 	Provider string `json:"provider" yaml:"provider"`
 	BaseURL  string `json:"base_url" yaml:"base_url"`
+	// APIVersion selects provider-specific API revisions. For Azure OpenAI this
+	// is sent as the api-version query parameter.
+	APIVersion string `json:"api_version" yaml:"api_version"`
 	// APIKeyDirect stores a direct provider key when the user supplies one.
 	APIKeyDirect string `json:"api_key" yaml:"api_key"`
 	// APIKeyEnv is the name of the environment variable that holds the API key.
@@ -322,6 +326,8 @@ func Load(path string) (Config, error) {
 // providerDefaultBaseURL returns the canonical base URL for a known provider.
 func providerDefaultBaseURL(provider string) string {
 	switch strings.ToLower(provider) {
+	case ProviderAzure:
+		return "https://YOUR-RESOURCE.openai.azure.com"
 	case ProviderGemini:
 		return "https://generativelanguage.googleapis.com/v1beta"
 	case ProviderOllama:
@@ -395,6 +401,9 @@ func (c *APIConfig) ApplyProviderDefaults() {
 	}
 	if c.BaseURL == "" {
 		c.BaseURL = providerDefaultBaseURL(c.Provider)
+	}
+	if strings.EqualFold(c.Provider, ProviderAzure) && c.APIVersion == "" {
+		c.APIVersion = "2024-10-21"
 	}
 	if c.Timeout == 0 {
 		c.Timeout = 300 * time.Second // 5 min; LLMs can be slow, especially local models

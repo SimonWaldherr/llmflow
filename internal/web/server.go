@@ -50,6 +50,18 @@ type Server struct {
 	serverCtx    context.Context // cancelled on graceful shutdown; used for job lifecycles
 }
 
+// LLMPreset describes one administrator-managed LLM option shown in the web UI.
+// Secrets are intentionally represented as environment variable names only.
+type LLMPreset struct {
+	ID         string `json:"id" yaml:"id"`
+	Label      string `json:"label" yaml:"label"`
+	Provider   string `json:"provider" yaml:"provider"`
+	Model      string `json:"model" yaml:"model"`
+	BaseURL    string `json:"base_url,omitempty" yaml:"base_url,omitempty"`
+	APIVersion string `json:"api_version,omitempty" yaml:"api_version,omitempty"`
+	APIKeyEnv  string `json:"api_key_env,omitempty" yaml:"api_key_env,omitempty"`
+}
+
 // WatcherConfig defines a standing order that auto-launches a job when a
 // matching file appears in the watched directory.
 type WatcherConfig struct {
@@ -204,6 +216,7 @@ func (s *Server) Run(ctx context.Context) error {
 	mux.HandleFunc("GET /api/openapi.json", s.handleOpenAPI)
 	mux.HandleFunc("GET /openapi.json", s.handleOpenAPI)
 	mux.HandleFunc("GET /docs", s.handleSwaggerUI)
+	mux.HandleFunc("GET /api/llm-presets", s.handleLLMPresets)
 	mux.HandleFunc("POST /api/models", s.handleModels)
 	mux.HandleFunc("GET /api/detect", s.handleDetect)
 	mux.HandleFunc("POST /api/suggest", s.handleSuggest)
@@ -947,6 +960,75 @@ func cloneJobStatus(src *JobStatus) *JobStatus {
 	return &clone
 }
 
+func (s *Server) handleLLMPresets(w http.ResponseWriter, r *http.Request) {
+	presets, err := s.loadLLMPresets()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, apiResponse{Error: err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, apiResponse{OK: true, Data: presets})
+}
+
+func (s *Server) loadLLMPresets() ([]LLMPreset, error) {
+	path := strings.TrimSpace(os.Getenv("LLMFLOW_LLM_PRESETS_FILE"))
+	if path == "" {
+		path = filepath.Join(s.dataRoot(), "llm-presets.yaml")
+	}
+
+	b, err := os.ReadFile(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("read llm presets: %w", err)
+	}
+
+	var wrapped struct {
+		Presets []LLMPreset `json:"presets" yaml:"presets"`
+	}
+	if err := yaml.Unmarshal(b, &wrapped); err != nil {
+		var direct []LLMPreset
+		if directErr := yaml.Unmarshal(b, &direct); directErr != nil {
+			return nil, fmt.Errorf("parse llm presets: %w", err)
+		}
+		wrapped.Presets = direct
+	}
+
+	presets := wrapped.Presets
+	if len(presets) == 0 {
+		var direct []LLMPreset
+		if err := yaml.Unmarshal(b, &direct); err != nil {
+			return nil, fmt.Errorf("parse llm presets: %w", err)
+		}
+		presets = direct
+	}
+
+	out := make([]LLMPreset, 0, len(presets))
+	seen := make(map[string]struct{}, len(presets))
+	for _, p := range presets {
+		p.ID = strings.TrimSpace(p.ID)
+		p.Label = strings.TrimSpace(p.Label)
+		p.Provider = strings.TrimSpace(strings.ToLower(p.Provider))
+		p.Model = strings.TrimSpace(p.Model)
+		p.BaseURL = strings.TrimSpace(p.BaseURL)
+		p.APIVersion = strings.TrimSpace(p.APIVersion)
+		p.APIKeyEnv = strings.TrimSpace(p.APIKeyEnv)
+
+		if p.ID == "" || p.Provider == "" || p.Model == "" {
+			continue
+		}
+		if _, ok := seen[p.ID]; ok {
+			continue
+		}
+		seen[p.ID] = struct{}{}
+		if p.Label == "" {
+			p.Label = p.ID
+		}
+		out = append(out, p)
+	}
+	return out, nil
+}
+
 func fetchProviderModels(ctx context.Context, cfg config.APIConfig, apiKey string) ([]string, error) {
 	modelsURL := strings.TrimRight(cfg.BaseURL, "/")
 	if modelsURL == "" {
@@ -960,6 +1042,8 @@ func fetchProviderModels(ctx context.Context, cfg config.APIConfig, apiKey strin
 		req, err = http.NewRequestWithContext(ctx, http.MethodGet, modelsURL+"/api/tags", nil)
 	case config.ProviderOpenAI, config.ProviderGeneric, config.ProviderLMStudio:
 		req, err = http.NewRequestWithContext(ctx, http.MethodGet, modelsURL+"/models", nil)
+	case config.ProviderAzure:
+		return nil, fmt.Errorf("Azure OpenAI does not expose deployment listing through this data-plane API; enter the deployment name manually")
 	case config.ProviderGemini:
 		endpoint := modelsURL + "/models"
 		if apiKey != "" {
@@ -1064,12 +1148,13 @@ type suggestRequest struct {
 	Config string `json:"config"`
 	// Provider / model / key let the UI pass a temporary LLM config that is used
 	// only for this suggestion call, without having to run a full job.
-	Provider  string `json:"provider"`
-	Model     string `json:"model"`
-	APIKey    string `json:"api_key"`
-	APIKeyEnv string `json:"api_key_env"`
-	BaseURL   string `json:"base_url"`
-	Timeout   string `json:"timeout"`
+	Provider   string `json:"provider"`
+	Model      string `json:"model"`
+	APIKey     string `json:"api_key"`
+	APIKeyEnv  string `json:"api_key_env"`
+	BaseURL    string `json:"base_url"`
+	APIVersion string `json:"api_version"`
+	Timeout    string `json:"timeout"`
 }
 
 type suggestResponse struct {
@@ -1214,10 +1299,11 @@ func (s *Server) handleSuggest(w http.ResponseWriter, r *http.Request) {
 		provider = config.ProviderOpenAI
 	}
 	apiCfg := config.APIConfig{
-		Provider: provider,
-		Model:    req.Model,
-		BaseURL:  req.BaseURL,
-		Timeout:  suggestTimeout,
+		Provider:   provider,
+		Model:      req.Model,
+		BaseURL:    req.BaseURL,
+		APIVersion: req.APIVersion,
+		Timeout:    suggestTimeout,
 	}
 	apiKeyDirect, apiKeyEnv := resolveQuickFormAPIKey(firstNonEmpty(req.APIKey, req.APIKeyEnv))
 	apiCfg.APIKeyDirect = apiKeyDirect

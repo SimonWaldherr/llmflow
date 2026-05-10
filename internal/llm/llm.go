@@ -15,14 +15,14 @@ type Generator interface {
 }
 
 // New returns the appropriate Generator for the provider declared in cfg.
-// Supported providers: openai, gemini, ollama, lmstudio, anthropic, generic.
+// Supported providers: openai, azure, gemini, ollama, lmstudio, anthropic, generic.
 func New(cfg config.APIConfig, apiKey string) Generator {
 	switch cfg.Provider {
 	case config.ProviderGemini:
 		return newGeminiClient(cfg, apiKey)
 	case config.ProviderOllama:
 		return newOllamaClient(cfg)
-	case config.ProviderLMStudio, config.ProviderGeneric:
+	case config.ProviderAzure, config.ProviderLMStudio, config.ProviderGeneric:
 		return newOpenAICompatClient(cfg, apiKey)
 	case config.ProviderAnthropic:
 		return newAnthropicClient(cfg, apiKey)

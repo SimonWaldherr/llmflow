@@ -1,0 +1,39 @@
+api:
+  provider: azure
+  # Either the resource endpoint shown in Azure OpenAI Studio:
+  base_url: https://YOUR-RESOURCE.openai.azure.com
+  # Or the full deployment base:
+  # base_url: https://YOUR-RESOURCE.openai.azure.com/openai/deployments/YOUR-DEPLOYMENT
+  api_version: 2024-10-21
+  api_key_env: AZURE_OPENAI_API_KEY
+  # For Azure OpenAI this is the deployment name, not the base model name.
+  model: YOUR-DEPLOYMENT
+  timeout: 60s
+  max_output_tokens: 800
+  rate_limit_rpm: 60
+
+prompt:
+  system: |
+    You are a precise data-transformation assistant.
+  input_template: |
+    Analyze the following record and return compact JSON.
+
+    {{ toPrettyJSON .record }}
+
+input:
+  type: csv
+  path: ./examples/input.csv
+  csv:
+    delimiter: ","
+    has_header: true
+
+output:
+  type: jsonl
+  path: ./examples/output-azure.jsonl
+
+processing:
+  mode: per_record
+  include_input_in_output: true
+  response_field: azure_response
+  continue_on_error: true
+  workers: 2

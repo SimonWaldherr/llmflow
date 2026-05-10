@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/SimonWaldherr/llmflow/internal/config"
@@ -20,6 +21,8 @@ type openAICompatClient struct {
 	baseURL       string
 	apiKey        string
 	model         string
+	provider      string
+	apiVersion    string
 	maxOut        int64
 	promptCaching bool
 }
@@ -30,6 +33,8 @@ func newOpenAICompatClient(cfg config.APIConfig, apiKey string) *openAICompatCli
 		baseURL:       strings.TrimRight(cfg.BaseURL, "/"),
 		apiKey:        apiKey,
 		model:         cfg.Model,
+		provider:      strings.ToLower(cfg.Provider),
+		apiVersion:    strings.TrimSpace(cfg.APIVersion),
 		maxOut:        cfg.MaxOutputTokens,
 		promptCaching: cfg.PromptCaching,
 	}
@@ -40,7 +45,7 @@ func newOpenAICompatClient(cfg config.APIConfig, apiKey string) *openAICompatCli
 // ---------------------------------------------------------------------------
 
 type chatRequest struct {
-	Model     string        `json:"model"`
+	Model     string        `json:"model,omitempty"`
 	Messages  []chatMessage `json:"messages"`
 	MaxTokens int64         `json:"max_tokens,omitempty"`
 	Tools     []oaiTool     `json:"tools,omitempty"`
@@ -104,6 +109,9 @@ func (c *openAICompatClient) Generate(ctx context.Context, systemPrompt, userPro
 		Messages:  messages,
 		MaxTokens: c.maxOut,
 	}
+	if c.isAzure() {
+		payload.Model = ""
+	}
 	return c.doChat(ctx, payload)
 }
 
@@ -152,20 +160,21 @@ func (c *openAICompatClient) GenerateAgent(ctx context.Context, req AgentRequest
 		MaxTokens: c.maxOut,
 		Tools:     tools,
 	}
+	if c.isAzure() {
+		payload.Model = ""
+	}
 
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/chat/completions", bytes.NewReader(body))
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.chatCompletionsURL(), bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
-	if c.apiKey != "" {
-		httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
-	}
+	c.setAuthHeader(httpReq)
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
@@ -223,14 +232,12 @@ func (c *openAICompatClient) doChat(ctx context.Context, payload chatRequest) (s
 		return "", fmt.Errorf("marshal request: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/chat/completions", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.chatCompletionsURL(), bytes.NewReader(body))
 	if err != nil {
 		return "", fmt.Errorf("create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	if c.apiKey != "" {
-		req.Header.Set("Authorization", "Bearer "+c.apiKey)
-	}
+	c.setAuthHeader(req)
 	// Enable explicit prompt caching beta header for providers that support it
 	// (e.g. OpenAI). The static system-message prefix is automatically eligible
 	// for caching when it is ≥ 1024 tokens; this header opts in to the feature.
@@ -266,4 +273,50 @@ func (c *openAICompatClient) doChat(ctx context.Context, payload chatRequest) (s
 		return "", fmt.Errorf("no content in response")
 	}
 	return *decoded.Choices[0].Message.Content, nil
+}
+
+func (c *openAICompatClient) isAzure() bool {
+	return c.provider == config.ProviderAzure
+}
+
+func (c *openAICompatClient) chatCompletionsURL() string {
+	if !c.isAzure() {
+		return c.baseURL + "/chat/completions"
+	}
+
+	base := strings.TrimRight(c.baseURL, "/")
+	if !strings.Contains(base, "/openai/deployments/") && c.model != "" {
+		base += "/openai/deployments/" + url.PathEscape(c.model)
+	}
+	endpoint := base + "/chat/completions"
+
+	version := c.apiVersion
+	if version == "" {
+		version = "2024-10-21"
+	}
+	u, err := url.Parse(endpoint)
+	if err != nil {
+		sep := "?"
+		if strings.Contains(endpoint, "?") {
+			sep = "&"
+		}
+		return endpoint + sep + "api-version=" + url.QueryEscape(version)
+	}
+	q := u.Query()
+	if q.Get("api-version") == "" {
+		q.Set("api-version", version)
+	}
+	u.RawQuery = q.Encode()
+	return u.String()
+}
+
+func (c *openAICompatClient) setAuthHeader(req *http.Request) {
+	if c.apiKey == "" {
+		return
+	}
+	if c.isAzure() {
+		req.Header.Set("api-key", c.apiKey)
+		return
+	}
+	req.Header.Set("Authorization", "Bearer "+c.apiKey)
 }

@@ -28,7 +28,7 @@ structured data.
 ## Features
 
 - Configuration via YAML or JSON
-- Multi-provider support: `openai`, `gemini`, `ollama`, `lmstudio`, `anthropic`, `generic`
+- Multi-provider support: `openai`, `azure`, `gemini`, `ollama`, `lmstudio`, `anthropic`, `generic`
 - Prompt building blocks: `system`, `pre_prompt`, `post_prompt`, optional Go templates
 - Input formats: `csv`, `json`, `jsonl`, `xml`, `sqlite`, `mssql`
 - Output formats: `csv`, `jsonl`, `sqlite`, `mssql`
@@ -85,6 +85,7 @@ The web UI exposes:
 Notes:
 - `AI Quick Setup` uses the same timeout as the quick form (`api.timeout`) and supports longer-running local models.
 - You can set `LLMFLOW_WEB_SUGGEST_TIMEOUT` on the server to override the default suggestion timeout budget.
+- Admins can predefine selectable LLMs for the web UI with `LLMFLOW_LLM_PRESETS_FILE=/path/to/llm-presets.yaml`.
 
 ## Documentation
 
@@ -97,6 +98,7 @@ Notes:
 
 ```bash
 llmflow run --config examples/config-openai.yaml
+llmflow run --config examples/config-azure.yaml
 llmflow run --config examples/config-gemini.yaml
 llmflow run --config examples/config-ollama.yaml
 llmflow run --config examples/config-lmstudio.yaml
@@ -106,12 +108,38 @@ llmflow run --config examples/config-json-input.yaml
 llmflow run --config examples/config-xml-input.yaml
 ```
 
+### Admin-defined LLM dropdown
+
+The web UI can show a curated LLM dropdown so users do not need to know provider URLs,
+deployment names, or API-key environment variables. Set:
+
+```bash
+export LLMFLOW_LLM_PRESETS_FILE=examples/llm-presets.yaml
+llmflow web --addr :8080
+```
+
+Preset file format:
+
+```yaml
+presets:
+  - id: azure-prod-gpt4o
+    label: Azure Production GPT-4o
+    provider: azure
+    base_url: https://YOUR-RESOURCE.openai.azure.com
+    api_version: 2024-10-21
+    api_key_env: AZURE_OPENAI_API_KEY
+    model: YOUR-DEPLOYMENT
+```
+
+`api_key_env` is the environment variable name resolved by the server at run time. Do not put raw API keys in preset files.
+
 ## Configuration reference
 
 ```yaml
 api:
-  provider: openai          # openai | gemini | ollama | lmstudio | anthropic | generic
+  provider: openai          # openai | azure | gemini | ollama | lmstudio | anthropic | generic
   base_url: https://api.openai.com/v1
+  api_version: 2024-10-21   # Azure OpenAI only
   api_key_env: OPENAI_API_KEY   # name of the env var holding the API key
   api_key: sk-...           # optional direct key; overrides api_key_env when set
   model: gpt-4o-mini
@@ -185,6 +213,7 @@ tools:
 |------|-------------|
 | `config.yaml` | Default OpenAI example |
 | `config-openai.yaml` | OpenAI via Chat Completions interface |
+| `config-azure.yaml` | Azure OpenAI via deployment endpoint |
 | `config-gemini.yaml` | Google Gemini REST API |
 | `config-ollama.yaml` | Local Ollama via `/api/generate` |
 | `config-lmstudio.yaml` | Local LM Studio via OpenAI-compatible `/v1` |

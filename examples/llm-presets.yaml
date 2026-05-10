@@ -1,0 +1,21 @@
+presets:
+  - id: azure-prod-gpt4o
+    label: Azure Production GPT-4o
+    provider: azure
+    base_url: https://YOUR-RESOURCE.openai.azure.com
+    api_version: 2024-10-21
+    api_key_env: AZURE_OPENAI_API_KEY
+    model: YOUR-DEPLOYMENT
+
+  - id: openai-mini
+    label: OpenAI GPT-5.4 Mini
+    provider: openai
+    base_url: https://api.openai.com/v1
+    api_key_env: OPENAI_API_KEY
+    model: gpt-5.4-mini
+
+  - id: local-lmstudio
+    label: Local LM Studio
+    provider: lmstudio
+    base_url: http://localhost:1234/v1
+    model: local-model

@@ -1183,11 +1183,19 @@ textarea {
       <span class="section-card-title">Provider And Prompts</span>
       <span class="section-card-desc">Control model selection and prompt pipeline.</span>
     </div>
+    <div class="form-group">
+      <label>Admin-defined LLM</label>
+      <select id="q-llm-preset">
+        <option value="">Manual provider setup</option>
+      </select>
+      <div class="hint" id="q-llm-preset-hint">Admins can define shared LLM choices in data/llm-presets.yaml.</div>
+    </div>
     <div class="quick-grid">
       <div class="form-group">
         <label>Provider</label>
         <select id="q-provider">
           <option value="openai">OpenAI</option>
+          <option value="azure">Azure OpenAI</option>
           <option value="gemini">Google Gemini</option>
           <option value="anthropic">Anthropic Claude</option>
           <option value="ollama">Ollama (local)</option>
@@ -1201,7 +1209,7 @@ textarea {
           <select id="q-model" onchange="onModelSelectChange()"></select>
           <button id="model-refresh" class="btn btn-secondary btn-sm" type="button">Load</button>
         </div>
-        <input id="q-model-custom" type="text" placeholder="custom-model-name" style="display:none; margin-top:6px">
+        <input id="q-model-custom" type="text" placeholder="custom-model-name or Azure deployment" style="display:none; margin-top:6px">
         <div class="hint" id="q-model-hint"></div>
       </div>
       <div class="form-group q-cloud-only">
@@ -1212,6 +1220,11 @@ textarea {
       <div class="form-group">
         <label>Base URL (optional)</label>
         <input id="q-baseurl" type="text" placeholder="Provider default if empty">
+      </div>
+      <div class="form-group q-azure-only" style="display:none">
+        <label>Azure API Version</label>
+        <input id="q-api-version" type="text" value="2024-10-21" placeholder="2024-10-21">
+        <div class="hint">Use the Azure resource endpoint as Base URL, for example https://my-resource.openai.azure.com. The Model field is the deployment name.</div>
       </div>
 
       <hr class="section-sep quick-full ui-expert-only">
@@ -2495,6 +2508,7 @@ function getAPIKeyConfigEntry() {
   if (localProviders.has(provider)) return null;
   const defaults = {
     openai: 'OPENAI_API_KEY',
+    azure: 'AZURE_OPENAI_API_KEY',
     gemini: 'GEMINI_API_KEY',
     anthropic: 'ANTHROPIC_API_KEY',
     generic: 'API_KEY',
@@ -2514,6 +2528,7 @@ function buildYAMLFromForm() {
   const provider      = document.getElementById('q-provider').value;
   const model         = getModelValue();
   const baseurl       = document.getElementById('q-baseurl').value;
+  const apiVersion    = document.getElementById('q-api-version') ? document.getElementById('q-api-version').value.trim() : '';
   const system        = document.getElementById('q-system').value || 'You are a helpful data-processing assistant.';
   const pre           = document.getElementById('q-pre').value;
   const template      = document.getElementById('q-template').value || '{{ toPrettyJSON .record }}';
@@ -2544,6 +2559,7 @@ function buildYAMLFromForm() {
   if (apiKeyEntry) yaml += `\n  ${apiKeyEntry.field}: ${apiKeyEntry.value}`;
   if (promptCaching === 'true') yaml += `\n  prompt_caching: true`;
   if (baseurl) yaml += `\n  base_url: ${baseurl}`;
+  if (provider === 'azure' && apiVersion) yaml += `\n  api_version: ${apiVersion}`;
 
   yaml += `\n\nprompt:\n  system: |\n    ${ind4(system)}`;
   if (pre.trim()) yaml += `\n  pre_prompt: |\n    ${ind4(pre)}`;
@@ -3334,6 +3350,7 @@ const detectedProviders = new Map();
 let quickFormTouched = false;
 const QUICK_PROVIDER_PREFS_KEY = 'llmflow-quick-provider-prefs-v1';
 let savedProviderPrefs = null;
+let llmPresets = [];
 
 /**
  * Returns a display label for a provider name.
@@ -3341,10 +3358,11 @@ let savedProviderPrefs = null;
  * @returns {string}
  */
 function providerLabel(p) {
-  return p === 'ollama' ? 'Ollama' : p === 'lmstudio' ? 'LM Studio' : p;
+  return p === 'ollama' ? 'Ollama' : p === 'lmstudio' ? 'LM Studio' : p === 'azure' ? 'Azure OpenAI' : p;
 }
 const PROVIDER_MODELS = {
   openai:    ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'o1', 'o1-mini', 'o3-mini', 'o4-mini'],
+  azure:     ['your-deployment-name'],
   gemini:    ['gemini-2.0-flash', 'gemini-2.0-flash-lite', 'gemini-2.5-pro', 'gemini-1.5-pro', 'gemini-1.5-flash'],
   anthropic: ['claude-opus-4-5', 'claude-sonnet-4-20250514', 'claude-haiku-3-5', 'claude-3-5-sonnet-20241022', 'claude-3-5-haiku-20241022'],
   ollama:    ['llama3.3', 'llama3.1', 'llama3', 'mistral', 'gemma3', 'gemma2', 'phi4', 'phi3', 'qwen2.5', 'qwen2', 'deepseek-r1'],
@@ -3378,6 +3396,13 @@ function onModelSelectChange() {
 function updateProviderUI(provider) {
   const isLocal = provider === 'ollama' || provider === 'lmstudio';
   document.querySelectorAll('.q-cloud-only').forEach(el => { el.style.display = isLocal ? 'none' : ''; });
+  document.querySelectorAll('.q-azure-only').forEach(el => { el.style.display = provider === 'azure' ? '' : 'none'; });
+  const baseURL = document.getElementById('q-baseurl');
+  if (baseURL) {
+    baseURL.placeholder = provider === 'azure'
+      ? 'https://YOUR-RESOURCE.openai.azure.com'
+      : 'Provider default if empty';
+  }
 }
 
 function loadProviderPrefs() {
@@ -3396,12 +3421,14 @@ function saveProviderPrefs() {
   const provider = document.getElementById('q-provider').value;
   const baseURL = document.getElementById('q-baseurl').value;
   const timeout = document.getElementById('q-timeout').value;
+  const apiVersionEl = document.getElementById('q-api-version');
   const model = getModelValue();
   savedProviderPrefs = {
     provider,
     model,
     base_url: baseURL,
     timeout,
+    api_version: apiVersionEl ? apiVersionEl.value : '',
   };
   try { localStorage.setItem(QUICK_PROVIDER_PREFS_KEY, JSON.stringify(savedProviderPrefs)); } catch(_) {}
 }
@@ -3442,6 +3469,10 @@ function applySavedProviderPrefs() {
   if (typeof savedProviderPrefs.timeout === 'string' && savedProviderPrefs.timeout.trim()) {
     document.getElementById('q-timeout').value = savedProviderPrefs.timeout;
   }
+  if (typeof savedProviderPrefs.api_version === 'string' && savedProviderPrefs.api_version.trim()) {
+    const apiVersionEl = document.getElementById('q-api-version');
+    if (apiVersionEl) apiVersionEl.value = savedProviderPrefs.api_version;
+  }
   if (typeof savedProviderPrefs.model === 'string' && savedProviderPrefs.model.trim()) {
     setPreferredModel(savedProviderPrefs.model.trim());
     onModelSelectChange();
@@ -3459,6 +3490,7 @@ function applySavedProviderPrefs() {
 function applyProviderDefaults(provider) {
   const defaults = {
     openai:    { key:'OPENAI_API_KEY',    url:'' },
+    azure:     { key:'AZURE_OPENAI_API_KEY', url:'https://YOUR-RESOURCE.openai.azure.com' },
     gemini:    { key:'GEMINI_API_KEY',    url:'' },
     anthropic: { key:'ANTHROPIC_API_KEY', url:'' },
     ollama:    { key:'',                  url:'http://localhost:11434' },
@@ -3490,7 +3522,65 @@ function applyProviderDefaults(provider) {
     return;
   }
 
+  if (provider === 'azure') {
+    const apiVersionEl = document.getElementById('q-api-version');
+    if (apiVersionEl && !apiVersionEl.value.trim()) apiVersionEl.value = '2024-10-21';
+    setModelSuggestions(PROVIDER_MODELS.azure);
+    document.getElementById('q-model-hint').textContent = 'For Azure, enter the deployment name. Model listing is not available through the data-plane API.';
+    return;
+  }
+
   setModelSuggestions(det ? (det.models || []) : []);
+}
+
+async function loadLLMPresets() {
+  const sel = document.getElementById('q-llm-preset');
+  const hint = document.getElementById('q-llm-preset-hint');
+  if (!sel) return;
+  try {
+    const r = await fetch('/api/llm-presets');
+    const d = await r.json();
+    if (!d.ok) {
+      hint.textContent = 'Could not load admin-defined LLMs: ' + d.error;
+      return;
+    }
+    llmPresets = Array.isArray(d.data) ? d.data : [];
+    sel.innerHTML = '<option value="">Manual provider setup</option>';
+    llmPresets.forEach(p => {
+      const o = document.createElement('option');
+      o.value = p.id;
+      o.textContent = p.label || `${providerLabel(p.provider)} · ${p.model}`;
+      sel.appendChild(o);
+    });
+    hint.textContent = llmPresets.length
+      ? `${llmPresets.length} admin-defined LLM option(s) available.`
+      : 'Admins can define shared LLM choices in data/llm-presets.yaml.';
+  } catch(e) {
+    hint.textContent = 'Could not load admin-defined LLMs: ' + e.message;
+  }
+}
+
+function applyLLMPreset(id) {
+  if (!id) return;
+  const preset = llmPresets.find(p => p.id === id);
+  const hint = document.getElementById('q-llm-preset-hint');
+  if (!preset) return;
+
+  quickFormTouched = true;
+  document.getElementById('q-provider').value = preset.provider || 'openai';
+  applyProviderDefaults(preset.provider || 'openai');
+  document.getElementById('q-baseurl').value = preset.base_url || '';
+  document.getElementById('q-apikey').value = preset.api_key_env || '';
+  const apiVersionEl = document.getElementById('q-api-version');
+  if (apiVersionEl) apiVersionEl.value = preset.api_version || (preset.provider === 'azure' ? '2024-10-21' : '');
+  setModelSuggestions(preset.model ? [preset.model] : []);
+  setPreferredModel(preset.model || '');
+  syncAPIKeyFieldMode();
+  updateProviderUI(preset.provider || 'openai');
+  saveProviderPrefs();
+  if (hint) {
+    hint.textContent = `Using ${preset.label || preset.id}. Secrets are resolved from ${preset.api_key_env || 'server environment'} at run time.`;
+  }
 }
 /**
  * Populates the model select with detected and curated model names.
@@ -3535,9 +3625,15 @@ function setModelSuggestions(models) {
 async function loadModels() {
   const btn = document.getElementById('model-refresh');
   const hint = document.getElementById('q-model-hint');
+  const provider = document.getElementById('q-provider').value;
+  if (provider === 'azure') {
+    setModelSuggestions(PROVIDER_MODELS.azure);
+    hint.textContent = 'Azure uses deployment names. Enter your deployment via Custom model name.';
+    return;
+  }
   const apiKeyEntry = getAPIKeyConfigEntry();
   const body = {
-    provider: document.getElementById('q-provider').value,
+    provider,
     base_url: document.getElementById('q-baseurl').value,
   };
   if (apiKeyEntry) body[apiKeyEntry.field] = apiKeyEntry.value;
@@ -3670,6 +3766,7 @@ async function suggestConfig() {
       provider,
       model,
       base_url:    document.getElementById('q-baseurl').value,
+      api_version: document.getElementById('q-api-version') ? document.getElementById('q-api-version').value : '',
       timeout:     suggestTimeout,
       config:      buildYAMLFromForm(),
     };
@@ -3733,14 +3830,16 @@ async function suggestConfig() {
 
 document.getElementById('detect-refresh').addEventListener('click', () => detectLocalProviders({ autoApply: false }));
 document.getElementById('model-refresh').addEventListener('click', () => loadModels());
+document.getElementById('q-llm-preset').addEventListener('change', e => applyLLMPreset(e.target.value));
 
 document.getElementById('q-provider').addEventListener('change', e => {
   quickFormTouched = true;
+  document.getElementById('q-llm-preset').value = '';
   applyProviderDefaults(e.target.value);
   saveProviderPrefs();
 });
 
-['q-model-custom','q-baseurl'].forEach(id =>
+['q-model-custom','q-baseurl','q-api-version'].forEach(id =>
   document.getElementById(id).addEventListener('input', () => {
     quickFormTouched = true;
     saveProviderPrefs();
@@ -3875,6 +3974,7 @@ const restoredProviderPrefs = applySavedProviderPrefs();
 if (!restoredProviderPrefs) {
   applyProviderDefaults(document.getElementById('q-provider').value);
 }
+loadLLMPresets();
 updateProviderUI(document.getElementById('q-provider').value);
 syncAPIKeyFieldMode();
 onIncludeInputChange();
