@@ -365,6 +365,9 @@ func (c *Config) ApplyDefaults() {
 		v := true
 		c.Processing.StrictOutput = &v
 	}
+	if c.Processing.BatchSize <= 0 {
+		c.Processing.BatchSize = 1
+	}
 	if c.Processing.MaxRetries <= 0 {
 		c.Processing.MaxRetries = 3
 	}
@@ -450,6 +453,9 @@ func (c Config) Validate() error {
 	supportedResponseFormats := map[string]bool{"": true, "text": true, "json": true, "xml": true, "csv": true}
 	if !supportedResponseFormats[strings.ToLower(c.Processing.ResponseFormat)] {
 		problems = append(problems, fmt.Errorf("unsupported processing.response_format: %s (must be text, json, xml, or csv)", c.Processing.ResponseFormat))
+	}
+	if c.Processing.BatchSize < 1 {
+		problems = append(problems, errors.New("processing.batch_size must be at least 1"))
 	}
 
 	if len(problems) > 0 {

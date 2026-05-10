@@ -1186,6 +1186,7 @@ type suggestResponse struct {
 	// StrictOutput enables strict output contract enforcement.
 	// Default is true in llmflow; set to false only for legacy compatibility.
 	StrictOutput *bool  `json:"strict_output,omitempty"`
+	BatchSize    int    `json:"batch_size,omitempty"`
 	Notes        string `json:"notes,omitempty"`
 }
 
@@ -1224,6 +1225,10 @@ Structured output fields (preferred over hand-crafted post_prompt instructions):
   spread into the record.
 - strict_output: default true. Keeps structured output strict and deterministic.
   Only set false when backwards-compatibility with mixed text+JSON responses is required.
+- batch_size: default 1. Set above 1 to reduce prompt overhead by sending multiple
+  records in one LLM request. In batch mode llmflow sends a JSON array and requires
+  the model to return a JSON array with the same length and order. Use modest values
+  such as 5, 10, or 20 unless records are very short.
 
 Other fields:
 - output_type: one of "jsonl", "csv", or "xml" for the output file writer.
@@ -1267,6 +1272,7 @@ Respond with ONLY a JSON object — no markdown, no explanation — following th
   "store_raw_response": true,
   "include_thinking_in_response_field": false,
   "strict_output": true,
+  "batch_size": 1,
   "response_fields": "...",
   "output_fields": "...",
   "include_input_in_output": "key",

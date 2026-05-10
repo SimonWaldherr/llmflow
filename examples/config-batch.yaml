@@ -1,0 +1,37 @@
+api:
+  provider: openai
+  base_url: https://api.openai.com/v1
+  api_key_env: OPENAI_API_KEY
+  model: gpt-5.4-mini
+  timeout: 60s
+  max_output_tokens: 1200
+  rate_limit_rpm: 60
+
+prompt:
+  system: |
+    You are a precise batch data-transformation assistant.
+  input_template: |
+    {{ toPrettyJSON .record }}
+
+input:
+  type: csv
+  path: ./examples/input.csv
+  csv:
+    delimiter: ","
+    has_header: true
+
+output:
+  type: jsonl
+  path: ./examples/output-batch.jsonl
+
+processing:
+  mode: per_record
+  batch_size: 10
+  include_input_in_output: true
+  response_field: llm_response
+  response_format: json
+  response_schema:
+    summary: short sentence
+    category: concise category label
+  continue_on_error: true
+  workers: 2

@@ -133,6 +133,26 @@ presets:
 
 `api_key_env` is the environment variable name resolved by the server at run time. Do not put raw API keys in preset files.
 
+### Batch multiple rows per LLM request
+
+Use `processing.batch_size` to reduce repeated prompt overhead. The default is `1`,
+which keeps the classic one-row-per-call behavior. Values above `1` make llmflow send
+a JSON array of records and require the model to return a JSON array with the same
+length and order.
+
+```yaml
+processing:
+  batch_size: 10
+  response_format: json
+  response_schema:
+    sentiment: positive | neutral | negative
+    reason: short sentence
+```
+
+Batch mode works best when `prompt.input_template` renders one JSON object per row,
+for example `{{ toPrettyJSON .record }}`. Start with small batches such as `5` or `10`;
+larger batches reduce overhead but make one malformed response affect more rows.
+
 ## Configuration reference
 
 ```yaml
@@ -176,7 +196,7 @@ processing:
   workers: 2                # parallel workers
   max_retries: 3            # LLM call retries per record
   dry_run: false
-  batch_size: 1
+  batch_size: 1             # 1 = one row per LLM call; >1 sends multiple rows per call
   output_fields: [id, sentiment, score]
 
 enrich:
@@ -214,6 +234,7 @@ tools:
 | `config.yaml` | Default OpenAI example |
 | `config-openai.yaml` | OpenAI via Chat Completions interface |
 | `config-azure.yaml` | Azure OpenAI via deployment endpoint |
+| `config-batch.yaml` | Multiple input rows per LLM request |
 | `config-gemini.yaml` | Google Gemini REST API |
 | `config-ollama.yaml` | Local Ollama via `/api/generate` |
 | `config-lmstudio.yaml` | Local LM Studio via OpenAI-compatible `/v1` |
