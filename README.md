@@ -118,6 +118,25 @@ export LLMFLOW_LLM_PRESETS_FILE=examples/llm-presets.yaml
 llmflow web --addr :8080
 ```
 
+If `LLMFLOW_LLM_PRESETS_FILE` is not set, the web server looks for:
+
+```text
+data/llm-presets.yaml
+```
+
+So there are two common ways to store admin-managed LLM definitions:
+
+- Default location: `data/llm-presets.yaml`
+- Custom location via `LLMFLOW_LLM_PRESETS_FILE=/path/to/llm-presets.yaml`
+
+Recommended workflow:
+
+1. Create a preset file, for example `data/llm-presets.yaml`.
+2. Define one or more shared LLM entries.
+3. Store API keys in server environment variables, not in the preset file.
+4. Start or restart `llmflow web`.
+5. In the UI, use the `Admin-defined LLM` dropdown.
+
 Preset file format:
 
 ```yaml
@@ -132,6 +151,52 @@ presets:
 ```
 
 `api_key_env` is the environment variable name resolved by the server at run time. Do not put raw API keys in preset files.
+
+Example with multiple providers:
+
+```yaml
+presets:
+  - id: azure-prod-gpt4o
+    label: Azure Production GPT-4o
+    provider: azure
+    base_url: https://YOUR-RESOURCE.openai.azure.com
+    api_version: 2024-10-21
+    api_key_env: AZURE_OPENAI_API_KEY
+    model: YOUR-DEPLOYMENT
+
+  - id: openai-mini
+    label: OpenAI GPT-5.4 Mini
+    provider: openai
+    base_url: https://api.openai.com/v1
+    api_key_env: OPENAI_API_KEY
+    model: gpt-5.4-mini
+
+  - id: local-lmstudio
+    label: Local LM Studio
+    provider: lmstudio
+    base_url: http://localhost:1234/v1
+    model: local-model
+```
+
+Notes:
+
+- `id` must be unique.
+- `label` is what users see in the dropdown.
+- `provider`, `model`, and usually `base_url` should match the target provider.
+- For Azure, `model` is the deployment name.
+- Duplicate preset IDs are ignored after the first entry.
+- Invalid entries missing `id`, `provider`, or `model` are skipped.
+
+Example for server-side secret setup on macOS/Linux:
+
+```bash
+export AZURE_OPENAI_API_KEY='your-real-key'
+export OPENAI_API_KEY='your-real-key'
+export LLMFLOW_LLM_PRESETS_FILE="$PWD/data/llm-presets.yaml"
+llmflow web --addr :8080
+```
+
+When a user selects a preset, the UI fills provider, base URL, model, and `api_key_env` automatically. The actual secret is still read only on the server from the named environment variable.
 
 ## Configuration reference
 

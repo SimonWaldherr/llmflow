@@ -1189,6 +1189,13 @@ type suggestResponse struct {
 	Notes        string `json:"notes,omitempty"`
 }
 
+const (
+	defaultSuggestTimeout    = 30 * time.Second
+	maxSuggestRetryTimeout   = 60 * time.Second
+	defaultSuggestRepairTime = 12 * time.Second
+	maxSuggestRepairRawBytes = 16 * 1024
+)
+
 const suggestSystemPrompt = `You are an expert llmflow configuration assistant.
 llmflow is a batch-processing tool that reads records from a file (CSV/JSON/JSONL/XML),
 sends each record to an LLM with a configurable prompt pipeline, and writes the responses
@@ -1276,6 +1283,16 @@ Respond with ONLY a JSON object — no markdown, no explanation — following th
   "notes": "..."
 }`
 
+const suggestRepairSystemPrompt = `Rewrite the provided llmflow suggestion as valid JSON.
+Return ONLY one JSON object with these fields when relevant:
+system_prompt, pre_prompt, input_template, post_prompt, output_type,
+response_field, response_format, response_schema, debug_field,
+debug_field_hint, thinking, store_raw_response,
+include_thinking_in_response_field, strict_output, response_fields,
+output_fields, include_input_in_output, key_column,
+parse_json_response, job_name, notes.
+Preserve the original intent, remove markdown fences/explanations, and ensure the result is valid JSON.`
+
 func (s *Server) handleSuggest(w http.ResponseWriter, r *http.Request) {
 	var req suggestRequest
 	if err := json.NewDecoder(io.LimitReader(r.Body, 64*1024)).Decode(&req); err != nil {
@@ -1324,28 +1341,25 @@ func (s *Server) handleSuggest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	userMsg := "Task description:\n" + strings.TrimSpace(req.Task)
-	if cfg := strings.TrimSpace(req.Config); cfg != "" {
-		userMsg += "\n\nCurrent config for reference:\n```yaml\n" + cfg + "\n```"
-	}
+	userMsg := buildSuggestUserMessage(req.Task, req.Config)
 
-	generateWithTimeout := func(timeout time.Duration) (string, error) {
+	generateWithTimeout := func(timeout time.Duration, systemPrompt, userMsg string) (string, error) {
 		tmpCfg := apiCfg
 		tmpCfg.Timeout = timeout
 		gen := llm.New(tmpCfg, apiKey)
 		ctx, cancel := context.WithTimeout(r.Context(), timeout+5*time.Second)
 		defer cancel()
-		return gen.Generate(ctx, suggestSystemPrompt, userMsg)
+		return gen.Generate(ctx, systemPrompt, userMsg)
 	}
 
-	raw, err := generateWithTimeout(suggestTimeout)
+	raw, err := generateWithTimeout(suggestTimeout, suggestSystemPrompt, userMsg)
 	if err != nil && errors.Is(err, context.DeadlineExceeded) {
-		retryTimeout := suggestTimeout * 2
-		if retryTimeout > 10*time.Minute {
-			retryTimeout = 10 * time.Minute
+		retryTimeout := suggestTimeout + 15*time.Second
+		if retryTimeout > maxSuggestRetryTimeout {
+			retryTimeout = maxSuggestRetryTimeout
 		}
 		if retryTimeout > suggestTimeout {
-			raw, err = generateWithTimeout(retryTimeout)
+			raw, err = generateWithTimeout(retryTimeout, suggestSystemPrompt, userMsg)
 		}
 	}
 	if err != nil {
@@ -1354,7 +1368,9 @@ func (s *Server) handleSuggest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sr, err := parseSuggestResponse(raw)
+	sr, err := parseSuggestResponseWithRepair(raw, suggestTimeout, func(systemPrompt, userMsg string, timeout time.Duration) (string, error) {
+		return generateWithTimeout(timeout, systemPrompt, userMsg)
+	})
 	if err != nil {
 		// Keep the UX resilient: fall back to a deterministic template instead
 		// of returning a hard 500 if the model emits malformed JSON.
@@ -1366,6 +1382,56 @@ func (s *Server) handleSuggest(w http.ResponseWriter, r *http.Request) {
 	sr = normalizeSuggestResponse(req.Task, sr)
 
 	writeJSON(w, http.StatusOK, apiResponse{OK: true, Data: sr})
+}
+
+func buildSuggestUserMessage(task, currentConfig string) string {
+	var b strings.Builder
+	b.WriteString("Task description:\n")
+	b.WriteString(strings.TrimSpace(task))
+
+	if cfg := strings.TrimSpace(currentConfig); cfg != "" {
+		b.WriteString("\n\nCurrent config YAML for reference only. Treat it as the baseline, but respond with a fresh JSON object following the required schema. Do not wrap the YAML or your answer in markdown fences.\n")
+		b.WriteString(cfg)
+	}
+
+	return b.String()
+}
+
+func parseSuggestResponseWithRepair(raw string, baseTimeout time.Duration, generate func(systemPrompt, userMsg string, timeout time.Duration) (string, error)) (suggestResponse, error) {
+	sr, err := parseSuggestResponse(raw)
+	if err == nil || generate == nil {
+		return sr, err
+	}
+
+	repairTimeout := baseTimeout / 3
+	if repairTimeout <= 0 {
+		repairTimeout = defaultSuggestRepairTime
+	}
+	if repairTimeout < 5*time.Second {
+		repairTimeout = 5 * time.Second
+	}
+	if repairTimeout > 20*time.Second {
+		repairTimeout = 20 * time.Second
+	}
+
+	repairedRaw, repairErr := generate(suggestRepairSystemPrompt, buildSuggestRepairMessage(raw), repairTimeout)
+	if repairErr != nil {
+		return sr, err
+	}
+
+	repaired, repairParseErr := parseSuggestResponse(repairedRaw)
+	if repairParseErr != nil {
+		return sr, err
+	}
+	return repaired, nil
+}
+
+func buildSuggestRepairMessage(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if len(raw) > maxSuggestRepairRawBytes {
+		raw = raw[:maxSuggestRepairRawBytes]
+	}
+	return "The previous assistant answer should have been one valid JSON object for llmflow AI setup. Rewrite it as valid JSON only, with no markdown or explanation. Preserve field values when possible.\n\nPrevious answer:\n" + raw
 }
 
 func normalizeSuggestResponse(task string, sr suggestResponse) suggestResponse {
@@ -1908,7 +1974,7 @@ func firstNonEmpty(values ...string) string {
 
 func resolveSuggestTimeout(raw string) (time.Duration, error) {
 	// Default timeout for quick suggestions. Can be overridden server-side.
-	timeout := 120 * time.Second
+	timeout := defaultSuggestTimeout
 	if fromEnv := strings.TrimSpace(os.Getenv("LLMFLOW_WEB_SUGGEST_TIMEOUT")); fromEnv != "" {
 		d, err := time.ParseDuration(fromEnv)
 		if err != nil || d <= 0 {

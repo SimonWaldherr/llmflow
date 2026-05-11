@@ -103,8 +103,18 @@ func TestResolveSuggestTimeout_Default(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolveSuggestTimeout returned error: %v", err)
 	}
-	if got != 120*time.Second {
-		t.Fatalf("expected 120s default, got %s", got)
+	if got != 30*time.Second {
+		t.Fatalf("expected 30s default, got %s", got)
+	}
+}
+
+func TestBuildSuggestUserMessage_DoesNotWrapConfigInMarkdown(t *testing.T) {
+	got := buildSuggestUserMessage("Classify products", "api:\n  model: gpt-4o-mini")
+	if !strings.Contains(got, "Current config YAML for reference only") {
+		t.Fatalf("expected config guidance in message, got %q", got)
+	}
+	if strings.Contains(got, "```") {
+		t.Fatalf("did not expect markdown fences in message: %q", got)
 	}
 }
 

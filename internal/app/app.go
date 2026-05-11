@@ -1758,14 +1758,19 @@ func (a *App) agentStepWithRetry(ctx context.Context, ag llm.AgentGenerator, mes
 			return resp, nil
 		}
 		lastErr = err
-		a.logger.Warn("agent step failed", "attempt", attempt, "error", err)
+		wait := llm.RetryDelay(err, attempt)
+		if llm.IsRateLimit(err) {
+			a.logger.Warn("agent step rate-limited", "attempt", attempt, "wait", wait, "error", err)
+		} else {
+			a.logger.Warn("agent step failed", "attempt", attempt, "wait", wait, "error", err)
+		}
 		if attempt == maxRetries {
 			break
 		}
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
-		case <-time.After(llm.Backoff(attempt)):
+		case <-time.After(wait):
 		}
 	}
 	return nil, lastErr
@@ -1780,14 +1785,19 @@ func (a *App) generateWithRetry(ctx context.Context, gen Generator, systemPrompt
 			return text, nil
 		}
 		lastErr = err
-		a.logger.Warn("llm request failed", "attempt", attempt, "error", err)
+		wait := llm.RetryDelay(err, attempt)
+		if llm.IsRateLimit(err) {
+			a.logger.Warn("llm request rate-limited", "attempt", attempt, "wait", wait, "error", err)
+		} else {
+			a.logger.Warn("llm request failed", "attempt", attempt, "wait", wait, "error", err)
+		}
 		if attempt == maxRetries {
 			break
 		}
 		select {
 		case <-ctx.Done():
 			return "", ctx.Err()
-		case <-time.After(llm.Backoff(attempt)):
+		case <-time.After(wait):
 		}
 	}
 	return "", lastErr

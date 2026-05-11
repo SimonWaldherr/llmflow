@@ -39,10 +39,90 @@ Typische Struktur:
 ## Relevante Umgebungsvariablen
 
 - `LLMFLOW_DATA_DIR`: alternatives Datenverzeichnis
+- `LLMFLOW_LLM_PRESETS_FILE`: optionaler Pfad zu einer Admin-Preset-Datei für die Weboberfläche; Standard ist `data/llm-presets.yaml`
 - `LLMFLOW_WEB_TOKEN`: optionaler Bearer-Token-Schutz für `/api/*`
 - `LLMFLOW_WEB_SUGGEST_TIMEOUT`: separates Timeout-Budget für AI Quick Setup in der Weboberfläche
 - Provider-spezifische API-Key-Variablen wie `OPENAI_API_KEY`, `GEMINI_API_KEY`, `ANTHROPIC_API_KEY`
 - Datenbank-DSNs oder Secrets über `dsn_env`, `api_key_env`, `username_env`, `password_env`
+
+## Admin-defined LLMs
+
+Administratoren koennen in der Weboberflaeche gemeinsame LLM-Auswahlen bereitstellen. Dadurch muessen Anwender keine Provider-URLs, Deployment-Namen oder Secret-Namen manuell eintragen.
+
+### Speicherort
+
+Ohne weitere Konfiguration sucht der Webserver nach:
+
+```text
+data/llm-presets.yaml
+```
+
+Alternativ kann der Pfad explizit gesetzt werden:
+
+```bash
+export LLMFLOW_LLM_PRESETS_FILE=/pfad/zur/llm-presets.yaml
+./bin/llmflow web --addr :8080
+```
+
+### Dateiformat
+
+Empfohlen ist eine YAML-Datei mit einem `presets`-Array:
+
+```yaml
+presets:
+	- id: azure-prod-gpt4o
+		label: Azure Production GPT-4o
+		provider: azure
+		base_url: https://YOUR-RESOURCE.openai.azure.com
+		api_version: 2024-10-21
+		api_key_env: AZURE_OPENAI_API_KEY
+		model: YOUR-DEPLOYMENT
+
+	- id: openai-mini
+		label: OpenAI GPT-5.4 Mini
+		provider: openai
+		base_url: https://api.openai.com/v1
+		api_key_env: OPENAI_API_KEY
+		model: gpt-5.4-mini
+```
+
+### Feldbedeutung
+
+- `id`: technische, eindeutige Kennung des Presets
+- `label`: Anzeigename in der Weboberflaeche
+- `provider`: z. B. `openai`, `azure`, `gemini`, `anthropic`, `lmstudio`, `ollama`, `generic`
+- `base_url`: Provider-Endpoint; fuer Azure die Resource-URL
+- `api_version`: nur fuer Azure relevant
+- `api_key_env`: Name der Umgebungsvariable, in der das Secret auf dem Server liegt
+- `model`: Modellname; bei Azure der Deployment-Name
+
+### Secrets richtig ablegen
+
+Die Preset-Datei sollte keine echten API-Keys enthalten. Stattdessen wird nur der Name der Umgebungsvariable hinterlegt, zum Beispiel `AZURE_OPENAI_API_KEY`.
+
+Beispiel:
+
+```bash
+export AZURE_OPENAI_API_KEY='your-real-key'
+export OPENAI_API_KEY='your-real-key'
+./bin/llmflow web --addr :8080
+```
+
+### Aktivierung und Nutzung
+
+1. Preset-Datei anlegen, bevorzugt unter `data/llm-presets.yaml`.
+2. Noetige Secrets als Umgebungsvariablen im Startkontext des Servers setzen.
+3. Webserver starten oder nach Aenderungen neu starten.
+4. In der Weboberflaeche im Feld `Admin-defined LLM` das gewuenschte Preset auswaehlen.
+
+Die Auswahl fuellt Provider, Base URL, Modell und Secret-Referenz automatisch vor.
+
+### Typische Fehler
+
+- Datei liegt am falschen Ort und `LLMFLOW_LLM_PRESETS_FILE` ist nicht gesetzt.
+- Die Umgebungsvariable aus `api_key_env` ist im Server-Prozess nicht gesetzt.
+- Bei Azure wurde statt des Deployment-Namens der Basis-Modellname eingetragen.
+- Die Preset-ID ist doppelt vergeben; spaetere Duplikate werden ignoriert.
 
 ## Sicherheitsempfehlungen
 

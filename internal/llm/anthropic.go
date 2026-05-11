@@ -156,7 +156,7 @@ func (c *anthropicClient) Generate(ctx context.Context, systemPrompt, userPrompt
 		return "", fmt.Errorf("read response body: %w", err)
 	}
 	if resp.StatusCode >= 300 {
-		return "", fmt.Errorf("anthropic api status %d: %s", resp.StatusCode, string(respBody))
+		return "", apiStatusError("anthropic", resp, respBody)
 	}
 
 	var decoded anthropicResponse
@@ -164,7 +164,7 @@ func (c *anthropicClient) Generate(ctx context.Context, systemPrompt, userPrompt
 		return "", fmt.Errorf("decode response: %w", err)
 	}
 	if decoded.Error != nil {
-		return "", fmt.Errorf("anthropic error (%s): %s", decoded.Error.Type, decoded.Error.Message)
+		return "", apiResponseError("anthropic", 0, decoded.Error.Type, decoded.Error.Message)
 	}
 	for _, block := range decoded.Content {
 		if block.Type == "text" {
@@ -277,7 +277,7 @@ func (c *anthropicClient) GenerateAgent(ctx context.Context, req AgentRequest) (
 		return nil, fmt.Errorf("read response body: %w", err)
 	}
 	if resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("anthropic api status %d: %s", resp.StatusCode, string(respBody))
+		return nil, apiStatusError("anthropic", resp, respBody)
 	}
 
 	var decoded anthropicResponse
@@ -285,7 +285,7 @@ func (c *anthropicClient) GenerateAgent(ctx context.Context, req AgentRequest) (
 		return nil, fmt.Errorf("decode response: %w", err)
 	}
 	if decoded.Error != nil {
-		return nil, fmt.Errorf("anthropic error (%s): %s", decoded.Error.Type, decoded.Error.Message)
+		return nil, apiResponseError("anthropic", 0, decoded.Error.Type, decoded.Error.Message)
 	}
 
 	ar := &AgentResponse{}

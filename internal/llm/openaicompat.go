@@ -187,7 +187,7 @@ func (c *openAICompatClient) GenerateAgent(ctx context.Context, req AgentRequest
 		return nil, fmt.Errorf("read response body: %w", err)
 	}
 	if resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("api status %d: %s", resp.StatusCode, string(respBody))
+		return nil, apiStatusError(c.provider, resp, respBody)
 	}
 
 	var decoded chatResponse
@@ -195,7 +195,7 @@ func (c *openAICompatClient) GenerateAgent(ctx context.Context, req AgentRequest
 		return nil, fmt.Errorf("decode response: %w", err)
 	}
 	if decoded.Error != nil {
-		return nil, fmt.Errorf("api error (%s): %s", decoded.Error.Type, decoded.Error.Message)
+		return nil, apiResponseError(c.provider, 0, decoded.Error.Type, decoded.Error.Message)
 	}
 	if len(decoded.Choices) == 0 {
 		return nil, fmt.Errorf("no choices returned by api")
@@ -256,7 +256,7 @@ func (c *openAICompatClient) doChat(ctx context.Context, payload chatRequest) (s
 		return "", fmt.Errorf("read response body: %w", err)
 	}
 	if resp.StatusCode >= 300 {
-		return "", fmt.Errorf("api status %d: %s", resp.StatusCode, string(respBody))
+		return "", apiStatusError(c.provider, resp, respBody)
 	}
 
 	var decoded chatResponse
@@ -264,7 +264,7 @@ func (c *openAICompatClient) doChat(ctx context.Context, payload chatRequest) (s
 		return "", fmt.Errorf("decode response: %w", err)
 	}
 	if decoded.Error != nil {
-		return "", fmt.Errorf("api error (%s): %s", decoded.Error.Type, decoded.Error.Message)
+		return "", apiResponseError(c.provider, 0, decoded.Error.Type, decoded.Error.Message)
 	}
 	if len(decoded.Choices) == 0 {
 		return "", fmt.Errorf("no choices returned by api")

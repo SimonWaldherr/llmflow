@@ -76,7 +76,7 @@ func (c *ollamaClient) Generate(ctx context.Context, systemPrompt, userPrompt st
 		return "", fmt.Errorf("read response body: %w", err)
 	}
 	if resp.StatusCode >= 300 {
-		return "", fmt.Errorf("ollama api status %d: %s", resp.StatusCode, string(respBody))
+		return "", apiStatusError("ollama", resp, respBody)
 	}
 
 	var decoded ollamaGenerateResponse
@@ -84,7 +84,7 @@ func (c *ollamaClient) Generate(ctx context.Context, systemPrompt, userPrompt st
 		return "", fmt.Errorf("decode response: %w", err)
 	}
 	if decoded.Error != "" {
-		return "", fmt.Errorf("ollama error: %s", decoded.Error)
+		return "", apiResponseError("ollama", 0, "", decoded.Error)
 	}
 	return decoded.Response, nil
 }

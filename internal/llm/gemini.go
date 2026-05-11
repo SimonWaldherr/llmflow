@@ -103,7 +103,7 @@ func (c *geminiClient) Generate(ctx context.Context, systemPrompt, userPrompt st
 		return "", fmt.Errorf("read response body: %w", err)
 	}
 	if resp.StatusCode >= 300 {
-		return "", fmt.Errorf("gemini api status %d: %s", resp.StatusCode, string(respBody))
+		return "", apiStatusError("gemini", resp, respBody)
 	}
 
 	var decoded geminiResponse
@@ -111,7 +111,7 @@ func (c *geminiClient) Generate(ctx context.Context, systemPrompt, userPrompt st
 		return "", fmt.Errorf("decode response: %w", err)
 	}
 	if decoded.Error != nil {
-		return "", fmt.Errorf("gemini error %d: %s", decoded.Error.Code, decoded.Error.Message)
+		return "", apiResponseError("gemini", decoded.Error.Code, "", decoded.Error.Message)
 	}
 	if len(decoded.Candidates) == 0 || len(decoded.Candidates[0].Content.Parts) == 0 {
 		return "", fmt.Errorf("no content returned by gemini")
