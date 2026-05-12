@@ -8,7 +8,7 @@ import (
 	"github.com/SimonWaldherr/llmflow/internal/config"
 )
 
-// New creates an input Reader based on cfg.Type and applies excluded_columns filtering.
+// New creates an input Reader based on cfg.Type and applies ExcludedColumns filtering.
 func New(cfg config.InputConfig) (Reader, error) {
 	var r Reader
 	var err error
