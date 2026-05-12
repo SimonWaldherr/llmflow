@@ -1125,13 +1125,11 @@ textarea {
           <option value="xml">XML</option>
         </select>
       </div>
-      <div class="form-group" style="display:none">
-        <label>Output Type</label>
-        <select id="q-output-type">
+      <div class="form-group">
+        <label>Output Storage</label>
+        <div class="hint" style="padding-top:10px">Web runs are stored as JSONL. Choose CSV, TSV, XLSX, JSON, XML, or raw JSONL when downloading.</div>
+        <select id="q-output-type" style="display:none">
           <option value="jsonl">JSONL</option>
-          <option value="csv">CSV</option>
-          <option value="xlsx">XLSX</option>
-          <option value="xml">XML</option>
         </select>
       </div>
     </div>
@@ -2425,7 +2423,7 @@ function renderFileTable(containerId, files, dir) {
 function renderOutputDownloadLinks(file) {
   const name = file.name || '';
   const base = `/api/files/download/output/${encodeURIComponent(name)}`;
-  const formats = ['csv', 'xlsx', 'json', 'jsonl', 'xml'];
+  const formats = ['jsonl', 'json', 'csv', 'tsv', 'xlsx', 'xml'];
   if (!name.toLowerCase().endsWith('.jsonl')) {
     return `<a class="btn btn-sm btn-secondary" href="${base}" download="${escHtml(name)}">Download</a>`;
   }

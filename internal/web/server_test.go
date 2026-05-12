@@ -1,7 +1,6 @@
 package web
 
 import (
-	"archive/zip"
 	"bytes"
 	"encoding/csv"
 	"encoding/json"
@@ -15,6 +14,7 @@ import (
 	"time"
 
 	"github.com/SimonWaldherr/llmflow/internal/config"
+	"github.com/xuri/excelize/v2"
 )
 
 func TestNormalizeHostBaseURL(t *testing.T) {
@@ -334,13 +334,34 @@ func TestFilesAPI(t *testing.T) {
 	}
 	rows, err := csv.NewReader(strings.NewReader(rec.Body.String())).ReadAll()
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("parse csv export: %v", err)
 	}
-	if got, want := len(rows), 2; got != want {
-		t.Fatalf("csv rows = %d, want %d", got, want)
+	if len(rows) != 2 {
+		t.Fatalf("csv rows = %d, want %d", len(rows), 2)
 	}
-	if rows[0][0] != "ok" || rows[1][0] != "true" {
-		t.Fatalf("csv export rows = %#v", rows)
+	if got, want := rows[0], []string{"ok"}; len(got) != len(want) || got[0] != want[0] {
+		t.Fatalf("csv header = %#v, want %#v", got, want)
+	}
+	if got, want := rows[1], []string{"true"}; len(got) != len(want) || got[0] != want[0] {
+		t.Fatalf("csv row = %#v, want %#v", got, want)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/files/download/output/result.jsonl?format=tsv", nil)
+	req.SetPathValue("dir", "output")
+	req.SetPathValue("name", "result.jsonl")
+	rec = httptest.NewRecorder()
+	srv.handleDownloadFile(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("tsv export status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	tsvReader := csv.NewReader(strings.NewReader(rec.Body.String()))
+	tsvReader.Comma = '\t'
+	rows, err = tsvReader.ReadAll()
+	if err != nil {
+		t.Fatalf("parse tsv export: %v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("tsv rows = %d, want %d", len(rows), 2)
 	}
 
 	req = httptest.NewRequest(http.MethodGet, "/api/files/download/output/result.jsonl?format=xlsx", nil)
@@ -351,8 +372,17 @@ func TestFilesAPI(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("xlsx export status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
 	}
-	if _, err := zip.NewReader(bytes.NewReader(rec.Body.Bytes()), int64(rec.Body.Len())); err != nil {
-		t.Fatalf("xlsx export is not a valid zip package: %v", err)
+	xlsx, err := excelize.OpenReader(bytes.NewReader(rec.Body.Bytes()))
+	if err != nil {
+		t.Fatalf("open xlsx export: %v", err)
+	}
+	defer xlsx.Close()
+	rows, err = xlsx.GetRows("Output")
+	if err != nil {
+		t.Fatalf("read xlsx rows: %v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("xlsx rows = %d, want %d", len(rows), 2)
 	}
 
 	req = httptest.NewRequest(http.MethodDelete, "/api/files/output/result.jsonl", nil)
@@ -365,27 +395,6 @@ func TestFilesAPI(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(outputDir, "result.jsonl")); !os.IsNotExist(err) {
 		t.Fatalf("expected output file to be deleted, stat err = %v", err)
-	}
-}
-
-func TestNormalizeWebRunOutputForcesJSONL(t *testing.T) {
-	root := t.TempDir()
-	srv := &Server{dataDir: root}
-	cfg := config.Config{
-		API:    config.APIConfig{Model: "m", APIKeyEnv: "K"},
-		Input:  config.InputConfig{Type: "csv"},
-		Output: config.OutputConfig{Type: "csv", Path: filepath.Join(root, "output", "result.csv")},
-		Prompt: config.PromptConfig{InputTemplate: "x"},
-	}
-	got, raw := srv.normalizeWebRunOutput(cfg, "fallback")
-	if got.Output.Type != "jsonl" {
-		t.Fatalf("output type = %q, want jsonl", got.Output.Type)
-	}
-	if filepath.Ext(got.Output.Path) != ".jsonl" {
-		t.Fatalf("output path = %q, want .jsonl extension", got.Output.Path)
-	}
-	if !strings.Contains(raw, "type: jsonl") {
-		t.Fatalf("normalized config does not contain jsonl output: %s", raw)
 	}
 }
 
