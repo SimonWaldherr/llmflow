@@ -8,6 +8,7 @@ import (
 	"github.com/SimonWaldherr/llmflow/internal/config"
 )
 
+// New creates an input Reader based on cfg.Type and applies excluded_columns filtering.
 func New(cfg config.InputConfig) (Reader, error) {
 	var r Reader
 	var err error
@@ -34,6 +35,7 @@ func New(cfg config.InputConfig) (Reader, error) {
 	return r, nil
 }
 
+// buildExcludedSet turns configured excluded column names into a lookup set.
 func buildExcludedSet(cols []string) map[string]struct{} {
 	set := make(map[string]struct{}, len(cols))
 	for _, c := range cols {

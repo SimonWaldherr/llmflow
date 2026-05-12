@@ -53,6 +53,13 @@ llmflow validate --config examples/config.yaml
 llmflow run     --config examples/config.yaml
 ```
 
+### CLI command overview
+
+- `llmflow validate --config <file>`: parse and validate configuration only.
+- `llmflow run --config <file>`: execute a full batch run.
+- `llmflow web --addr :8080`: start the web UI/API server.
+- `llmflow --version`: print build version.
+
 ### Web UI
 
 ```bash
@@ -299,6 +306,12 @@ make ci           # run the same checks as CI locally
 make act          # run the GitHub Actions workflow locally via act
 make test-cover   # run tests with coverage report
 make lint         # run golangci-lint
+```
+
+If `make lint` fails because `golangci-lint` is missing, install it first:
+
+```bash
+go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
 ```
 
 ## Architecture

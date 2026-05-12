@@ -91,6 +91,7 @@ func main() {
 	}
 }
 
+// parseCLIArgs parses global flags and accepts the command token in any position.
 func parseCLIArgs(args []string) (cliOptions, string, error) {
 	opts := cliOptions{
 		cfgPath:  "config.yaml",
@@ -126,6 +127,7 @@ func parseCLIArgs(args []string) (cliOptions, string, error) {
 	return opts, cmd, nil
 }
 
+// findCommandIndex returns the first command token while skipping flag values.
 func findCommandIndex(args []string) int {
 	expectValue := false
 	for i, arg := range args {
@@ -150,6 +152,7 @@ func findCommandIndex(args []string) int {
 	return -1
 }
 
+// parseFlagToken splits a flag token into name and "has inline value" marker.
 func parseFlagToken(arg string) (name string, hasInlineValue bool) {
 	trimmed := strings.TrimLeft(arg, "-")
 	if trimmed == "" {
@@ -161,6 +164,7 @@ func parseFlagToken(arg string) (name string, hasInlineValue bool) {
 	return trimmed, false
 }
 
+// flagExpectsValue reports whether a known flag requires a following value.
 func flagExpectsValue(name string) bool {
 	switch name {
 	case "config", "log-level", "addr":
@@ -170,6 +174,7 @@ func flagExpectsValue(name string) bool {
 	}
 }
 
+// isCommand reports whether the token is a supported top-level command.
 func isCommand(s string) bool {
 	switch s {
 	case "run", "validate", "web":

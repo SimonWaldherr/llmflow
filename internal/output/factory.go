@@ -7,6 +7,7 @@ import (
 	"github.com/SimonWaldherr/llmflow/internal/config"
 )
 
+// New creates an output Writer implementation based on cfg.Type.
 func New(cfg config.OutputConfig) (Writer, error) {
 	switch strings.ToLower(cfg.Type) {
 	case "csv":
