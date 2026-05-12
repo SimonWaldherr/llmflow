@@ -1,7 +1,6 @@
 package output
 
 import (
-	"archive/zip"
 	"bufio"
 	"context"
 	"encoding/csv"
@@ -11,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/SimonWaldherr/llmflow/internal/config"
+	"github.com/xuri/excelize/v2"
 )
 
 func TestCSVWriter_Basic(t *testing.T) {
@@ -199,19 +199,29 @@ func TestXLSXWriter_BasicPackage(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	zr, err := zip.OpenReader(p)
+	f, err := excelize.OpenFile(p)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer zr.Close()
-	parts := map[string]bool{}
-	for _, f := range zr.File {
-		parts[f.Name] = true
+	defer f.Close()
+	if sheets := f.GetSheetList(); len(sheets) != 1 || sheets[0] != "Output" {
+		t.Fatalf("sheet list = %#v, want [Output]", sheets)
 	}
-	for _, name := range []string{"[Content_Types].xml", "_rels/.rels", "xl/workbook.xml", "xl/worksheets/sheet1.xml"} {
-		if !parts[name] {
-			t.Fatalf("xlsx part %s missing", name)
-		}
+	rows, err := f.GetRows("Output")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 3 {
+		t.Fatalf("row count = %d, want 3", len(rows))
+	}
+	if got, want := rows[0], []string{"answer", "id"}; len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("header row = %#v, want %#v", got, want)
+	}
+	if got, want := rows[1], []string{"yes", "1"}; len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("first data row = %#v, want %#v", got, want)
+	}
+	if got, want := rows[2], []string{"no", "2"}; len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("second data row = %#v, want %#v", got, want)
 	}
 }
 
