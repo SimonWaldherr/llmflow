@@ -105,6 +105,7 @@ func TestValidateUnsupportedInputType(t *testing.T) {
 }
 
 func TestValidateXLSXOutputType(t *testing.T) {
+	t.Setenv("K", "secret")
 	c := Config{
 		API:    APIConfig{Model: "m", APIKeyEnv: "K"},
 		Input:  InputConfig{Type: "csv"},
