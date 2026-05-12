@@ -5,7 +5,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"sort"
+	"maps"
+	"slices"
 	"strings"
 
 	_ "github.com/microsoft/go-mssqldb"
@@ -69,12 +70,7 @@ func (w *SQLWriter) Prepare(ctx context.Context, columns []string) error {
 
 func (w *SQLWriter) WriteRecord(ctx context.Context, record Record) error {
 	if !w.prepared {
-		cols := make([]string, 0, len(record))
-		for k := range record {
-			cols = append(cols, k)
-		}
-		sort.Strings(cols)
-		if err := w.Prepare(ctx, cols); err != nil {
+		if err := w.Prepare(ctx, slices.Sorted(maps.Keys(record))); err != nil {
 			return err
 		}
 	}
@@ -179,12 +175,7 @@ func unionColumns(records []Record) []string {
 			set[k] = struct{}{}
 		}
 	}
-	cols := make([]string, 0, len(set))
-	for k := range set {
-		cols = append(cols, k)
-	}
-	sort.Strings(cols)
-	return cols
+	return slices.Sorted(maps.Keys(set))
 }
 
 func quoteIdentifier(kind, name string) string {

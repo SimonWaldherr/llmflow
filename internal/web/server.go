@@ -13,13 +13,14 @@ import (
 	"io"
 	"io/fs"
 	"log/slog"
+	"maps"
 	"net/http"
 	"net/url"
 	"os"
 	"path"
 	"path/filepath"
 	"regexp"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -1944,12 +1945,7 @@ func deriveOutputFieldsFromSuggest(sr suggestResponse) []string {
 	if strings.EqualFold(strings.TrimSpace(sr.IncludeInputInOutput), "key") && strings.TrimSpace(sr.KeyColumn) != "" {
 		fields = append(fields, strings.TrimSpace(sr.KeyColumn))
 	}
-	keys := make([]string, 0, len(sr.ResponseSchema))
-	for k := range sr.ResponseSchema {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	fields = append(fields, keys...)
+	fields = append(fields, slices.Sorted(maps.Keys(sr.ResponseSchema))...)
 
 	if sr.StoreRawResponse != nil && *sr.StoreRawResponse {
 		resp := strings.TrimSpace(sr.ResponseField)
@@ -2471,16 +2467,12 @@ func (s *Server) handlePreview(w http.ResponseWriter, r *http.Request) {
 
 	// Collect column names in stable order.
 	colSet := map[string]struct{}{}
-	var columns []string
 	for _, rec := range records {
 		for k := range rec {
-			if _, seen := colSet[k]; !seen {
-				colSet[k] = struct{}{}
-				columns = append(columns, k)
-			}
+			colSet[k] = struct{}{}
 		}
 	}
-	sort.Strings(columns)
+	columns := slices.Sorted(maps.Keys(colSet))
 
 	recs := make([]map[string]any, len(records))
 	for i, rec := range records {
@@ -2854,7 +2846,7 @@ func normalizeModelNames(models []string) []string {
 		set[model] = struct{}{}
 		out = append(out, model)
 	}
-	sort.Strings(out)
+	slices.Sort(out)
 	return out
 }
 

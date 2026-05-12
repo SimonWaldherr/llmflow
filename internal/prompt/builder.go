@@ -4,7 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"sort"
+	"maps"
+	"slices"
 	"strings"
 	"text/template"
 
@@ -151,12 +152,7 @@ func RepairPrompt(schema map[string]string, raw string) string {
 
 // schemaKeys returns the keys of schema in deterministic sorted order.
 func schemaKeys(schema map[string]string) []string {
-	keys := make([]string, 0, len(schema))
-	for k := range schema {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	return keys
+	return slices.Sorted(maps.Keys(schema))
 }
 
 // describeSchemaHint converts a raw type hint string into a plain-English

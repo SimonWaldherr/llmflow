@@ -6,8 +6,9 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"math"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -163,12 +164,7 @@ func buildOutputColumns(records []input.Record, responseField string, includeInp
 			set[key] = struct{}{}
 		}
 	}
-	columns := make([]string, 0, len(set))
-	for key := range set {
-		columns = append(columns, key)
-	}
-	sort.Strings(columns)
-	return columns
+	return slices.Sorted(maps.Keys(set))
 }
 
 // buildTools constructs the slice of active Tool objects from the config.
@@ -755,8 +751,8 @@ func validateResponseSchema(parsed map[string]any, schema map[string]string) err
 		}
 	}
 	if len(missing) > 0 || len(extra) > 0 {
-		sort.Strings(missing)
-		sort.Strings(extra)
+		slices.Sort(missing)
+		slices.Sort(extra)
 		parts := make([]string, 0, 2)
 		if len(missing) > 0 {
 			parts = append(parts, "missing: "+strings.Join(missing, ", "))
@@ -767,12 +763,7 @@ func validateResponseSchema(parsed map[string]any, schema map[string]string) err
 		return fmt.Errorf("response JSON keys do not match response_schema (%s)", strings.Join(parts, "; "))
 	}
 
-	keys := make([]string, 0, len(schema))
-	for k := range schema {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	for _, k := range keys {
+	for _, k := range slices.Sorted(maps.Keys(schema)) {
 		if err := validateSchemaValue(k, parsed[k], schema[k]); err != nil {
 			return err
 		}
@@ -1260,12 +1251,7 @@ func (a *App) processBatch(
 	))
 	if len(schema) > 0 {
 		userPrompt.WriteString("Each object must contain exactly these fields:\n")
-		keys := make([]string, 0, len(schema))
-		for k := range schema {
-			keys = append(keys, k)
-		}
-		sort.Strings(keys)
-		for _, k := range keys {
+		for _, k := range slices.Sorted(maps.Keys(schema)) {
 			userPrompt.WriteString(fmt.Sprintf("- %s: %s\n", k, schema[k]))
 		}
 	}

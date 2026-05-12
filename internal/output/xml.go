@@ -4,9 +4,10 @@ import (
 	"context"
 	"encoding/xml"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 
 	"github.com/SimonWaldherr/llmflow/internal/config"
 )
@@ -64,12 +65,7 @@ func (w *XMLWriter) Prepare(_ context.Context, columns []string) error {
 func (w *XMLWriter) WriteRecord(ctx context.Context, record Record) error {
 	if !w.prepared {
 		// Derive column order from the record itself when Prepare was not called.
-		cols := make([]string, 0, len(record))
-		for k := range record {
-			cols = append(cols, k)
-		}
-		sort.Strings(cols)
-		if err := w.Prepare(ctx, cols); err != nil {
+		if err := w.Prepare(ctx, slices.Sorted(maps.Keys(record))); err != nil {
 			return err
 		}
 	}
@@ -87,11 +83,7 @@ func (w *XMLWriter) WriteRecord(ctx context.Context, record Record) error {
 	// Use the prepared header order when available; otherwise sort the keys.
 	keys := w.headers
 	if len(keys) == 0 {
-		keys = make([]string, 0, len(record))
-		for k := range record {
-			keys = append(keys, k)
-		}
-		sort.Strings(keys)
+		keys = slices.Sorted(maps.Keys(record))
 	}
 
 	for _, k := range keys {

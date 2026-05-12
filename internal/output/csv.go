@@ -5,9 +5,10 @@ import (
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"unicode/utf8"
 
 	"github.com/SimonWaldherr/llmflow/internal/config"
@@ -163,21 +164,11 @@ func unionHeaders(records []Record) []string {
 			seen[k] = struct{}{}
 		}
 	}
-	headers := make([]string, 0, len(seen))
-	for k := range seen {
-		headers = append(headers, k)
-	}
-	sort.Strings(headers)
-	return headers
+	return slices.Sorted(maps.Keys(seen))
 }
 
 func sortedRecordKeys(record Record) []string {
-	keys := make([]string, 0, len(record))
-	for k := range record {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	return keys
+	return slices.Sorted(maps.Keys(record))
 }
 
 func mergeHeaders(headers []string, record Record) ([]string, bool) {
@@ -195,7 +186,7 @@ func mergeHeaders(headers []string, record Record) ([]string, bool) {
 	if len(missing) == 0 {
 		return headers, false
 	}
-	sort.Strings(missing)
+	slices.Sort(missing)
 	next := append(append([]string(nil), headers...), missing...)
 	return next, true
 }
