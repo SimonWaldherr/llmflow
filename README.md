@@ -31,9 +31,10 @@ structured data.
 - Multi-provider support: `openai`, `azure`, `gemini`, `ollama`, `lmstudio`, `anthropic`, `generic`
 - Prompt building blocks: `system`, `pre_prompt`, `post_prompt`, optional Go templates
 - Input formats: `csv`, `json`, `jsonl`, `xml`, `sqlite`, `mssql`
-- Output formats: `csv`, `jsonl`, `sqlite`, `mssql`
+- Output formats: `csv`, `xlsx`, `jsonl`, `xml`, `sqlite`, `mssql`
 - Input preview with column exclusion before a run starts
 - Auto-detection of input format for uploaded files in the web UI
+- Web UI stores run results as JSONL and exports them on download as CSV, XLSX, JSON, JSONL, or XML
 - Optional non-agentic web enrichment step per record
 - Optional key-column-only output mode for traceable slim outputs
 - Standing orders / file watchers for folder-based automation
@@ -228,7 +229,7 @@ input:
     has_header: true
 
 output:
-  type: jsonl               # csv | jsonl | sqlite | mssql
+  type: jsonl               # csv | xlsx | jsonl | xml | sqlite | mssql
   path: ./examples/output.jsonl
 
 processing:

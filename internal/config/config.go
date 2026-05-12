@@ -442,7 +442,7 @@ func (c Config) Validate() error {
 		problems = append(problems, fmt.Errorf("unsupported input.type: %s", c.Input.Type))
 	}
 
-	supportedOutputs := map[string]bool{"csv": true, "jsonl": true, "xml": true, "sqlite": true, "mssql": true}
+	supportedOutputs := map[string]bool{"csv": true, "xlsx": true, "jsonl": true, "xml": true, "sqlite": true, "mssql": true}
 	if !supportedOutputs[strings.ToLower(c.Output.Type)] {
 		problems = append(problems, fmt.Errorf("unsupported output.type: %s", c.Output.Type))
 	}

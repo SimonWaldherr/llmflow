@@ -1,6 +1,7 @@
 package output
 
 import (
+	"archive/zip"
 	"bufio"
 	"context"
 	"encoding/csv"
@@ -113,6 +114,107 @@ func TestCSVWriter_WriteRecordSyncs(t *testing.T) {
 	}
 }
 
+func TestCSVWriter_AppendsColumnsDiscoveredDuringStreaming(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "out.csv")
+	cfg := config.OutputConfig{Type: "csv", Path: p}
+	w, err := NewCSVWriter(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Prepare(context.Background(), []string{"id"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.WriteRecord(context.Background(), Record{"id": "1"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.WriteRecord(context.Background(), Record{"id": "2", "answer": "yes"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	f, err := os.Open(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	rows, err := csv.NewReader(f).ReadAll()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := [][]string{{"id", "answer"}, {"1", ""}, {"2", "yes"}}
+	if got, encWant := mustJSON(t, rows), mustJSON(t, want); got != encWant {
+		t.Fatalf("rows = %s, want %s", got, encWant)
+	}
+}
+
+func TestCSVWriter_SerializesStructuredValuesAsJSONCells(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "out.csv")
+	cfg := config.OutputConfig{Type: "csv", Path: p}
+	w, err := NewCSVWriter(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	records := []Record{{"id": "1", "meta": map[string]any{"ok": true}}}
+	if err := w.WriteAll(context.Background(), records); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	f, err := os.Open(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	rows, err := csv.NewReader(f).ReadAll()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rows[1][1] != `{"ok":true}` {
+		t.Fatalf("structured cell = %q, want JSON", rows[1][1])
+	}
+}
+
+func TestXLSXWriter_BasicPackage(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "out.xlsx")
+	cfg := config.OutputConfig{Type: "xlsx", Path: p}
+	w, err := NewXLSXWriter(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	records := []Record{
+		{"id": "1", "answer": "yes"},
+		{"id": "2", "answer": "no"},
+	}
+	if err := w.WriteAll(context.Background(), records); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	zr, err := zip.OpenReader(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer zr.Close()
+	parts := map[string]bool{}
+	for _, f := range zr.File {
+		parts[f.Name] = true
+	}
+	for _, name := range []string{"[Content_Types].xml", "_rels/.rels", "xl/workbook.xml", "xl/worksheets/sheet1.xml"} {
+		if !parts[name] {
+			t.Fatalf("xlsx part %s missing", name)
+		}
+	}
+}
+
 func containsRune(s string, r rune) bool {
 	for _, c := range s {
 		if c == r {
@@ -120,6 +222,15 @@ func containsRune(s string, r rune) bool {
 		}
 	}
 	return false
+}
+
+func mustJSON(t *testing.T, v any) string {
+	t.Helper()
+	b, err := json.Marshal(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
 }
 
 func TestJSONLWriter_Basic(t *testing.T) {

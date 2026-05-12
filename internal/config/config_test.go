@@ -104,6 +104,18 @@ func TestValidateUnsupportedInputType(t *testing.T) {
 	}
 }
 
+func TestValidateXLSXOutputType(t *testing.T) {
+	c := Config{
+		API:    APIConfig{Model: "m", APIKeyEnv: "K"},
+		Input:  InputConfig{Type: "csv"},
+		Output: OutputConfig{Type: "xlsx"},
+		Prompt: PromptConfig{InputTemplate: "x"},
+	}
+	if err := c.Validate(); err != nil {
+		t.Fatalf("unexpected error for xlsx output: %v", err)
+	}
+}
+
 func TestApplyDefaults(t *testing.T) {
 	c := Config{}
 	c.ApplyDefaults()

@@ -2,11 +2,13 @@
 package web
 
 import (
+	"archive/zip"
 	"bufio"
 	"bytes"
 	"context"
 	"crypto/subtle"
 	"embed"
+	"encoding/csv"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -478,7 +480,26 @@ func (s *Server) handleRun(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusAccepted, apiResponse{OK: true, Data: cloneJobStatus(job)})
 }
 
+func (s *Server) normalizeWebRunOutput(cfg config.Config, fallbackRaw string) (config.Config, string) {
+	cfg.Output.Type = "jsonl"
+	cfg.Output.CSV = config.CSVConfig{}
+	if strings.TrimSpace(cfg.Output.Path) == "" {
+		ts := time.Now().UTC().Format("2006-01-02T15-04-05")
+		cfg.Output.Path = filepath.Join(s.dataRoot(), "output", "output-"+ts+".jsonl")
+	} else if strings.ToLower(filepath.Ext(cfg.Output.Path)) != ".jsonl" {
+		ext := filepath.Ext(cfg.Output.Path)
+		cfg.Output.Path = strings.TrimSuffix(cfg.Output.Path, ext) + ".jsonl"
+	}
+	cfg.ApplyDefaults()
+	b, err := yaml.Marshal(cfg)
+	if err != nil {
+		return cfg, fallbackRaw
+	}
+	return cfg, string(b)
+}
+
 func (s *Server) enqueueJob(name, rawConfig string, dryRun bool, cfg config.Config) *JobStatus {
+	cfg, rawConfig = s.normalizeWebRunOutput(cfg, rawConfig)
 	s.mu.Lock()
 	s.jobIDSeq++
 	job := &JobStatus{
@@ -643,6 +664,7 @@ func (s *Server) handleDeleteFile(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleDownloadFile serves a file from data/input or data/output for download.
+// Output JSONL files can be converted on demand with ?format=jsonl|json|csv|xml|xlsx.
 func (s *Server) handleDownloadFile(w http.ResponseWriter, r *http.Request) {
 	dir := r.PathValue("dir")
 	name := r.PathValue("name")
@@ -665,9 +687,301 @@ func (s *Server) handleDownloadFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	format := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("format")))
+	if dir == "output" && format != "" {
+		if err := s.exportOutputFile(w, dst, name, format); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+		}
+		return
+	}
+
 	w.Header().Set("Content-Disposition", `attachment; filename="`+name+`"`)
 	http.ServeFile(w, r, dst)
 }
+
+func (s *Server) exportOutputFile(w http.ResponseWriter, filePath, name, format string) error {
+	if strings.ToLower(filepath.Ext(filePath)) != ".jsonl" {
+		return fmt.Errorf("format conversion is only supported for JSONL output files")
+	}
+	if format == "jsonl" {
+		w.Header().Set("Content-Type", "application/x-ndjson")
+		w.Header().Set("Content-Disposition", `attachment; filename="`+downloadName(name, "jsonl")+`"`)
+		f, err := os.Open(filePath)
+		if err != nil {
+			return fmt.Errorf("open output file: %w", err)
+		}
+		defer f.Close()
+		_, err = io.Copy(w, f)
+		return err
+	}
+	records, err := readJSONLRecords(filePath)
+	if err != nil {
+		return err
+	}
+
+	switch format {
+	case "json":
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Disposition", `attachment; filename="`+downloadName(name, "json")+`"`)
+		enc := json.NewEncoder(w)
+		enc.SetIndent("", "  ")
+		return enc.Encode(records)
+	case "csv":
+		w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+		w.Header().Set("Content-Disposition", `attachment; filename="`+downloadName(name, "csv")+`"`)
+		return writeCSVExport(w, records)
+	case "xml":
+		w.Header().Set("Content-Type", "application/xml; charset=utf-8")
+		w.Header().Set("Content-Disposition", `attachment; filename="`+downloadName(name, "xml")+`"`)
+		return writeXMLExport(w, records)
+	case "xlsx":
+		w.Header().Set("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+		w.Header().Set("Content-Disposition", `attachment; filename="`+downloadName(name, "xlsx")+`"`)
+		return writeXLSXExport(w, records)
+	default:
+		return fmt.Errorf("unsupported export format %q", format)
+	}
+}
+
+func downloadName(name, ext string) string {
+	base := strings.TrimSuffix(filepath.Base(name), filepath.Ext(name))
+	if base == "" || base == "." {
+		base = "output"
+	}
+	return base + "." + ext
+}
+
+func readJSONLRecords(filePath string) ([]map[string]any, error) {
+	f, err := os.Open(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("open output file: %w", err)
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 1<<20), 32<<20)
+	var records []map[string]any
+	lineNo := 0
+	for scanner.Scan() {
+		lineNo++
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		var rec map[string]any
+		if err := json.Unmarshal([]byte(line), &rec); err != nil {
+			return nil, fmt.Errorf("parse JSONL line %d: %w", lineNo, err)
+		}
+		records = append(records, rec)
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("read JSONL output: %w", err)
+	}
+	return records, nil
+}
+
+func writeCSVExport(w io.Writer, records []map[string]any) error {
+	headers := exportHeaders(records)
+	cw := csv.NewWriter(w)
+	if len(headers) > 0 {
+		if err := cw.Write(headers); err != nil {
+			return err
+		}
+	}
+	for _, rec := range records {
+		row := make([]string, len(headers))
+		for i, h := range headers {
+			row[i] = exportCell(rec[h])
+		}
+		if err := cw.Write(row); err != nil {
+			return err
+		}
+	}
+	cw.Flush()
+	return cw.Error()
+}
+
+func writeXMLExport(w io.Writer, records []map[string]any) error {
+	if _, err := io.WriteString(w, `<?xml version="1.0" encoding="UTF-8"?>`+"\n<records>"); err != nil {
+		return err
+	}
+	headers := exportHeaders(records)
+	for _, rec := range records {
+		if _, err := io.WriteString(w, "\n  <record>"); err != nil {
+			return err
+		}
+		for _, h := range headers {
+			if _, ok := rec[h]; !ok {
+				continue
+			}
+			tag := sanitizeExportXMLName(h)
+			if _, err := fmt.Fprintf(w, "\n    <%s>", tag); err != nil {
+				return err
+			}
+			if err := xmlEscapeText(w, exportCell(rec[h])); err != nil {
+				return err
+			}
+			if _, err := fmt.Fprintf(w, "</%s>", tag); err != nil {
+				return err
+			}
+		}
+		if _, err := io.WriteString(w, "\n  </record>"); err != nil {
+			return err
+		}
+	}
+	_, err := io.WriteString(w, "\n</records>\n")
+	return err
+}
+
+func writeXLSXExport(w io.Writer, records []map[string]any) error {
+	zw := zip.NewWriter(w)
+	headers := exportHeaders(records)
+	files := map[string]string{
+		"[Content_Types].xml":        xlsxContentTypesXML,
+		"_rels/.rels":                xlsxRootRelsXML,
+		"xl/workbook.xml":            xlsxWorkbookXML,
+		"xl/_rels/workbook.xml.rels": xlsxWorkbookRelsXML,
+		"xl/worksheets/sheet1.xml":   buildXLSXSheetXML(headers, records),
+	}
+	for _, name := range []string{"[Content_Types].xml", "_rels/.rels", "xl/workbook.xml", "xl/_rels/workbook.xml.rels", "xl/worksheets/sheet1.xml"} {
+		fw, err := zw.Create(name)
+		if err != nil {
+			_ = zw.Close()
+			return err
+		}
+		if _, err := fw.Write([]byte(files[name])); err != nil {
+			_ = zw.Close()
+			return err
+		}
+	}
+	return zw.Close()
+}
+
+func exportHeaders(records []map[string]any) []string {
+	seen := map[string]struct{}{}
+	for _, rec := range records {
+		for k := range rec {
+			seen[k] = struct{}{}
+		}
+	}
+	headers := make([]string, 0, len(seen))
+	for k := range seen {
+		headers = append(headers, k)
+	}
+	sort.Strings(headers)
+	return headers
+}
+
+func exportCell(v any) string {
+	if v == nil {
+		return ""
+	}
+	switch x := v.(type) {
+	case string:
+		return x
+	case json.Number:
+		return x.String()
+	case bool, float64:
+		return fmt.Sprint(x)
+	default:
+		b, err := json.Marshal(x)
+		if err == nil {
+			return string(b)
+		}
+		return fmt.Sprint(x)
+	}
+}
+
+func xmlEscapeText(w io.Writer, s string) error {
+	repl := strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", `"`, "&quot;", "'", "&apos;")
+	_, err := io.WriteString(w, repl.Replace(s))
+	return err
+}
+
+func sanitizeExportXMLName(name string) string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return "field"
+	}
+	var b strings.Builder
+	for i, r := range name {
+		valid := (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || r == '_' || (i > 0 && ((r >= '0' && r <= '9') || r == '-' || r == '.'))
+		if valid {
+			b.WriteRune(r)
+		} else {
+			b.WriteByte('_')
+		}
+	}
+	out := b.String()
+	if out == "" || !((out[0] >= 'a' && out[0] <= 'z') || (out[0] >= 'A' && out[0] <= 'Z') || out[0] == '_') {
+		out = "field_" + out
+	}
+	return out
+}
+
+func buildXLSXSheetXML(headers []string, records []map[string]any) string {
+	var b strings.Builder
+	b.WriteString(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>`)
+	b.WriteString(`<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>`)
+	if len(headers) > 0 {
+		writeXLSXExportRow(&b, 1, headers)
+	}
+	for i, rec := range records {
+		values := make([]string, len(headers))
+		for j, h := range headers {
+			values[j] = exportCell(rec[h])
+		}
+		writeXLSXExportRow(&b, i+2, values)
+	}
+	b.WriteString(`</sheetData></worksheet>`)
+	return b.String()
+}
+
+func writeXLSXExportRow(b *strings.Builder, row int, values []string) {
+	b.WriteString(fmt.Sprintf(`<row r="%d">`, row))
+	for i, value := range values {
+		ref := fmt.Sprintf("%s%d", xlsxColumnName(i+1), row)
+		b.WriteString(fmt.Sprintf(`<c r="%s" t="inlineStr"><is><t>`, ref))
+		b.WriteString(strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", `"`, "&quot;", "'", "&apos;").Replace(value))
+		b.WriteString(`</t></is></c>`)
+	}
+	b.WriteString(`</row>`)
+}
+
+func xlsxColumnName(n int) string {
+	var out []byte
+	for n > 0 {
+		n--
+		out = append([]byte{byte('A' + n%26)}, out...)
+		n /= 26
+	}
+	return string(out)
+}
+
+const xlsxContentTypesXML = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+</Types>`
+
+const xlsxRootRelsXML = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+</Relationships>`
+
+const xlsxWorkbookXML = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="Output" sheetId="1" r:id="rId1"/>
+  </sheets>
+</workbook>`
+
+const xlsxWorkbookRelsXML = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+</Relationships>`
 
 func (s *Server) handleOpenAPI(w http.ResponseWriter, _ *http.Request) {
 	spec := map[string]any{
@@ -743,11 +1057,15 @@ func (s *Server) handleOpenAPI(w http.ResponseWriter, _ *http.Request) {
 					"responses": map[string]any{"200": map[string]any{"description": "Uploaded"}},
 				},
 			},
-			"/api/files":                       map[string]any{"get": map[string]any{"summary": "List input and output files", "responses": map[string]any{"200": map[string]any{"description": "Files"}}}},
-			"/api/files/download/{dir}/{name}": map[string]any{"get": map[string]any{"summary": "Download a file", "responses": map[string]any{"200": map[string]any{"description": "File download"}}}},
-			"/api/models":                      map[string]any{"post": map[string]any{"summary": "Fetch available models", "responses": map[string]any{"200": map[string]any{"description": "Models"}}}},
-			"/api/detect":                      map[string]any{"get": map[string]any{"summary": "Detect local providers", "responses": map[string]any{"200": map[string]any{"description": "Providers"}}}},
-			"/api/suggest":                     map[string]any{"post": map[string]any{"summary": "Generate quick setup suggestions", "responses": map[string]any{"200": map[string]any{"description": "Suggestion"}}}},
+			"/api/files": map[string]any{"get": map[string]any{"summary": "List input and output files", "responses": map[string]any{"200": map[string]any{"description": "Files"}}}},
+			"/api/files/download/{dir}/{name}": map[string]any{"get": map[string]any{
+				"summary":    "Download a file; output JSONL files support ?format=jsonl|json|csv|xml|xlsx",
+				"parameters": []map[string]any{{"name": "format", "in": "query", "required": false, "schema": map[string]any{"type": "string"}}},
+				"responses":  map[string]any{"200": map[string]any{"description": "File download"}},
+			}},
+			"/api/models":  map[string]any{"post": map[string]any{"summary": "Fetch available models", "responses": map[string]any{"200": map[string]any{"description": "Models"}}}},
+			"/api/detect":  map[string]any{"get": map[string]any{"summary": "Detect local providers", "responses": map[string]any{"200": map[string]any{"description": "Providers"}}}},
+			"/api/suggest": map[string]any{"post": map[string]any{"summary": "Generate quick setup suggestions", "responses": map[string]any{"200": map[string]any{"description": "Suggestion"}}}},
 		},
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -1233,7 +1551,7 @@ Structured output fields (preferred over hand-crafted post_prompt instructions):
   Only set false when backwards-compatibility with mixed text+JSON responses is required.
 
 Other fields:
-- output_type: one of "jsonl", "csv", or "xml" for the output file writer.
+- output_type: one of "jsonl", "csv", "xlsx", or "xml" for the output file writer.
   If the task says "Ausgabe als CSV/XML/JSONL", set this field, not pre/post prompt text.
 - response_fields: comma-separated list of JSON keys produced by the LLM (used only
   when response_format is not set and post_prompt enforces a manual JSON schema).
@@ -1462,7 +1780,7 @@ func normalizeSuggestResponse(task string, sr suggestResponse) suggestResponse {
 		}
 	}
 	switch strings.ToLower(strings.TrimSpace(sr.OutputType)) {
-	case "csv", "xml", "jsonl":
+	case "csv", "xlsx", "xml", "jsonl":
 		sr.OutputType = strings.ToLower(strings.TrimSpace(sr.OutputType))
 	default:
 		sr.OutputType = ""
@@ -1639,6 +1957,10 @@ func detectFormatHints(text string) (responseFormat, outputType string) {
 		responseFormat = "csv"
 		outputType = "csv"
 	}
+	if strings.Contains(low, "xlsx") || strings.Contains(low, "excel") {
+		responseFormat = "csv"
+		outputType = "xlsx"
+	}
 	if strings.Contains(low, "xml") {
 		responseFormat = "xml"
 		outputType = "xml"
@@ -1666,6 +1988,8 @@ func isFormatInstructionLine(line string) bool {
 		return false
 	}
 	hasFormatToken := strings.Contains(l, "csv") ||
+		strings.Contains(l, "xlsx") ||
+		strings.Contains(l, "excel") ||
 		strings.Contains(l, "xml") ||
 		strings.Contains(l, "json") ||
 		strings.Contains(l, "jsonl") ||

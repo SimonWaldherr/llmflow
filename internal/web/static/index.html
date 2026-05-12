@@ -1125,11 +1125,12 @@ textarea {
           <option value="xml">XML</option>
         </select>
       </div>
-      <div class="form-group">
+      <div class="form-group" style="display:none">
         <label>Output Type</label>
         <select id="q-output-type">
           <option value="jsonl">JSONL</option>
           <option value="csv">CSV</option>
+          <option value="xlsx">XLSX</option>
           <option value="xml">XML</option>
         </select>
       </div>
@@ -1351,12 +1352,9 @@ textarea {
         <div class="preset-row">
           <select id="q-advanced-preset">
             <option value="">— choose preset —</option>
-            <option value="full_csv">Full Output as CSV</option>
-            <option value="full_json">Full Output as JSON</option>
-            <option value="key_ai_csv">Only Key + AI-generated Columns as CSV</option>
-            <option value="key_ai_json">Only Key + AI-generated Columns as JSON</option>
-            <option value="key_struct_csv">Only Key + Structured AI Columns as CSV (hide raw)</option>
-            <option value="key_struct_json">Only Key + Structured AI Columns as JSON (hide raw)</option>
+            <option value="full_result">Full Result</option>
+            <option value="key_ai">Only Key + AI-generated Columns</option>
+            <option value="key_struct">Only Key + Structured AI Columns (hide raw)</option>
           </select>
           <button type="button" class="btn btn-secondary btn-sm" id="apply-advanced-preset">Apply Preset</button>
         </div>
@@ -2410,7 +2408,7 @@ function renderFileTable(containerId, files, dir) {
         <div class="file-actions">
           ${dir === 'input' ? `<button class="btn btn-sm btn-secondary js-use-file-input" data-path="${escHtml(f.path || '')}" data-name="${escHtml(f.name || '')}">Use as Input</button>` : ''}
           ${dir === 'output' ? `<button class="btn btn-sm btn-secondary" onclick="previewFile('output','${escHtml(f.name || '')}')">Preview</button>` : ''}
-          <a class="btn btn-sm btn-secondary" href="/api/files/download/${encodeURIComponent(dir)}/${encodeURIComponent(f.name || '')}" download="${escHtml(f.name || '')}">Download</a>
+          ${dir === 'output' ? renderOutputDownloadLinks(f) : `<a class="btn btn-sm btn-secondary" href="/api/files/download/${encodeURIComponent(dir)}/${encodeURIComponent(f.name || '')}" download="${escHtml(f.name || '')}">Download</a>`}
           <button class="btn btn-sm btn-danger js-delete-file" data-dir="${escHtml(dir)}" data-name="${escHtml(f.name || '')}">Delete</button>
         </div>
       </td>
@@ -2422,6 +2420,18 @@ function renderFileTable(containerId, files, dir) {
     <th style="cursor:pointer" onclick="sortFileTableBy('${dir}','mod_time')">Modified${thIcon('mod_time')}</th>
     <th>Actions</th>
   </tr></thead><tbody>${rows}</tbody></table>`;
+}
+
+function renderOutputDownloadLinks(file) {
+  const name = file.name || '';
+  const base = `/api/files/download/output/${encodeURIComponent(name)}`;
+  const formats = ['csv', 'xlsx', 'json', 'jsonl', 'xml'];
+  if (!name.toLowerCase().endsWith('.jsonl')) {
+    return `<a class="btn btn-sm btn-secondary" href="${base}" download="${escHtml(name)}">Download</a>`;
+  }
+  return formats.map(fmt =>
+    `<a class="btn btn-sm btn-secondary" href="${base}?format=${fmt}" download>${fmt.toUpperCase()}</a>`
+  ).join('');
 }
 
 /**
@@ -2534,7 +2544,7 @@ function buildYAMLFromForm() {
   const template      = document.getElementById('q-template').value || '{{ toPrettyJSON .record }}';
   const post          = document.getElementById('q-post').value;
   const inputType     = document.getElementById('q-input-type').value;
-  const outputType    = document.getElementById('q-output-type').value;
+  const outputType    = 'jsonl';
   const workers       = document.getElementById('q-workers').value || '2';
   const rpm           = document.getElementById('q-rpm').value || '60';
   const timeout       = document.getElementById('q-timeout').value || '300s';
@@ -2544,7 +2554,7 @@ function buildYAMLFromForm() {
   const includeMode   = document.getElementById('q-include-input').value; // all | key | none
   const inputPath     = uploadedPath || './input.' + (inputType === 'jsonl' ? 'jsonl' : inputType);
   const ts            = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-  const outputPath    = `data/output/output-${ts}.` + outputType;
+  const outputPath    = `data/output/output-${ts}.jsonl`;
   const task          = (document.getElementById('q-task').value || '').trim();
   const responseFieldsRaw = (document.getElementById('q-response-fields') ? document.getElementById('q-response-fields').value.trim() : '');
 
@@ -2809,67 +2819,51 @@ function applyAdvancedPreset() {
   const includeInputEl = document.getElementById('q-include-input');
   const storeRawEl = document.getElementById('q-store-raw-response');
   const outputFieldsEl = document.getElementById('q-output-fields');
+  const responseFormatEl = document.getElementById('q-response-format');
   const statusEl = document.getElementById('advanced-preset-status');
-  const responseFormat = (document.getElementById('q-response-format').value || '').trim();
+  const responseFormat = (responseFormatEl.value || '').trim();
   const hasSchema = parseSchemaFields().length > 0;
   const hasResponseFields = parseCommaFields('q-response-fields').length > 0;
 
   let status = '';
   switch (preset) {
+    case 'full_result':
     case 'full_csv':
-      outputTypeEl.value = 'csv';
-      includeInputEl.value = 'all';
-      storeRawEl.value = 'true';
-      outputFieldsEl.value = '';
-      status = 'Applied: full output as CSV.';
-      break;
+    case 'full_xlsx':
     case 'full_json':
       outputTypeEl.value = 'jsonl';
       includeInputEl.value = 'all';
       storeRawEl.value = 'true';
       outputFieldsEl.value = '';
-      status = 'Applied: full output as JSON (JSONL).';
+      status = 'Applied: full result. Export format is selected at download.';
       break;
+    case 'key_ai':
     case 'key_ai_csv':
-      outputTypeEl.value = 'csv';
-      includeInputEl.value = 'key';
-      onIncludeInputChange();
-      selectPreferredKeyColumn();
-      storeRawEl.value = 'true';
-      outputFieldsEl.value = '';
-      status = 'Applied: key + AI columns as CSV.';
-      break;
+    case 'key_ai_xlsx':
     case 'key_ai_json':
       outputTypeEl.value = 'jsonl';
+      responseFormatEl.value = responseFormat || 'json';
       includeInputEl.value = 'key';
       onIncludeInputChange();
       selectPreferredKeyColumn();
       storeRawEl.value = 'true';
       outputFieldsEl.value = '';
-      status = 'Applied: key + AI columns as JSON.';
+      status = 'Applied: key + AI columns. Export format is selected at download.';
       break;
+    case 'key_struct':
     case 'key_struct_csv':
-      outputTypeEl.value = 'csv';
-      includeInputEl.value = 'key';
-      onIncludeInputChange();
-      selectPreferredKeyColumn();
-      storeRawEl.value = 'false';
-      outputFieldsEl.value = '';
-      status = 'Applied: key + structured AI columns as CSV (raw hidden).';
-      if (!responseFormat && !hasSchema && !hasResponseFields) {
-        status += ' Note: add schema/response fields to avoid key-only output.';
-      }
-      break;
+    case 'key_struct_xlsx':
     case 'key_struct_json':
       outputTypeEl.value = 'jsonl';
+      responseFormatEl.value = responseFormat || 'json';
       includeInputEl.value = 'key';
       onIncludeInputChange();
       selectPreferredKeyColumn();
       storeRawEl.value = 'false';
       outputFieldsEl.value = '';
-      status = 'Applied: key + structured AI columns as JSON (raw hidden).';
+      status = 'Applied: key + structured AI columns (raw hidden). Export format is selected at download.';
       if (!responseFormat && !hasSchema && !hasResponseFields) {
-        status += ' Note: add schema/response fields to avoid key-only output.';
+        status += ' Note: add schema/response fields for deterministic columns.';
       }
       break;
     default:
@@ -2877,6 +2871,7 @@ function applyAdvancedPreset() {
   }
 
   onIncludeInputChange();
+  onResponseFormatChange();
   updateOutputStructureSummary();
   if (statusEl) statusEl.textContent = status;
 }

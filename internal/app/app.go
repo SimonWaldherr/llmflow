@@ -115,7 +115,10 @@ func (a *App) Run(ctx context.Context) error {
 	var writerPrepared bool
 	emit := func(_ int, record map[string]any) error {
 		if !writerPrepared {
-			columns := buildOutputColumns([]input.Record{record}, a.cfg.Processing.ResponseField, a.cfg.Processing.IncludeInputInOutput, a.cfg.Processing.KeyColumn)
+			columns := append([]string(nil), a.cfg.Processing.OutputFields...)
+			if len(columns) == 0 {
+				columns = buildOutputColumns([]input.Record{record}, a.cfg.Processing.ResponseField, a.cfg.Processing.IncludeInputInOutput, a.cfg.Processing.KeyColumn)
+			}
 			if err := writer.Prepare(ctx, columns); err != nil {
 				return err
 			}

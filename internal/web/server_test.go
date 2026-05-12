@@ -1,7 +1,9 @@
 package web
 
 import (
+	"archive/zip"
 	"bytes"
+	"encoding/csv"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -322,6 +324,37 @@ func TestFilesAPI(t *testing.T) {
 		t.Fatalf("download body = %q, want %q", got, "a,b\n1,2\n")
 	}
 
+	req = httptest.NewRequest(http.MethodGet, "/api/files/download/output/result.jsonl?format=csv", nil)
+	req.SetPathValue("dir", "output")
+	req.SetPathValue("name", "result.jsonl")
+	rec = httptest.NewRecorder()
+	srv.handleDownloadFile(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("csv export status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	rows, err := csv.NewReader(strings.NewReader(rec.Body.String())).ReadAll()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := len(rows), 2; got != want {
+		t.Fatalf("csv rows = %d, want %d", got, want)
+	}
+	if rows[0][0] != "ok" || rows[1][0] != "true" {
+		t.Fatalf("csv export rows = %#v", rows)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/files/download/output/result.jsonl?format=xlsx", nil)
+	req.SetPathValue("dir", "output")
+	req.SetPathValue("name", "result.jsonl")
+	rec = httptest.NewRecorder()
+	srv.handleDownloadFile(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("xlsx export status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	if _, err := zip.NewReader(bytes.NewReader(rec.Body.Bytes()), int64(rec.Body.Len())); err != nil {
+		t.Fatalf("xlsx export is not a valid zip package: %v", err)
+	}
+
 	req = httptest.NewRequest(http.MethodDelete, "/api/files/output/result.jsonl", nil)
 	req.SetPathValue("dir", "output")
 	req.SetPathValue("name", "result.jsonl")
@@ -332,6 +365,27 @@ func TestFilesAPI(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(outputDir, "result.jsonl")); !os.IsNotExist(err) {
 		t.Fatalf("expected output file to be deleted, stat err = %v", err)
+	}
+}
+
+func TestNormalizeWebRunOutputForcesJSONL(t *testing.T) {
+	root := t.TempDir()
+	srv := &Server{dataDir: root}
+	cfg := config.Config{
+		API:    config.APIConfig{Model: "m", APIKeyEnv: "K"},
+		Input:  config.InputConfig{Type: "csv"},
+		Output: config.OutputConfig{Type: "csv", Path: filepath.Join(root, "output", "result.csv")},
+		Prompt: config.PromptConfig{InputTemplate: "x"},
+	}
+	got, raw := srv.normalizeWebRunOutput(cfg, "fallback")
+	if got.Output.Type != "jsonl" {
+		t.Fatalf("output type = %q, want jsonl", got.Output.Type)
+	}
+	if filepath.Ext(got.Output.Path) != ".jsonl" {
+		t.Fatalf("output path = %q, want .jsonl extension", got.Output.Path)
+	}
+	if !strings.Contains(raw, "type: jsonl") {
+		t.Fatalf("normalized config does not contain jsonl output: %s", raw)
 	}
 }
 

@@ -11,6 +11,8 @@ func New(cfg config.OutputConfig) (Writer, error) {
 	switch strings.ToLower(cfg.Type) {
 	case "csv":
 		return NewCSVWriter(cfg)
+	case "xlsx":
+		return NewXLSXWriter(cfg)
 	case "jsonl":
 		return NewJSONLWriter(cfg)
 	case "xml":
