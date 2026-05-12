@@ -335,9 +335,9 @@ func writeJSON(w http.ResponseWriter, status int, resp apiResponse) {
 	json.NewEncoder(w).Encode(resp)
 }
 
-func (s *Server) persistJobs() {
+func (s *Server) persistJobs() error {
 	if s == nil {
-		return
+		return nil
 	}
 	s.mu.Lock()
 	state := jobState{Jobs: make([]*JobStatus, 0, len(s.jobs))}
@@ -348,30 +348,112 @@ func (s *Server) persistJobs() {
 	s.mu.Unlock()
 
 	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
-		if s.logger != nil {
-			s.logger.Warn("persist jobs mkdir", "error", err)
-		}
-		return
+		return fmt.Errorf("persist jobs mkdir: %w", err)
 	}
 	data, err := json.MarshalIndent(state, "", "  ")
 	if err != nil {
-		if s.logger != nil {
-			s.logger.Warn("persist jobs marshal", "error", err)
-		}
-		return
+		return fmt.Errorf("persist jobs marshal: %w", err)
 	}
+	if err := writeFileAtomicWithBackup(path, data, 0o640); err != nil {
+		return fmt.Errorf("persist jobs write: %w", err)
+	}
+	return nil
+}
+
+func (s *Server) persistJobsBestEffort(context string) {
+	if err := s.persistJobs(); err != nil && s.logger != nil {
+		s.logger.Warn("persist jobs failed", "context", context, "error", err)
+	}
+}
+
+func writeFileAtomicWithBackup(path string, data []byte, perm fs.FileMode) error {
 	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o640); err != nil {
-		if s.logger != nil {
-			s.logger.Warn("persist jobs write", "error", err)
-		}
-		return
+	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, perm)
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(data); err != nil {
+		_ = f.Close()
+		_ = os.Remove(tmp)
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		_ = f.Close()
+		_ = os.Remove(tmp)
+		return err
+	}
+	if err := f.Close(); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+
+	if _, err := os.Stat(path); err == nil {
+		_ = copyFile(path, path+".bak", perm)
+	} else if err != nil && !os.IsNotExist(err) {
+		_ = os.Remove(tmp)
+		return err
 	}
 	if err := os.Rename(tmp, path); err != nil {
-		if s.logger != nil {
-			s.logger.Warn("persist jobs rename", "error", err)
-		}
+		_ = os.Remove(tmp)
+		return err
 	}
+	if dir, err := os.Open(filepath.Dir(path)); err == nil {
+		_ = dir.Sync()
+		_ = dir.Close()
+	}
+	return nil
+}
+
+func copyFile(src, dst string, perm fs.FileMode) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, perm)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		_ = out.Close()
+		return err
+	}
+	if err := out.Sync(); err != nil {
+		_ = out.Close()
+		return err
+	}
+	return out.Close()
+}
+
+func readJobState(path string) (jobState, error) {
+	var state jobState
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return state, err
+	}
+	if err := json.Unmarshal(data, &state); err != nil {
+		return state, err
+	}
+	return state, nil
+}
+
+func (s *Server) loadJobStateWithBackup(path string) (jobState, error) {
+	state, err := readJobState(path)
+	if err == nil {
+		return state, nil
+	}
+	if os.IsNotExist(err) {
+		return state, err
+	}
+	backupPath := path + ".bak"
+	backupState, backupErr := readJobState(backupPath)
+	if backupErr != nil {
+		return state, fmt.Errorf("parse job state: %w; backup %s failed: %v", err, backupPath, backupErr)
+	}
+	if s.logger != nil {
+		s.logger.Warn("loaded job state backup", "path", path, "backup", backupPath, "error", err)
+	}
+	return backupState, nil
 }
 
 func (s *Server) loadJobs() error {
@@ -379,16 +461,12 @@ func (s *Server) loadJobs() error {
 		return nil
 	}
 	path := s.jobStatePath()
-	data, err := os.ReadFile(path)
+	state, err := s.loadJobStateWithBackup(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil
 		}
 		return fmt.Errorf("read job state: %w", err)
-	}
-	var state jobState
-	if err := json.Unmarshal(data, &state); err != nil {
-		return fmt.Errorf("parse job state: %w", err)
 	}
 	now := time.Now()
 	maxID := 0
@@ -410,7 +488,7 @@ func (s *Server) loadJobs() error {
 	s.jobIDSeq = maxID
 	s.mu.Unlock()
 	if maxID > 0 {
-		s.persistJobs()
+		s.persistJobsBestEffort("load_jobs_recovery")
 	}
 	return nil
 }
@@ -561,7 +639,11 @@ func (s *Server) handleRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	cfg, rawConfig = s.normalizeWebRunOutput(cfg, rawConfig)
-	job := s.enqueueJob(req.Name, rawConfig, req.DryRun, cfg)
+	job, err := s.enqueueJob(req.Name, rawConfig, req.DryRun, cfg)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, apiResponse{Error: "persist job: " + err.Error()})
+		return
+	}
 
 	writeJSON(w, http.StatusAccepted, apiResponse{OK: true, Data: cloneJobStatus(job)})
 }
@@ -587,7 +669,7 @@ func (s *Server) normalizeWebRunOutput(cfg config.Config, fallbackRaw string) (c
 	return cfg, string(raw)
 }
 
-func (s *Server) enqueueJob(name, rawConfig string, dryRun bool, cfg config.Config) *JobStatus {
+func (s *Server) enqueueJob(name, rawConfig string, dryRun bool, cfg config.Config) (*JobStatus, error) {
 	s.mu.Lock()
 	s.jobIDSeq++
 	job := &JobStatus{
@@ -600,7 +682,17 @@ func (s *Server) enqueueJob(name, rawConfig string, dryRun bool, cfg config.Conf
 	}
 	s.jobs = append(s.jobs, job)
 	s.mu.Unlock()
-	s.persistJobs()
+	if err := s.persistJobs(); err != nil {
+		s.mu.Lock()
+		for i, existing := range s.jobs {
+			if existing == job {
+				s.jobs = append(s.jobs[:i], s.jobs[i+1:]...)
+				break
+			}
+		}
+		s.mu.Unlock()
+		return nil, err
+	}
 
 	s.mu.Lock()
 	serverCtx := s.serverCtx
@@ -613,13 +705,13 @@ func (s *Server) enqueueJob(name, rawConfig string, dryRun bool, cfg config.Conf
 
 	s.wg.Add(1)
 	go s.runJob(job, cfg, jobCtx, jobCancel)
-	return job
+	return job, nil
 }
 
 func (s *Server) runJob(job *JobStatus, cfg config.Config, jobCtx context.Context, jobCancel context.CancelFunc) {
 	defer s.wg.Done()
 	defer jobCancel()
-	lc := &logCollector{job: job, mu: &s.mu, persist: s.persistJobs}
+	lc := &logCollector{job: job, mu: &s.mu, persist: func() { s.persistJobsBestEffort("job_log") }}
 	logger := slog.New(slog.NewJSONHandler(lc, &slog.HandlerOptions{Level: slog.LevelDebug}))
 
 	const maxPreviewItems = 20
@@ -628,7 +720,7 @@ func (s *Server) runJob(job *JobStatus, cfg config.Config, jobCtx context.Contex
 		job.Progress.Current = current
 		job.Progress.Total = total
 		s.mu.Unlock()
-		s.persistJobs()
+		s.persistJobsBestEffort("job_progress")
 	}
 	resultPreview := func(index, total int, record map[string]any) {
 		s.mu.Lock()
@@ -637,12 +729,12 @@ func (s *Server) runJob(job *JobStatus, cfg config.Config, jobCtx context.Contex
 		if len(job.Preview) >= maxPreviewItems {
 			job.Preview = append(job.Preview[1:], item)
 			s.mu.Unlock()
-			s.persistJobs()
+			s.persistJobsBestEffort("job_preview")
 			return
 		}
 		job.Preview = append(job.Preview, item)
 		s.mu.Unlock()
-		s.persistJobs()
+		s.persistJobsBestEffort("job_preview")
 	}
 
 	a := app.New(cfg, logger).WithDryRun(job.DryRun).WithProgressFunc(progress).WithResultFunc(resultPreview)
@@ -652,7 +744,7 @@ func (s *Server) runJob(job *JobStatus, cfg config.Config, jobCtx context.Contex
 	job.EndedAt = time.Now()
 	if job.Status == "cancelled" {
 		s.mu.Unlock()
-		s.persistJobs()
+		s.persistJobsBestEffort("job_cancelled")
 		return
 	}
 	if runErr != nil {
@@ -662,7 +754,7 @@ func (s *Server) runJob(job *JobStatus, cfg config.Config, jobCtx context.Contex
 		job.Status = "completed"
 	}
 	s.mu.Unlock()
-	s.persistJobs()
+	s.persistJobsBestEffort("job_finished")
 }
 
 // allowedFileDir validates and returns the absolute path for "input" or "output".
