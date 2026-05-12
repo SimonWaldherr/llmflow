@@ -182,6 +182,91 @@ func TestParseConfigAcceptsJSON(t *testing.T) {
 	}
 }
 
+func TestHandlePreflightReturnsSummaryAndWarnings(t *testing.T) {
+	root := t.TempDir()
+	inputPath := filepath.Join(root, "missing.csv")
+	outputPath := filepath.Join(root, "out.jsonl")
+	cfg := `api:
+  provider: ollama
+  model: llama3
+prompt:
+  input_template: "{{ toPrettyJSON .record }}"
+input:
+  type: csv
+  path: ` + inputPath + `
+output:
+  type: jsonl
+  path: ` + outputPath + `
+processing:
+  include_input_in_output: true
+  response_field: result
+  response_format: json
+  workers: 12
+`
+	body, err := json.Marshal(map[string]string{"config": cfg})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/preflight", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	(&Server{}).handlePreflight(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	var resp apiResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if !resp.OK {
+		t.Fatalf("expected ok response, got %#v", resp)
+	}
+	raw, err := json.Marshal(resp.Data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var data preflightResponse
+	if err := json.Unmarshal(raw, &data); err != nil {
+		t.Fatal(err)
+	}
+	if data.Summary.Provider != config.ProviderOllama || data.Summary.Model != "llama3" {
+		t.Fatalf("unexpected summary: %#v", data.Summary)
+	}
+	if data.Summary.SchemaFields != 0 {
+		t.Fatalf("schema fields = %d, want 0", data.Summary.SchemaFields)
+	}
+	if len(data.Warnings) < 2 {
+		t.Fatalf("expected warnings, got %#v", data.Warnings)
+	}
+	joined := strings.Join(data.Warnings, "\n")
+	if !strings.Contains(joined, "input file does not exist") {
+		t.Fatalf("expected missing input warning, got %#v", data.Warnings)
+	}
+	if !strings.Contains(joined, "structured output is enabled without a schema") {
+		t.Fatalf("expected schema warning, got %#v", data.Warnings)
+	}
+}
+
+func TestBuildPreviewColumnStats(t *testing.T) {
+	columns := []string{"id", "active", "note"}
+	records := []map[string]any{
+		{"id": float64(1), "active": true, "note": ""},
+		{"id": float64(2), "active": false, "note": "ready"},
+	}
+	stats := buildPreviewColumnStats(columns, records)
+	if stats["id"].Type != "number" {
+		t.Fatalf("id type = %q, want number", stats["id"].Type)
+	}
+	if stats["active"].Type != "bool" {
+		t.Fatalf("active type = %q, want bool", stats["active"].Type)
+	}
+	if stats["note"].Empty != 1 {
+		t.Fatalf("note empty = %d, want 1", stats["note"].Empty)
+	}
+	if len(stats["id"].Examples) == 0 {
+		t.Fatal("expected id examples")
+	}
+}
+
 func TestHandleModelsOpenAICompatible(t *testing.T) {
 	providerServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/models" {

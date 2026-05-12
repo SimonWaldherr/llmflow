@@ -68,6 +68,7 @@ The web UI exposes:
 |--------|------|-------------|
 | `GET`  | `/health` | Liveness / readiness probe |
 | `POST` | `/api/validate` | Validate a YAML config |
+| `POST` | `/api/preflight` | Validate a config and return run-readiness summary and warnings |
 | `POST` | `/api/run` | Submit a job |
 | `GET`  | `/api/jobs` | List recent jobs |
 | `GET`  | `/api/jobs/{id}` | Get job status and logs |

@@ -197,6 +197,7 @@ func (s *Server) Run(ctx context.Context) error {
 
 	mux.HandleFunc("GET /health", s.handleHealth)
 	mux.HandleFunc("POST /api/validate", s.handleValidate)
+	mux.HandleFunc("POST /api/preflight", s.handlePreflight)
 	mux.HandleFunc("POST /api/run", s.handleRun)
 	mux.HandleFunc("GET /api/jobs", s.handleListJobs)
 	mux.HandleFunc("GET /api/jobs/", s.handleGetJob)
@@ -280,6 +281,26 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 
 type validateRequest struct {
 	Config string `json:"config"`
+}
+
+type preflightResponse struct {
+	Summary  preflightSummary `json:"summary"`
+	Warnings []string         `json:"warnings,omitempty"`
+}
+
+type preflightSummary struct {
+	Provider       string `json:"provider"`
+	Model          string `json:"model"`
+	InputType      string `json:"input_type"`
+	InputPath      string `json:"input_path,omitempty"`
+	OutputType     string `json:"output_type"`
+	OutputPath     string `json:"output_path,omitempty"`
+	Workers        int    `json:"workers"`
+	RateLimitRPM   int    `json:"rate_limit_rpm"`
+	ResponseFormat string `json:"response_format,omitempty"`
+	SchemaFields   int    `json:"schema_fields"`
+	ToolsEnabled   bool   `json:"tools_enabled"`
+	EnrichEnabled  bool   `json:"enrich_enabled"`
 }
 
 type modelsRequest struct {
@@ -406,6 +427,70 @@ func (s *Server) handleValidate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, apiResponse{OK: true})
+}
+
+func (s *Server) handlePreflight(w http.ResponseWriter, r *http.Request) {
+	var req validateRequest
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, apiResponse{Error: "invalid JSON body"})
+		return
+	}
+	cfg, err := parseConfig(req.Config)
+	if err != nil {
+		writeJSON(w, http.StatusOK, apiResponse{OK: false, Error: err.Error()})
+		return
+	}
+	summary, warnings := s.buildPreflight(cfg)
+	writeJSON(w, http.StatusOK, apiResponse{OK: true, Data: preflightResponse{Summary: summary, Warnings: warnings}})
+}
+
+func (s *Server) buildPreflight(cfg config.Config) (preflightSummary, []string) {
+	summary := preflightSummary{
+		Provider:       cfg.API.Provider,
+		Model:          cfg.API.Model,
+		InputType:      cfg.Input.Type,
+		InputPath:      cfg.Input.Path,
+		OutputType:     cfg.Output.Type,
+		OutputPath:     cfg.Output.Path,
+		Workers:        cfg.Processing.Workers,
+		RateLimitRPM:   cfg.API.RateLimitRPM,
+		ResponseFormat: cfg.Processing.ResponseFormat,
+		SchemaFields:   len(cfg.Processing.ResponseSchema),
+		ToolsEnabled:   cfg.Tools.Enabled,
+		EnrichEnabled:  cfg.Enrich.Enabled,
+	}
+
+	var warnings []string
+	if strings.TrimSpace(cfg.Input.Path) == "" && cfg.Input.Type != "sqlite" && cfg.Input.Type != "mssql" {
+		warnings = append(warnings, "input.path is empty; the job needs a readable input file")
+	} else if cfg.Input.Path != "" {
+		if _, err := os.Stat(cfg.Input.Path); err != nil {
+			if os.IsNotExist(err) {
+				warnings = append(warnings, "input file does not exist on the server")
+			} else {
+				warnings = append(warnings, "input file cannot be checked: "+err.Error())
+			}
+		}
+	}
+	if strings.TrimSpace(cfg.Output.Path) == "" && cfg.Output.Type != "sqlite" && cfg.Output.Type != "mssql" {
+		warnings = append(warnings, "output.path is empty; generated results need a destination")
+	}
+	if cfg.Processing.Workers > 8 && cfg.API.RateLimitRPM > 0 {
+		warnings = append(warnings, "high worker count with a rate limit can cause queued requests; lower workers if jobs look stalled")
+	}
+	if cfg.Processing.ResponseFormat != "" && len(cfg.Processing.ResponseSchema) == 0 {
+		warnings = append(warnings, "structured output is enabled without a schema; columns may vary between records")
+	}
+	if cfg.Processing.IncludeInputInOutput && cfg.Processing.KeyColumn == "" && len(cfg.Processing.OutputFields) == 0 {
+		warnings = append(warnings, "output includes all input fields; choose a key column or output fields for smaller exports")
+	}
+	if cfg.Tools.Enabled && !(cfg.Tools.WebFetch || cfg.Tools.WebSearch || cfg.Tools.WebExtractLinks || cfg.Tools.TextStats || cfg.Tools.RegexExtract || cfg.Tools.JSONExtract || cfg.Tools.CodeExecute || cfg.Tools.SQLQuery) {
+		warnings = append(warnings, "tools.enabled is true, but no individual tool is enabled")
+	}
+	if cfg.Enrich.Enabled && strings.TrimSpace(cfg.Enrich.Column) == "" {
+		warnings = append(warnings, "data enrichment is enabled without enrich.column")
+	}
+	return summary, warnings
 }
 
 func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
@@ -876,6 +961,20 @@ func (s *Server) handleOpenAPI(w http.ResponseWriter, _ *http.Request) {
 						}}},
 					},
 					"responses": map[string]any{"200": map[string]any{"description": "Validation result"}},
+				},
+			},
+			"/api/preflight": map[string]any{
+				"post": map[string]any{
+					"summary": "Validate a config and return run-readiness warnings",
+					"requestBody": map[string]any{
+						"required": true,
+						"content": map[string]any{"application/json": map[string]any{"schema": map[string]any{
+							"type":       "object",
+							"properties": map[string]any{"config": map[string]any{"type": "string"}},
+							"required":   []string{"config"},
+						}}},
+					},
+					"responses": map[string]any{"200": map[string]any{"description": "Preflight result"}},
 				},
 			},
 			"/api/run": map[string]any{
@@ -2202,8 +2301,16 @@ type previewRequest struct {
 }
 
 type previewResponse struct {
-	Columns []string         `json:"columns"`
-	Records []map[string]any `json:"records"`
+	Columns     []string                 `json:"columns"`
+	Records     []map[string]any         `json:"records"`
+	SampleCount int                      `json:"sample_count"`
+	ColumnStats map[string]previewColumn `json:"column_stats,omitempty"`
+}
+
+type previewColumn struct {
+	Type     string `json:"type"`
+	Empty    int    `json:"empty"`
+	Examples []any  `json:"examples,omitempty"`
 }
 
 func (s *Server) handlePreview(w http.ResponseWriter, r *http.Request) {
@@ -2275,9 +2382,79 @@ func (s *Server) handlePreview(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, apiResponse{OK: true, Data: previewResponse{
-		Columns: columns,
-		Records: recs,
+		Columns:     columns,
+		Records:     recs,
+		SampleCount: len(records),
+		ColumnStats: buildPreviewColumnStats(columns, recs),
 	}})
+}
+
+func buildPreviewColumnStats(columns []string, records []map[string]any) map[string]previewColumn {
+	stats := make(map[string]previewColumn, len(columns))
+	for _, col := range columns {
+		typeCounts := map[string]int{}
+		seenExamples := map[string]struct{}{}
+		pc := previewColumn{}
+		for _, rec := range records {
+			v, ok := rec[col]
+			if !ok || isEmptyPreviewValue(v) {
+				pc.Empty++
+				continue
+			}
+			typ := previewValueType(v)
+			typeCounts[typ]++
+			if len(pc.Examples) < 3 {
+				key := fmt.Sprint(v)
+				if _, seen := seenExamples[key]; !seen {
+					seenExamples[key] = struct{}{}
+					pc.Examples = append(pc.Examples, v)
+				}
+			}
+		}
+		pc.Type = dominantPreviewType(typeCounts)
+		stats[col] = pc
+	}
+	return stats
+}
+
+func isEmptyPreviewValue(v any) bool {
+	if v == nil {
+		return true
+	}
+	if s, ok := v.(string); ok {
+		return strings.TrimSpace(s) == ""
+	}
+	return false
+}
+
+func previewValueType(v any) string {
+	switch v.(type) {
+	case bool:
+		return "bool"
+	case float64, float32, int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
+		return "number"
+	case []any:
+		return "array"
+	case map[string]any:
+		return "object"
+	default:
+		return "string"
+	}
+}
+
+func dominantPreviewType(counts map[string]int) string {
+	if len(counts) == 0 {
+		return "empty"
+	}
+	bestType := "string"
+	bestCount := -1
+	for typ, count := range counts {
+		if count > bestCount || (count == bestCount && typ < bestType) {
+			bestType = typ
+			bestCount = count
+		}
+	}
+	return bestType
 }
 
 func parseConfig(yamlText string) (config.Config, error) {
