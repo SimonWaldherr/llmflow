@@ -246,6 +246,77 @@ processing:
 	}
 }
 
+func TestHandleRunFailsWhenJobCannotBePersisted(t *testing.T) {
+	root := t.TempDir()
+	jobsPath := filepath.Join(root, "jobs.json")
+	if err := os.Mkdir(jobsPath, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	inputPath := filepath.Join(root, "input.csv")
+	if err := os.WriteFile(inputPath, []byte("name\nAlice\n"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	outputPath := filepath.Join(root, "out.jsonl")
+	runConfig := `api:
+  provider: ollama
+  model: llama3
+prompt:
+  input_template: "{{ .name }}"
+input:
+  type: csv
+  path: ` + inputPath + `
+output:
+  type: jsonl
+  path: ` + outputPath + `
+processing:
+  dry_run: true
+`
+	body, err := json.Marshal(map[string]any{"config": runConfig, "dry_run": true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := &Server{dataDir: root, jobsFile: jobsPath}
+	req := httptest.NewRequest(http.MethodPost, "/api/run", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	srv.handleRun(rec, req)
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusInternalServerError, rec.Body.String())
+	}
+	if len(srv.jobs) != 0 {
+		t.Fatalf("expected failed enqueue to roll back in-memory job, got %d job(s)", len(srv.jobs))
+	}
+}
+
+func TestLoadJobsFallsBackToBackup(t *testing.T) {
+	root := t.TempDir()
+	jobsDir := filepath.Join(root, "jobs")
+	if err := os.MkdirAll(jobsDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	jobsPath := filepath.Join(jobsDir, "jobs.json")
+	if err := os.WriteFile(jobsPath, []byte("{not-json"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	backup := jobState{Jobs: []*JobStatus{{ID: 7, Status: "completed", StartedAt: time.Now(), Config: "api:\n  provider: ollama\n  model: llama3\n"}}}
+	data, err := json.Marshal(backup)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(jobsPath+".bak", data, 0o640); err != nil {
+		t.Fatal(err)
+	}
+	srv := &Server{dataDir: root, jobsFile: jobsPath}
+	if err := srv.loadJobs(); err != nil {
+		t.Fatalf("loadJobs returned error: %v", err)
+	}
+	if len(srv.jobs) != 1 || srv.jobs[0].ID != 7 {
+		t.Fatalf("expected backup job #7, got %#v", srv.jobs)
+	}
+	if srv.jobIDSeq != 7 {
+		t.Fatalf("jobIDSeq = %d, want 7", srv.jobIDSeq)
+	}
+}
+
 func TestBuildPreviewColumnStats(t *testing.T) {
 	columns := []string{"id", "active", "note"}
 	records := []map[string]any{

@@ -20,6 +20,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -1155,13 +1156,22 @@ func (s *Server) handleSwaggerUI(w http.ResponseWriter, _ *http.Request) {
 
 func (s *Server) handleListJobs(w http.ResponseWriter, r *http.Request) {
 	showArchived := r.URL.Query().Get("archived") == "true"
+	limit := 500
+	if rawLimit := strings.TrimSpace(r.URL.Query().Get("limit")); rawLimit != "" {
+		if parsed, err := strconv.Atoi(rawLimit); err == nil && parsed > 0 {
+			limit = parsed
+		}
+	}
+	if limit > 2000 {
+		limit = 2000
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	n := len(s.jobs)
 	start := 0
-	if n > 100 {
-		start = n - 100
+	if n > limit {
+		start = n - limit
 	}
 	result := make([]*JobStatus, 0, n-start)
 	for i := n - 1; i >= start; i-- {
@@ -1227,7 +1237,7 @@ func (s *Server) handleCancelJob(w http.ResponseWriter, r *http.Request) {
 			}
 			resp = apiResponse{OK: true}
 			s.mu.Unlock()
-			s.persistJobs()
+			s.persistJobsBestEffort("cancel_job")
 			writeJSON(w, http.StatusOK, resp)
 			return
 		}
@@ -1247,7 +1257,7 @@ func (s *Server) handleArchiveJob(w http.ResponseWriter, r *http.Request) {
 		if j.ID == id {
 			j.Archived = true
 			s.mu.Unlock()
-			s.persistJobs()
+			s.persistJobsBestEffort("archive_job")
 			writeJSON(w, http.StatusOK, apiResponse{OK: true})
 			return
 		}
@@ -1287,7 +1297,11 @@ func (s *Server) handleRerunJob(w http.ResponseWriter, r *http.Request) {
 	if name == "" {
 		name = fmt.Sprintf("job #%d", source.ID)
 	}
-	job := s.enqueueJob(name+" (re-run)", source.Config, source.DryRun, cfg)
+	job, err := s.enqueueJob(name+" (re-run)", source.Config, source.DryRun, cfg)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, apiResponse{Error: "persist job: " + err.Error()})
+		return
+	}
 	writeJSON(w, http.StatusAccepted, apiResponse{OK: true, Data: cloneJobStatus(job)})
 }
 
@@ -1307,7 +1321,7 @@ func (s *Server) handleDeleteJob(w http.ResponseWriter, r *http.Request) {
 			}
 			s.jobs = append(s.jobs[:i], s.jobs[i+1:]...)
 			s.mu.Unlock()
-			s.persistJobs()
+			s.persistJobsBestEffort("delete_job")
 			writeJSON(w, http.StatusOK, apiResponse{OK: true})
 			return
 		}
@@ -3324,7 +3338,12 @@ func (s *Server) processWatcher(ctx context.Context, wc *WatcherConfig) {
 		jobName = jobName + ": " + name
 
 		s.logger.Info("watcher: launching job", "watcher", wc.Name, "file", name)
-		job := s.enqueueJob(jobName, jobConfig, false, cfg)
+		job, err := s.enqueueJob(jobName, jobConfig, false, cfg)
+		if err != nil {
+			s.logger.Warn("watcher: cannot persist job", "watcher", wc.Name, "file", name, "error", err)
+			_ = os.Rename(activePath, filepath.Join(doneDir, name))
+			continue
+		}
 
 		// After job completes, move file to done/ in a background goroutine.
 		go func(j *JobStatus, ap, dp string) {

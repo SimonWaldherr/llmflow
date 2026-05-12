@@ -3491,7 +3491,9 @@ function stopAutoRefresh() {
 async function refreshJobs() {
   const showArchived = document.getElementById('show-archived').checked;
   try {
-    const r = await fetch('/api/jobs' + (showArchived ? '?archived=true' : ''));
+    const params = new URLSearchParams({ limit: '500' });
+    if (showArchived) params.set('archived', 'true');
+    const r = await fetch('/api/jobs?' + params.toString());
     const d = await r.json();
     const list  = document.getElementById('job-list');
     const badge = document.getElementById('jobs-running-badge');
