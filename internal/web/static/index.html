@@ -363,6 +363,86 @@ textarea {
   margin-top: 12px;
 }
 
+.run-summary {
+  position: sticky;
+  bottom: 12px;
+  z-index: 20;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  margin-top: 14px;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(8px);
+}
+
+.run-summary-main {
+  min-width: 0;
+}
+
+.run-summary-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.run-summary-status {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.run-summary-status.ready {
+  color: var(--green);
+  background: color-mix(in srgb, var(--green) 14%, transparent);
+}
+
+.run-summary-status.needs-attention {
+  color: var(--yellow);
+  background: color-mix(in srgb, var(--yellow) 16%, transparent);
+}
+
+.run-summary-details {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 7px;
+}
+
+.run-chip {
+  max-width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 3px 8px;
+  color: var(--text-muted);
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.run-summary-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.autosave-note {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
 .btn {
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -1033,6 +1113,14 @@ textarea {
   .ai-assist-label {
     margin-top: 0;
   }
+
+  .run-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .run-summary-actions {
+    justify-content: flex-start;
+  }
 }
 </style>
 </head>
@@ -1542,6 +1630,20 @@ textarea {
     <button class="btn btn-secondary" onclick="validateQuick()">Validate</button>
     <button class="btn btn-primary" onclick="runQuick(false)">Run</button>
     <button class="btn btn-secondary" onclick="runQuick(true)">Dry Run</button>
+    <span id="quick-autosave-note" class="autosave-note"></span>
+  </div>
+  <div class="run-summary" aria-live="polite">
+    <div class="run-summary-main">
+      <div class="run-summary-title">
+        <span>Ready Check</span>
+        <span id="run-ready-status" class="run-summary-status needs-attention">Needs input</span>
+      </div>
+      <div id="run-ready-details" class="run-summary-details"></div>
+    </div>
+    <div class="run-summary-actions">
+      <button class="btn btn-secondary" type="button" onclick="runQuickValidated(true)">Validate & Dry Run</button>
+      <button class="btn btn-primary" type="button" onclick="runQuickValidated(false)">Validate & Run</button>
+    </div>
   </div>
   <div id="quick-status" class="status-bar"></div>
 </div>
@@ -1875,6 +1977,8 @@ async function uploadFile(file) {
       }
       await refreshFiles();
       await loadPreview();
+      saveQuickFormState();
+      updateRunReadiness();
     } else {
       showStatus('quick-status', 'error', 'Upload failed: ' + d.error);
     }
@@ -2473,6 +2577,8 @@ function useFileAsInput(path, name) {
   el.style.display = 'block';
   showStatus('quick-status', 'ok', 'Input file set to: ' + name);
   loadPreview();
+  saveQuickFormState();
+  updateRunReadiness();
 }
 
 /**
@@ -3044,6 +3150,103 @@ async function apiAction(endpoint, method = 'POST') {
   return r.json();
 }
 
+// ── Quick setup usability helpers ─────────────────────────────────
+const QUICK_FORM_STATE_KEY = 'llmflow-quick-form-state-v2';
+const QUICK_FORM_FIELDS = [
+  'q-task', 'q-provider', 'q-model', 'q-model-custom', 'q-baseurl', 'q-api-version',
+  'q-system', 'q-pre', 'q-template', 'q-post', 'q-input-type', 'q-response-field',
+  'q-include-input', 'q-key-column', 'q-workers', 'q-name', 'q-response-format',
+  'q-response-schema', 'q-debug-field', 'q-debug-field-hint', 'q-thinking',
+  'q-advanced-preset', 'q-rpm', 'q-timeout', 'q-retries', 'q-continue-on-error',
+  'q-prompt-caching', 'q-parse-json', 'q-strict-output', 'q-store-raw-response',
+  'q-include-thinking-response', 'q-response-fields', 'q-output-fields',
+  'q-batch-size', 'q-debug', 't-enabled', 't-web-fetch', 't-web-search',
+  't-web-extract-links', 't-code-exec', 't-sql-query', 't-max-rounds',
+  'e-enabled', 'e-column', 'e-output-field', 'e-max-chars'
+];
+
+function quickFieldValue(el) {
+  if (!el) return undefined;
+  if (el.type === 'checkbox') return el.checked;
+  return el.value;
+}
+
+function setQuickFieldValue(el, value) {
+  if (!el || value === undefined || value === null) return;
+  if (el.type === 'checkbox') el.checked = !!value;
+  else el.value = String(value);
+}
+
+function saveQuickFormState() {
+  const state = { uploadedPath, fields: {} };
+  for (const id of QUICK_FORM_FIELDS) {
+    const el = document.getElementById(id);
+    if (!el) continue;
+    state.fields[id] = quickFieldValue(el);
+  }
+  const apiKey = (document.getElementById('q-apikey').value || '').trim();
+  if (apiKey && !/^sk-|^AIza|^eyJ/i.test(apiKey)) {
+    state.fields['q-apikey'] = apiKey;
+  }
+  localStorage.setItem(QUICK_FORM_STATE_KEY, JSON.stringify(state));
+  const note = document.getElementById('quick-autosave-note');
+  if (note) note.textContent = 'Saved locally';
+}
+
+function restoreQuickFormState() {
+  try {
+    const raw = localStorage.getItem(QUICK_FORM_STATE_KEY);
+    if (!raw) return false;
+    const state = JSON.parse(raw);
+    const fields = state && state.fields ? state.fields : {};
+    if (fields['q-provider']) {
+      setQuickFieldValue(document.getElementById('q-provider'), fields['q-provider']);
+      applyProviderDefaults(fields['q-provider']);
+    }
+    for (const [id, value] of Object.entries(fields)) {
+      setQuickFieldValue(document.getElementById(id), value);
+    }
+    if (state.uploadedPath) {
+      uploadedPath = state.uploadedPath;
+      const el = document.getElementById('upload-path');
+      if (el) {
+        el.textContent = '✓ ' + uploadedPath;
+        el.style.display = 'block';
+      }
+    }
+    const note = document.getElementById('quick-autosave-note');
+    if (note) note.textContent = 'Restored from browser';
+    return true;
+  } catch(_) {
+    return false;
+  }
+}
+
+function updateRunReadiness() {
+  const statusEl = document.getElementById('run-ready-status');
+  const detailsEl = document.getElementById('run-ready-details');
+  if (!statusEl || !detailsEl) return;
+  const model = getModelValue();
+  const provider = document.getElementById('q-provider').value;
+  const task = (document.getElementById('q-task').value || '').trim();
+  const format = document.getElementById('q-response-format').value || 'single field';
+  const inputLabel = uploadedPath || 'No file selected';
+  const warnings = [];
+  if (!uploadedPath) warnings.push('select an input file');
+  if (!model) warnings.push('select a model');
+  if (!task && !document.getElementById('q-pre').value.trim() && !document.getElementById('q-post').value.trim()) {
+    warnings.push('describe the task');
+  }
+  statusEl.className = 'run-summary-status ' + (warnings.length ? 'needs-attention' : 'ready');
+  statusEl.textContent = warnings.length ? 'Needs ' + warnings[0] : 'Ready';
+  detailsEl.innerHTML = [
+    `Input: ${inputLabel}`,
+    `Model: ${provider}/${model || 'not selected'}`,
+    `Output: ${format}`,
+    warnings.length ? `Next: ${warnings.join(', ')}` : 'Validate and start when ready'
+  ].map(text => `<span class="run-chip" title="${escHtml(text)}">${escHtml(text)}</span>`).join('');
+}
+
 // ── Validate / Run ────────────────────────────────────────────────
 /**
  * Validates the Quick Start form by submitting the generated YAML.
@@ -3053,6 +3256,7 @@ async function validateQuick() {
   const d = await apiPost('/api/validate', { config: buildYAMLFromForm() });
   if (d.ok) showStatus('quick-status', 'ok', 'Configuration is valid ✓');
   else showStatus('quick-status', 'error', 'Validation failed: ' + d.error);
+  return d;
 }
 
 /**
@@ -3080,6 +3284,14 @@ async function runQuick(dryRun) {
   } else {
     showStatus('quick-status', 'error', 'Failed: ' + d.error);
   }
+}
+
+async function runQuickValidated(dryRun) {
+  showStatus('quick-status', 'info', 'Validating configuration...');
+  const validation = await validateQuick();
+  if (!validation || !validation.ok) return;
+  showStatus('quick-status', 'info', dryRun ? 'Starting dry run...' : 'Starting run...');
+  await runQuick(dryRun);
 }
 
 /**
@@ -3672,6 +3884,8 @@ function applyDetected(info, { markTouched=true } = {}) {
   setModelSuggestions(info.models || []);
   updateProviderUI(info.provider);
   saveProviderPrefs();
+  saveQuickFormState();
+  updateRunReadiness();
 }
 
 /**
@@ -3811,6 +4025,8 @@ async function suggestConfig() {
     statusEl.textContent = s.notes ? `✓ ${s.notes}` : '✓ Fields configured — review and adjust as needed.';
     statusEl.className = 'suggest-status ok';
     quickFormTouched = true;
+    saveQuickFormState();
+    updateRunReadiness();
   } catch(e) {
     statusEl.textContent = 'Request failed: ' + e.message;
     statusEl.className = 'suggest-status error';
@@ -3967,21 +4183,31 @@ const restoredProviderPrefs = applySavedProviderPrefs();
 if (!restoredProviderPrefs) {
   applyProviderDefaults(document.getElementById('q-provider').value);
 }
+restoreQuickFormState();
 loadLLMPresets();
 updateProviderUI(document.getElementById('q-provider').value);
 syncAPIKeyFieldMode();
+onModelSelectChange();
 onIncludeInputChange();
 onResponseFormatChange();
 updateOutputStructureSummary();
 updateLLMResponseSample();
 updateOutputRecordSample();
 reorderQuickSections();
+updateRunReadiness();
 document.getElementById('ui-mode-toggle').addEventListener('click', () => {
   const panel = document.getElementById('panel-quick');
   const toExpert = panel ? panel.classList.contains('ui-simple') : true;
   applyUIMode(toExpert ? 'expert' : 'simple');
 });
 applyUIMode('simple');
+document.querySelectorAll('#panel-quick input, #panel-quick select, #panel-quick textarea').forEach(el => {
+  const eventName = el.tagName === 'SELECT' || el.type === 'checkbox' ? 'change' : 'input';
+  el.addEventListener(eventName, () => {
+    saveQuickFormState();
+    updateRunReadiness();
+  });
+});
 // Do not auto-refresh provider/model lists on every page load.
 // Refresh is user-triggered via the explicit buttons.
 </script>
