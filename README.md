@@ -40,7 +40,7 @@ structured data.
 - Standing orders / file watchers for folder-based automation
 - Secrets resolved from environment variables
 - Structured JSON logs via `log/slog`
-- Configurable concurrency, rate limiting, and retry count
+- Configurable concurrency, system-wide worker cap, rate limiting, and retry count
 - Web UI with optional Bearer-token authentication and graceful shutdown
 - Live job monitoring with progress, logs, intermediate result previews, and re-run support for completed jobs
 - Optional sandboxed code execution tool via nanoGo
@@ -215,7 +215,7 @@ api:
   base_url: https://api.openai.com/v1
   api_version: 2024-10-21   # Azure OpenAI only
   api_key_env: OPENAI_API_KEY   # name of the env var holding the API key
-  api_key: sk-...           # optional direct key; overrides api_key_env when set
+  api_key: sk-...           # optional direct key; prefer api_key_env for production
   model: gpt-4o-mini
   timeout: 60s
   max_output_tokens: 1000
@@ -247,7 +247,7 @@ processing:
   response_field: llm_response
   parse_json_response: true
   continue_on_error: true
-  workers: 2                # parallel workers
+  workers: 2                # per-job workers; web server caps total workers with LLMFLOW_MAX_WORKERS
   max_retries: 3            # LLM call retries per record
   dry_run: false
   batch_size: 1

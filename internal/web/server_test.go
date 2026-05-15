@@ -246,6 +246,106 @@ processing:
 	}
 }
 
+func TestPreflightReportsSystemWorkerCap(t *testing.T) {
+	cfg := `api:
+  provider: ollama
+  model: llama3
+prompt:
+  input_template: "{{ toPrettyJSON .record }}"
+input:
+  type: csv
+  path: missing.csv
+output:
+  type: jsonl
+  path: out.jsonl
+processing:
+  workers: 12
+`
+	body, err := json.Marshal(map[string]string{"config": cfg})
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := &Server{maxWorkers: 4}
+	req := httptest.NewRequest(http.MethodPost, "/api/preflight", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	srv.handlePreflight(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	var resp apiResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(resp.Data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var data preflightResponse
+	if err := json.Unmarshal(raw, &data); err != nil {
+		t.Fatal(err)
+	}
+	if data.Summary.Workers != 12 || data.Summary.EffectiveWorkers != 4 || data.Summary.MaxWorkers != 4 {
+		t.Fatalf("unexpected worker summary: %#v", data.Summary)
+	}
+	if !strings.Contains(strings.Join(data.Warnings, "\n"), "worker count will be capped") {
+		t.Fatalf("expected worker cap warning, got %#v", data.Warnings)
+	}
+}
+
+func TestHandleRunSanitizesStoredConfigAndUsesUniqueOutput(t *testing.T) {
+	root := t.TempDir()
+	inputPath := filepath.Join(root, "input.csv")
+	outputPath := filepath.Join(root, "out.jsonl")
+	if err := os.WriteFile(inputPath, []byte("name\nAlice\n"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	cfg := `api:
+  provider: openai
+  api_key: sk-test-direct
+  model: gpt-test
+prompt:
+  input_template: "{{ .name }}"
+input:
+  type: csv
+  path: ` + inputPath + `
+  csv:
+    has_header: true
+output:
+  type: jsonl
+  path: ` + outputPath + `
+processing:
+  include_input_in_output: true
+  response_field: result
+  workers: 9
+`
+	body, err := json.Marshal(map[string]any{"config": cfg, "dry_run": true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := &Server{dataDir: root, maxWorkers: 2}
+	req := httptest.NewRequest(http.MethodPost, "/api/run", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	srv.handleRun(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusAccepted, rec.Body.String())
+	}
+	job := decodeJobFromResponse(t, rec.Body.Bytes())
+	if strings.Contains(job.Config, "sk-test-direct") {
+		t.Fatalf("stored config contains direct API key: %s", job.Config)
+	}
+	if !strings.Contains(job.Config, "workers: 2") {
+		t.Fatalf("stored config does not contain capped workers: %s", job.Config)
+	}
+	wantOutput := filepath.Join(root, "out.job-1.jsonl")
+	if !strings.Contains(job.Config, wantOutput) {
+		t.Fatalf("stored config does not contain unique output path %q: %s", wantOutput, job.Config)
+	}
+	waitForJobStatus(t, srv, job.ID, "completed")
+	if _, err := os.Stat(wantOutput); err != nil {
+		t.Fatalf("expected unique output file %s: %v", wantOutput, err)
+	}
+}
+
 func TestHandleRunFailsWhenJobCannotBePersisted(t *testing.T) {
 	root := t.TempDir()
 	jobsPath := filepath.Join(root, "jobs.json")

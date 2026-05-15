@@ -1275,6 +1275,7 @@ textarea {
         <input type="file" id="file-input" style="display:none" accept=".csv,.json,.jsonl,.xml">
         <div id="upload-path" class="upload-path" style="display:none"></div>
       </div>
+      <div class="hint">Use one table-like file. The first row should contain column names for CSV files.</div>
     </div>
     <div class="quick-grid">
       <div class="form-group">
@@ -1334,6 +1335,7 @@ textarea {
         <textarea id="q-task" class="ai-assist-input" rows="2" placeholder="Example: classify each product for freight shipping need and expiry-date relevance."></textarea>
         <button class="btn btn-accent" onclick="suggestConfig()" id="suggest-btn">Configure with AI</button>
       </div>
+      <div class="hint">Write the result you need in plain language, for example: "For every row, decide whether shipping must be done by forwarding agent and explain why."</div>
       <div id="suggest-status" class="suggest-status"></div>
     </div>
   </div>
@@ -1376,7 +1378,7 @@ textarea {
       <div class="form-group q-cloud-only">
         <label>API Key / Env Name</label>
         <input id="q-apikey" type="text" placeholder="OPENAI_API_KEY or sk-...">
-        <div class="hint">Leave blank for local providers.</div>
+        <div class="hint">Recommended for production: enter an environment variable name such as OPENAI_API_KEY. Direct keys work for the current run but are not saved in job history.</div>
       </div>
       <div class="form-group">
         <label>Base URL (optional)</label>
@@ -1445,6 +1447,7 @@ textarea {
       <div class="form-group">
         <label>Workers</label>
         <input id="q-workers" type="number" value="2" min="1" max="32">
+        <div class="hint" id="q-workers-hint">Workers process rows in parallel. Use 1-2 for small tests; the server limit is applied automatically.</div>
       </div>
       <div class="form-group">
         <label>Job Name (optional)</label>
@@ -1471,6 +1474,7 @@ textarea {
         <div class="form-group quick-full" id="response-schema-group" style="display:none">
           <label>Schema (optional, one field per line)</label>
           <textarea id="q-response-schema" class="schema-editor" rows="4" placeholder="needs_freight: true|false&#10;shipping_type: DHL|UPS|Forwarder&#10;reason: short sentence"></textarea>
+          <div class="hint">Each line becomes one output column. Left side is the column name, right side explains the allowed value or expected text.</div>
         </div>
         <div class="form-group ui-expert-only" id="debug-field-group" style="display:none">
           <label>Debug Field (optional)</label>
@@ -1757,6 +1761,7 @@ processing:
   include_input_in_output: true
   response_field: llm_response
   continue_on_error: true
+  # Per-job workers. The server also enforces LLMFLOW_MAX_WORKERS across all running jobs.
   workers: 2
   max_retries: 3
   dry_run: false
@@ -1999,6 +2004,33 @@ const fileInput  = document.getElementById('file-input');
 const filesUploadZone = document.getElementById('files-upload-zone');
 const filesFileInput = document.getElementById('files-file-input');
 let uploadedPath = '';
+let serverSettings = { max_workers: 0, max_workers_env: 'LLMFLOW_MAX_WORKERS', running_jobs: 0 };
+
+async function loadServerSettings() {
+  try {
+    const r = await fetch('/api/settings');
+    const d = await r.json();
+    if (d.ok && d.data) {
+      serverSettings = d.data;
+      applyServerSettings();
+    }
+  } catch(e) { console.error('settings:', e); }
+}
+
+function applyServerSettings() {
+  const max = Number(serverSettings.max_workers || 0);
+  const workersInput = document.getElementById('q-workers');
+  const hint = document.getElementById('q-workers-hint');
+  if (workersInput && max > 0) {
+    workersInput.max = String(max);
+    if (Number(workersInput.value || 0) > max) workersInput.value = String(max);
+  }
+  if (hint) {
+    hint.textContent = max > 0
+      ? `Workers process rows in parallel. The server-wide maximum is ${max} (${serverSettings.max_workers_env || 'LLMFLOW_MAX_WORKERS'}); extra parallel jobs wait automatically.`
+      : 'Workers process rows in parallel. Use 1-2 for small tests; no server-wide limit is configured.';
+  }
+}
 
 uploadZone.addEventListener('click', () => fileInput.click());
 uploadZone.addEventListener('dragover', e => { e.preventDefault(); uploadZone.classList.add('dragover'); });
@@ -3355,11 +3387,14 @@ function renderPreflight(data) {
     return;
   }
   const s = data.summary;
+  const workerText = s.max_workers && s.effective_workers && s.effective_workers !== s.workers
+    ? `${s.effective_workers} active worker${s.effective_workers === 1 ? '' : 's'} (requested ${s.workers}, max ${s.max_workers}), ${s.rate_limit_rpm || 0} RPM`
+    : `${s.workers || 1} worker${s.workers === 1 ? '' : 's'}, ${s.rate_limit_rpm || 0} RPM`;
   const items = [
     ['Provider', `${s.provider || '-'} / ${s.model || '-'}`],
     ['Input', `${s.input_type || '-'} ${s.input_path || ''}`.trim()],
     ['Output', `${s.output_type || '-'} ${s.output_path || ''}`.trim()],
-    ['Execution', `${s.workers || 1} worker${s.workers === 1 ? '' : 's'}, ${s.rate_limit_rpm || 0} RPM`],
+    ['Execution', workerText],
     ['Structure', s.response_format ? `${s.response_format}, ${s.schema_fields || 0} schema fields` : 'single response field'],
     ['Tools', s.tools_enabled ? 'enabled' : 'off'],
     ['Enrichment', s.enrich_enabled ? 'enabled' : 'off'],
@@ -4325,6 +4360,7 @@ if (!restoredProviderPrefs) {
   applyProviderDefaults(document.getElementById('q-provider').value);
 }
 restoreQuickFormState();
+loadServerSettings();
 loadLLMPresets();
 updateProviderUI(document.getElementById('q-provider').value);
 syncAPIKeyFieldMode();

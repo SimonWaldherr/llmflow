@@ -42,6 +42,7 @@ Typische Struktur:
 - `LLMFLOW_LLM_PRESETS_FILE`: optionaler Pfad zu einer Admin-Preset-Datei für die Weboberfläche; Standard ist `data/llm-presets.yaml`
 - `LLMFLOW_WEB_TOKEN`: optionaler Bearer-Token-Schutz für `/api/*`
 - `LLMFLOW_WEB_SUGGEST_TIMEOUT`: separates Timeout-Budget für AI Quick Setup in der Weboberfläche
+- `LLMFLOW_MAX_WORKERS`: systemweite Obergrenze für parallel aktive Worker im Webserver; Standard ist `8`
 - Provider-spezifische API-Key-Variablen wie `OPENAI_API_KEY`, `GEMINI_API_KEY`, `ANTHROPIC_API_KEY`
 - Datenbank-DSNs oder Secrets über `dsn_env`, `api_key_env`, `username_env`, `password_env`
 
@@ -146,7 +147,12 @@ Authorization: Bearer <token>
 
 - Secrets nicht im YAML im Klartext speichern, wenn vermeidbar.
 - `api_key_env`, `dsn_env` und ähnliche Felder bevorzugen.
+- Direkt eingetragene API-Keys werden für den aktuellen Lauf verwendet, aber nicht in der Job-Historie gespeichert.
 - Zugriff auf Log-Ausgaben und Konfigurationsdateien einschränken.
+
+### Parallelität begrenzen
+
+`processing.workers` steuert die parallelen Worker eines einzelnen Jobs. Für den Produktiveinsatz sollte zusätzlich `LLMFLOW_MAX_WORKERS` gesetzt werden. Diese Obergrenze gilt im Webserver pro Prozess über alle gleichzeitig laufenden Jobs hinweg. Wenn mehrere Jobs parallel starten, warten zusätzliche Worker automatisch, statt Provider, lokale Modelle oder Ausgabedateien zu überlasten.
 
 ### Agentic Tools bewusst freischalten
 

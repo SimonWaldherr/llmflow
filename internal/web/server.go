@@ -39,18 +39,21 @@ var staticFS embed.FS
 
 // Server holds the web UI HTTP server state.
 type Server struct {
-	logger       *slog.Logger
-	addr         string
-	dataDir      string
-	jobsFile     string
-	watchersFile string
-	mu           sync.Mutex
-	jobs         []*JobStatus
-	jobIDSeq     int
-	watchers     []*WatcherConfig
-	watcherIDSeq int
-	wg           sync.WaitGroup  // tracks running job goroutines
-	serverCtx    context.Context // cancelled on graceful shutdown; used for job lifecycles
+	logger        *slog.Logger
+	addr          string
+	dataDir       string
+	jobsFile      string
+	watchersFile  string
+	mu            sync.Mutex
+	persistMu     sync.Mutex
+	jobs          []*JobStatus
+	jobIDSeq      int
+	watchers      []*WatcherConfig
+	watcherIDSeq  int
+	maxWorkers    int
+	workerLimiter app.WorkerLimiter
+	wg            sync.WaitGroup  // tracks running job goroutines
+	serverCtx     context.Context // cancelled on graceful shutdown; used for job lifecycles
 }
 
 // LLMPreset describes one administrator-managed LLM option shown in the web UI.
@@ -110,21 +113,33 @@ type JobStatus struct {
 	cancelFn context.CancelFunc
 }
 
+const defaultWebMaxWorkers = 8
+
 // NewServer creates a new web UI server.
 func NewServer(addr string, logger *slog.Logger) *Server {
 	dataDir := strings.TrimSpace(os.Getenv("LLMFLOW_DATA_DIR"))
 	if dataDir == "" {
 		dataDir = "data"
 	}
+	maxWorkers := defaultWebMaxWorkers
+	if envMax, err := app.MaxWorkersFromEnv(); err != nil {
+		if logger != nil {
+			logger.Warn("invalid max workers setting ignored", "env", app.MaxWorkersEnv, "error", err)
+		}
+	} else if envMax > 0 {
+		maxWorkers = envMax
+	}
 	jobsFile := filepath.Join(dataDir, "jobs", "jobs.json")
 	watchersFile := filepath.Join(dataDir, "jobs", "watchers.json")
 	return &Server{
-		addr:         addr,
-		dataDir:      dataDir,
-		jobsFile:     jobsFile,
-		watchersFile: watchersFile,
-		logger:       logger,
-		serverCtx:    context.Background(), // replaced by Run(); guards against nil if handleRun is called early
+		addr:          addr,
+		dataDir:       dataDir,
+		jobsFile:      jobsFile,
+		watchersFile:  watchersFile,
+		logger:        logger,
+		maxWorkers:    maxWorkers,
+		workerLimiter: app.NewWorkerLimiter(maxWorkers),
+		serverCtx:     context.Background(), // replaced by Run(); guards against nil if handleRun is called early
 	}
 }
 
@@ -201,6 +216,7 @@ func (s *Server) Run(ctx context.Context) error {
 	mux.HandleFunc("POST /api/validate", s.handleValidate)
 	mux.HandleFunc("POST /api/preflight", s.handlePreflight)
 	mux.HandleFunc("POST /api/run", s.handleRun)
+	mux.HandleFunc("GET /api/settings", s.handleSettings)
 	mux.HandleFunc("GET /api/jobs", s.handleListJobs)
 	mux.HandleFunc("GET /api/jobs/", s.handleGetJob)
 	mux.HandleFunc("POST /api/jobs/{id}/cancel", s.handleCancelJob)
@@ -281,6 +297,23 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, apiResponse{OK: true})
 }
 
+func (s *Server) handleSettings(w http.ResponseWriter, _ *http.Request) {
+	running := 0
+	s.mu.Lock()
+	for _, job := range s.jobs {
+		if job != nil && job.Status == "running" {
+			running++
+		}
+	}
+	maxWorkers := s.maxWorkers
+	s.mu.Unlock()
+	writeJSON(w, http.StatusOK, apiResponse{OK: true, Data: settingsResponse{
+		MaxWorkers:    maxWorkers,
+		MaxWorkersEnv: app.MaxWorkersEnv,
+		RunningJobs:   running,
+	}})
+}
+
 type validateRequest struct {
 	Config string `json:"config"`
 }
@@ -291,18 +324,26 @@ type preflightResponse struct {
 }
 
 type preflightSummary struct {
-	Provider       string `json:"provider"`
-	Model          string `json:"model"`
-	InputType      string `json:"input_type"`
-	InputPath      string `json:"input_path,omitempty"`
-	OutputType     string `json:"output_type"`
-	OutputPath     string `json:"output_path,omitempty"`
-	Workers        int    `json:"workers"`
-	RateLimitRPM   int    `json:"rate_limit_rpm"`
-	ResponseFormat string `json:"response_format,omitempty"`
-	SchemaFields   int    `json:"schema_fields"`
-	ToolsEnabled   bool   `json:"tools_enabled"`
-	EnrichEnabled  bool   `json:"enrich_enabled"`
+	Provider         string `json:"provider"`
+	Model            string `json:"model"`
+	InputType        string `json:"input_type"`
+	InputPath        string `json:"input_path,omitempty"`
+	OutputType       string `json:"output_type"`
+	OutputPath       string `json:"output_path,omitempty"`
+	Workers          int    `json:"workers"`
+	EffectiveWorkers int    `json:"effective_workers"`
+	MaxWorkers       int    `json:"max_workers"`
+	RateLimitRPM     int    `json:"rate_limit_rpm"`
+	ResponseFormat   string `json:"response_format,omitempty"`
+	SchemaFields     int    `json:"schema_fields"`
+	ToolsEnabled     bool   `json:"tools_enabled"`
+	EnrichEnabled    bool   `json:"enrich_enabled"`
+}
+
+type settingsResponse struct {
+	MaxWorkers    int    `json:"max_workers"`
+	MaxWorkersEnv string `json:"max_workers_env"`
+	RunningJobs   int    `json:"running_jobs"`
 }
 
 type modelsRequest struct {
@@ -341,6 +382,9 @@ func (s *Server) persistJobs() error {
 	if s == nil {
 		return nil
 	}
+	s.persistMu.Lock()
+	defer s.persistMu.Unlock()
+
 	s.mu.Lock()
 	state := jobState{Jobs: make([]*JobStatus, 0, len(s.jobs))}
 	for _, job := range s.jobs {
@@ -525,19 +569,22 @@ func (s *Server) handlePreflight(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) buildPreflight(cfg config.Config) (preflightSummary, []string) {
+	effectiveWorkers := app.ClampWorkers(cfg.Processing.Workers, s.maxWorkers)
 	summary := preflightSummary{
-		Provider:       cfg.API.Provider,
-		Model:          cfg.API.Model,
-		InputType:      cfg.Input.Type,
-		InputPath:      cfg.Input.Path,
-		OutputType:     cfg.Output.Type,
-		OutputPath:     cfg.Output.Path,
-		Workers:        cfg.Processing.Workers,
-		RateLimitRPM:   cfg.API.RateLimitRPM,
-		ResponseFormat: cfg.Processing.ResponseFormat,
-		SchemaFields:   len(cfg.Processing.ResponseSchema),
-		ToolsEnabled:   cfg.Tools.Enabled,
-		EnrichEnabled:  cfg.Enrich.Enabled,
+		Provider:         cfg.API.Provider,
+		Model:            cfg.API.Model,
+		InputType:        cfg.Input.Type,
+		InputPath:        cfg.Input.Path,
+		OutputType:       cfg.Output.Type,
+		OutputPath:       cfg.Output.Path,
+		Workers:          cfg.Processing.Workers,
+		EffectiveWorkers: effectiveWorkers,
+		MaxWorkers:       s.maxWorkers,
+		RateLimitRPM:     cfg.API.RateLimitRPM,
+		ResponseFormat:   cfg.Processing.ResponseFormat,
+		SchemaFields:     len(cfg.Processing.ResponseSchema),
+		ToolsEnabled:     cfg.Tools.Enabled,
+		EnrichEnabled:    cfg.Enrich.Enabled,
 	}
 
 	var warnings []string
@@ -557,6 +604,9 @@ func (s *Server) buildPreflight(cfg config.Config) (preflightSummary, []string) 
 	}
 	if cfg.Processing.Workers > 8 && cfg.API.RateLimitRPM > 0 {
 		warnings = append(warnings, "high worker count with a rate limit can cause queued requests; lower workers if jobs look stalled")
+	}
+	if s.maxWorkers > 0 && cfg.Processing.Workers > s.maxWorkers {
+		warnings = append(warnings, fmt.Sprintf("worker count will be capped to the system limit (%d)", s.maxWorkers))
 	}
 	if cfg.Processing.ResponseFormat != "" && len(cfg.Processing.ResponseSchema) == 0 {
 		warnings = append(warnings, "structured output is enabled without a schema; columns may vary between records")
@@ -647,7 +697,7 @@ func (s *Server) handleRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusAccepted, apiResponse{OK: true, Data: cloneJobStatus(job)})
+	writeJSON(w, http.StatusAccepted, apiResponse{OK: true, Data: s.cloneJobSnapshot(job)})
 }
 
 func (s *Server) normalizeWebRunOutput(cfg config.Config, fallbackRaw string) (config.Config, string) {
@@ -674,8 +724,19 @@ func (s *Server) normalizeWebRunOutput(cfg config.Config, fallbackRaw string) (c
 func (s *Server) enqueueJob(name, rawConfig string, dryRun bool, cfg config.Config) (*JobStatus, error) {
 	s.mu.Lock()
 	s.jobIDSeq++
+	jobID := s.jobIDSeq
+	s.mu.Unlock()
+
+	cfg = s.prepareJobConfigForRun(cfg, jobID)
+	if sanitized, err := configForStorage(cfg); err == nil {
+		rawConfig = sanitized
+	} else if s.logger != nil {
+		s.logger.Warn("sanitize job config failed; storing submitted config", "error", err)
+	}
+
+	s.mu.Lock()
 	job := &JobStatus{
-		ID:        s.jobIDSeq,
+		ID:        jobID,
 		Name:      name,
 		Status:    "running",
 		StartedAt: time.Now(),
@@ -710,6 +771,32 @@ func (s *Server) enqueueJob(name, rawConfig string, dryRun bool, cfg config.Conf
 	return job, nil
 }
 
+func (s *Server) prepareJobConfigForRun(cfg config.Config, jobID int) config.Config {
+	cfg.Processing.Workers = app.ClampWorkers(cfg.Processing.Workers, s.maxWorkers)
+	if strings.TrimSpace(cfg.Output.Path) != "" {
+		cfg.Output.Path = outputPathForJob(cfg.Output.Path, jobID)
+	}
+	return cfg
+}
+
+var jobIDSuffixRE = regexp.MustCompile(`\.job-\d+$`)
+
+func outputPathForJob(rawPath string, jobID int) string {
+	ext := filepath.Ext(rawPath)
+	base := strings.TrimSuffix(rawPath, ext)
+	base = jobIDSuffixRE.ReplaceAllString(base, "")
+	return fmt.Sprintf("%s.job-%d%s", base, jobID, ext)
+}
+
+func configForStorage(cfg config.Config) (string, error) {
+	cfg.API.APIKeyDirect = ""
+	raw, err := yaml.Marshal(cfg)
+	if err != nil {
+		return "", err
+	}
+	return string(raw), nil
+}
+
 func (s *Server) runJob(job *JobStatus, cfg config.Config, jobCtx context.Context, jobCancel context.CancelFunc) {
 	defer s.wg.Done()
 	defer jobCancel()
@@ -739,7 +826,11 @@ func (s *Server) runJob(job *JobStatus, cfg config.Config, jobCtx context.Contex
 		s.persistJobsBestEffort("job_preview")
 	}
 
-	a := app.New(cfg, logger).WithDryRun(job.DryRun).WithProgressFunc(progress).WithResultFunc(resultPreview)
+	a := app.New(cfg, logger).
+		WithDryRun(job.DryRun).
+		WithProgressFunc(progress).
+		WithResultFunc(resultPreview).
+		WithWorkerLimiter(s.workerLimiter)
 	runErr := a.Run(jobCtx)
 
 	s.mu.Lock()
@@ -1089,6 +1180,12 @@ func (s *Server) handleOpenAPI(w http.ResponseWriter, _ *http.Request) {
 					"responses": map[string]any{"202": map[string]any{"description": "Job accepted"}},
 				},
 			},
+			"/api/settings": map[string]any{
+				"get": map[string]any{
+					"summary":   "Return server runtime settings such as the worker limit",
+					"responses": map[string]any{"200": map[string]any{"description": "Settings"}},
+				},
+			},
 			"/api/jobs": map[string]any{
 				"get": map[string]any{
 					"summary":   "List jobs",
@@ -1303,7 +1400,7 @@ func (s *Server) handleRerunJob(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, apiResponse{Error: "persist job: " + err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusAccepted, apiResponse{OK: true, Data: cloneJobStatus(job)})
+	writeJSON(w, http.StatusAccepted, apiResponse{OK: true, Data: s.cloneJobSnapshot(job)})
 }
 
 func (s *Server) handleDeleteJob(w http.ResponseWriter, r *http.Request) {
@@ -1344,6 +1441,12 @@ func cloneJobStatus(src *JobStatus) *JobStatus {
 	}
 	clone.cancelFn = nil
 	return &clone
+}
+
+func (s *Server) cloneJobSnapshot(src *JobStatus) *JobStatus {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return cloneJobStatus(src)
 }
 
 func (s *Server) handleLLMPresets(w http.ResponseWriter, r *http.Request) {
@@ -3128,6 +3231,9 @@ func (s *Server) loadWatchers() error {
 }
 
 func (s *Server) persistWatchers() {
+	s.persistMu.Lock()
+	defer s.persistMu.Unlock()
+
 	s.mu.Lock()
 	state := watcherState{Watchers: make([]*WatcherConfig, 0, len(s.watchers))}
 	for _, w := range s.watchers {
@@ -3146,11 +3252,7 @@ func (s *Server) persistWatchers() {
 	if err != nil {
 		return
 	}
-	tmp := filePath + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o640); err != nil {
-		return
-	}
-	_ = os.Rename(tmp, filePath)
+	_ = writeFileAtomicWithBackup(filePath, data, 0o640)
 }
 
 // ─── Watcher HTTP handlers ────────────────────────────────────────────────────

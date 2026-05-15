@@ -3,12 +3,15 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"maps"
 	"math"
+	"os"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -30,11 +33,69 @@ type Generator interface {
 
 // App coordinates input, prompt building, LLM calls, and output writing for one job run.
 type App struct {
-	cfg          config.Config
-	logger       *slog.Logger
-	dryRun       bool
-	progressFunc func(current, total int)
-	resultFunc   func(index, total int, record map[string]any)
+	cfg           config.Config
+	logger        *slog.Logger
+	dryRun        bool
+	progressFunc  func(current, total int)
+	resultFunc    func(index, total int, record map[string]any)
+	workerLimiter WorkerLimiter
+}
+
+const MaxWorkersEnv = "LLMFLOW_MAX_WORKERS"
+
+// WorkerLimiter limits concurrently active record workers across one process.
+type WorkerLimiter interface {
+	Acquire(ctx context.Context) (func(), error)
+	Max() int
+}
+
+type semaphoreWorkerLimiter struct {
+	slots chan struct{}
+}
+
+func NewWorkerLimiter(max int) WorkerLimiter {
+	if max <= 0 {
+		return nil
+	}
+	return &semaphoreWorkerLimiter{slots: make(chan struct{}, max)}
+}
+
+func (l *semaphoreWorkerLimiter) Acquire(ctx context.Context) (func(), error) {
+	select {
+	case l.slots <- struct{}{}:
+		return func() { <-l.slots }, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+func (l *semaphoreWorkerLimiter) Max() int {
+	if l == nil {
+		return 0
+	}
+	return cap(l.slots)
+}
+
+func MaxWorkersFromEnv() (int, error) {
+	raw := strings.TrimSpace(os.Getenv(MaxWorkersEnv))
+	if raw == "" {
+		return 0, nil
+	}
+	max, err := strconv.Atoi(raw)
+	if err != nil || max < 1 {
+		return 0, fmt.Errorf("%s must be a positive integer", MaxWorkersEnv)
+	}
+	return max, nil
+}
+
+func ClampWorkers(requested, max int) int {
+	if requested <= 0 {
+		requested = 1
+	}
+	if max > 0 && requested > max {
+		return max
+	}
+	return requested
 }
 
 // WithProgressFunc sets a callback invoked after each record is processed.
@@ -43,6 +104,12 @@ func (a *App) WithProgressFunc(f func(current, total int)) *App { a.progressFunc
 // WithResultFunc sets a callback invoked for each successful output record.
 func (a *App) WithResultFunc(f func(index, total int, record map[string]any)) *App {
 	a.resultFunc = f
+	return a
+}
+
+// WithWorkerLimiter applies a shared process-wide worker limit.
+func (a *App) WithWorkerLimiter(l WorkerLimiter) *App {
+	a.workerLimiter = l
 	return a
 }
 
@@ -101,9 +168,17 @@ func (a *App) Run(ctx context.Context) error {
 	// Build the list of enabled tools (only relevant when tools.enabled = true).
 	activeTools := a.buildTools()
 
-	workers := a.cfg.Processing.Workers
-	if workers <= 0 {
-		workers = 1
+	maxWorkers := 0
+	if a.workerLimiter != nil {
+		maxWorkers = a.workerLimiter.Max()
+	} else if envMax, envErr := MaxWorkersFromEnv(); envErr != nil {
+		a.logger.Warn("invalid max workers setting ignored", "env", MaxWorkersEnv, "error", envErr)
+	} else {
+		maxWorkers = envMax
+	}
+	workers := ClampWorkers(a.cfg.Processing.Workers, maxWorkers)
+	if maxWorkers > 0 && a.cfg.Processing.Workers > maxWorkers {
+		a.logger.Warn("worker count capped by system limit", "requested", a.cfg.Processing.Workers, "effective", workers, "max_workers", maxWorkers)
 	}
 
 	var rateLimiter <-chan time.Time
@@ -134,6 +209,13 @@ func (a *App) Run(ctx context.Context) error {
 	}
 	a.logger.Info("wrote output records", "count", len(results))
 	return nil
+}
+
+func (a *App) acquireWorkerSlot(ctx context.Context) (func(), error) {
+	if a.workerLimiter == nil {
+		return func() {}, nil
+	}
+	return a.workerLimiter.Acquire(ctx)
 }
 
 // PreviewRecords reads up to n records from the given reader without any LLM
@@ -305,6 +387,16 @@ func (a *App) processRecordsWithSink(
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+			releaseWorker, err := a.acquireWorkerSlot(ctx)
+			if err != nil {
+				mu.Lock()
+				if firstErr == nil && !errors.Is(err, context.Canceled) {
+					firstErr = fmt.Errorf("acquire worker slot: %w", err)
+				}
+				mu.Unlock()
+				return
+			}
+			defer releaseWorker()
 			for j := range jobs {
 				select {
 				case <-ctx.Done():
@@ -1094,6 +1186,16 @@ func (a *App) processRecordStreamBatch(
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+			releaseWorker, err := a.acquireWorkerSlot(ctx)
+			if err != nil {
+				mu.Lock()
+				if firstErr == nil && !errors.Is(err, context.Canceled) {
+					firstErr = fmt.Errorf("acquire worker slot: %w", err)
+				}
+				mu.Unlock()
+				return
+			}
+			defer releaseWorker()
 			for bj := range jobs {
 				select {
 				case <-ctx.Done():
@@ -1425,6 +1527,16 @@ func (a *App) processJobs(
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+			releaseWorker, err := a.acquireWorkerSlot(ctx)
+			if err != nil {
+				mu.Lock()
+				if firstErr == nil && !errors.Is(err, context.Canceled) {
+					firstErr = fmt.Errorf("acquire worker slot: %w", err)
+				}
+				mu.Unlock()
+				return
+			}
+			defer releaseWorker()
 			for j := range jobs {
 				select {
 				case <-ctx.Done():
