@@ -1686,7 +1686,7 @@ const (
 )
 
 const suggestSystemPrompt = `You are an expert llmflow configuration assistant.
-llmflow is a batch-processing tool that reads records from a file (CSV/JSON/JSONL/XML),
+llmflow is a batch-processing tool that reads records from a file (CSV/XLSX/JSON/JSONL/XML),
 sends each record to an LLM with a configurable prompt pipeline, and writes the responses
 back to an output file.
 
@@ -1722,8 +1722,8 @@ Structured output fields (preferred over hand-crafted post_prompt instructions):
   Only set false when backwards-compatibility with mixed text+JSON responses is required.
 
 Other fields:
-- output_type: one of "jsonl", "csv", or "xml" for the output file writer.
-  If the task says "Ausgabe als CSV/XML/JSONL", set this field, not pre/post prompt text.
+- output_type: one of "jsonl", "json", "csv", "xlsx", or "xml" for the output file writer.
+  If the task says "Ausgabe als CSV/XLSX/XML/JSON/JSONL", set this field, not pre/post prompt text.
 - response_fields: comma-separated list of JSON keys produced by the LLM (used only
   when response_format is not set and post_prompt enforces a manual JSON schema).
 - output_fields: comma-separated list of the final columns to write (restricts output).
@@ -1948,10 +1948,12 @@ func normalizeSuggestResponse(task string, sr suggestResponse) suggestResponse {
 		switch strings.ToLower(strings.TrimSpace(sr.ResponseFormat)) {
 		case "csv", "xml":
 			sr.OutputType = strings.ToLower(strings.TrimSpace(sr.ResponseFormat))
+		case "json":
+			sr.OutputType = "json"
 		}
 	}
 	switch strings.ToLower(strings.TrimSpace(sr.OutputType)) {
-	case "csv", "xml", "jsonl":
+	case "csv", "xlsx", "xml", "json", "jsonl":
 		sr.OutputType = strings.ToLower(strings.TrimSpace(sr.OutputType))
 	default:
 		sr.OutputType = ""
@@ -2119,6 +2121,9 @@ func detectFormatHints(text string) (responseFormat, outputType string) {
 	if strings.Contains(low, "jsonl") || strings.Contains(low, "json lines") || strings.Contains(low, "json-lines") {
 		outputType = "jsonl"
 	}
+	if strings.Contains(low, "xlsx") || strings.Contains(low, "excel") {
+		outputType = "xlsx"
+	}
 	if strings.Contains(low, "csv") || strings.Contains(low, "kommagetrennt") {
 		responseFormat = "csv"
 		outputType = "csv"
@@ -2129,6 +2134,9 @@ func detectFormatHints(text string) (responseFormat, outputType string) {
 	}
 	if responseFormat == "" && strings.Contains(low, "json") {
 		responseFormat = "json"
+		if outputType == "" {
+			outputType = "json"
+		}
 	}
 	return responseFormat, outputType
 }
@@ -2375,7 +2383,7 @@ func buildSuggestFallback(task, currentConfig string) suggestResponse {
 	}
 	if outputType == "" {
 		switch responseFormat {
-		case "csv", "xml":
+		case "csv", "xml", "json":
 			outputType = responseFormat
 		}
 	}
@@ -2491,7 +2499,7 @@ func resolveSuggestTimeout(raw string) (time.Duration, error) {
 // table and let the user deselect columns before running a job.
 
 type previewRequest struct {
-	// Type is the input type: csv, json, jsonl, xml.
+	// Type is the input type: csv, xlsx, json, jsonl, xml.
 	Type string `json:"type"`
 	// Path is the file path on the server (e.g. data/input/file.csv).
 	Path string `json:"path"`
@@ -3152,6 +3160,8 @@ func sniffFormat(filePath string, buf []byte) detectFormatResponse {
 
 	// Extension-based detection as primary hint.
 	switch ext {
+	case ".xlsx":
+		return detectFormatResponse{Type: "xlsx", HasHeader: true}
 	case ".json":
 		trimmed := strings.TrimSpace(string(buf))
 		if strings.HasPrefix(trimmed, "[") {

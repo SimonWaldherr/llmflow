@@ -77,6 +77,27 @@ func TestJSONReader_Object(t *testing.T) {
 	}
 }
 
+func TestJSONReader_RootPathArray(t *testing.T) {
+	p := writeTempJSON(t, "data.json", `{"data":{"items":[{"id":"1"},{"id":"2"}]}}`)
+	cfg := config.InputConfig{
+		Type: "json",
+		Path: p,
+		JSON: config.JSONConfig{RootPath: "data.items"},
+	}
+	r, err := NewJSONReader(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	recs, err := r.ReadAll(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(recs) != 2 || recs[1]["id"] != "2" {
+		t.Fatalf("unexpected root_path records: %#v", recs)
+	}
+}
+
 func TestJSONReader_JSONL(t *testing.T) {
 	content := `{"a":"1"}` + "\n" + `{"a":"2"}` + "\n"
 	p := writeTempJSON(t, "data.jsonl", content)

@@ -15,6 +15,8 @@ func New(cfg config.InputConfig) (Reader, error) {
 	switch strings.ToLower(cfg.Type) {
 	case "csv":
 		r, err = NewCSVReader(cfg)
+	case "xlsx":
+		r, err = NewXLSXReader(cfg)
 	case "json", "jsonl":
 		r, err = NewJSONReader(cfg)
 	case "xml":

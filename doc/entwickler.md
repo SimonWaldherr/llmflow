@@ -8,12 +8,12 @@ llmflow ist in klar getrennte Pakete geschnitten:
 
 - `cmd/llmflow`: CLI-Einstiegspunkt
 - `internal/config`: Laden, Defaulting und Validierung der Konfiguration
-- `internal/input`: Reader für CSV, JSON, JSONL, XML, SQLite, MSSQL
+- `internal/input`: Reader für CSV, XLSX, JSON, JSONL, XML, SQLite, MSSQL
 - `internal/prompt`: deterministische Prompt-Erzeugung
 - `internal/llm`: Provider-spezifische Generatoren
 - `internal/tools`: optionale agentische Tools
 - `internal/enrich`: nicht-agentisches Web-Enrichment
-- `internal/output`: Writer für CSV, JSONL, SQLite, MSSQL
+- `internal/output`: Writer für CSV, XLSX, JSON, JSONL, XML, SQLite, MSSQL
 - `internal/app`: Orchestrierung, Worker, Retries, Rate-Limits, Record-Fluss
 - `internal/web`: API und eingebettete Weboberfläche
 

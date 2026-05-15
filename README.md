@@ -17,7 +17,7 @@ In practical terms:
   and is great when you want broad integrations and event-driven flows.
 - `OpenClaw` is closer to an AI assistant / agent workspace. It is useful when the main
   interaction is conversational or agent-driven.
-- `llmflow` is for structured, file-based processing. It reads CSV, JSON, JSONL, XML, or
+- `llmflow` is for structured, file-based processing. It reads CSV, XLSX, JSON, JSONL, XML, or
   databases, applies a deterministic prompt pipeline per row, and writes durable output
   files.
 
@@ -30,8 +30,8 @@ structured data.
 - Configuration via YAML or JSON
 - Multi-provider support: `openai`, `azure`, `gemini`, `ollama`, `lmstudio`, `anthropic`, `generic`
 - Prompt building blocks: `system`, `pre_prompt`, `post_prompt`, optional Go templates
-- Input formats: `csv`, `json`, `jsonl`, `xml`, `sqlite`, `mssql`
-- Output formats: `csv`, `xlsx`, `jsonl`, `xml`, `sqlite`, `mssql`
+- Input formats: `csv`, `xlsx`, `json`, `jsonl`, `xml`, `sqlite`, `mssql`
+- Output formats: `csv`, `xlsx`, `json`, `jsonl`, `xml`, `sqlite`, `mssql`
 - Input preview with column exclusion before a run starts
 - Auto-detection of input format for uploaded files in the web UI
 - Web UI stores run results as JSONL and exports them on download as CSV, XLSX, JSON, JSONL, or XML
@@ -230,14 +230,14 @@ prompt:
   post_prompt: "Return only a compact JSON object."
 
 input:
-  type: csv                 # csv | json | jsonl | xml | sqlite | mssql
+  type: csv                 # csv | xlsx | json | jsonl | xml | sqlite | mssql
   path: ./examples/input.csv
   csv:
     delimiter: ","
     has_header: true
 
 output:
-  type: jsonl               # csv | xlsx | jsonl | xml | sqlite | mssql
+  type: jsonl               # csv | xlsx | json | jsonl | xml | sqlite | mssql
   path: ./examples/output.jsonl
 
 processing:
@@ -319,8 +319,8 @@ go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
 | Package | Responsibility |
 |---------|---------------|
 | `internal/config` | Load and validate configuration |
-| `internal/input` | Readers for CSV / JSON / XML / SQLite / MSSQL |
-| `internal/output` | Writers for CSV / JSONL / SQLite / MSSQL |
+| `internal/input` | Readers for CSV / XLSX / JSON / JSONL / XML / SQLite / MSSQL |
+| `internal/output` | Writers for CSV / XLSX / JSON / JSONL / XML / SQLite / MSSQL |
 | `internal/prompt` | Prompt assembly and Go templating |
 | `internal/llm` | Provider-specific LLM clients and routing |
 | `internal/openai` | OpenAI Responses API client |

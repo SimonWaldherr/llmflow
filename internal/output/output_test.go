@@ -284,6 +284,60 @@ func TestJSONLWriter_Basic(t *testing.T) {
 	}
 }
 
+func TestJSONWriter_Basic(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "out.json")
+	cfg := config.OutputConfig{Type: "json", Path: p}
+	w, err := NewJSONWriter(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	records := []Record{
+		{"name": "Alice"},
+		{"name": "Bob"},
+	}
+	if err := w.WriteAll(context.Background(), records); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []map[string]any
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[0]["name"] != "Alice" {
+		t.Fatalf("unexpected json output: %#v", got)
+	}
+}
+
+func TestJSONWriter_Empty(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "out.json")
+	cfg := config.OutputConfig{Type: "json", Path: p}
+	w, err := NewJSONWriter(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.WriteAll(context.Background(), nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "[]\n" {
+		t.Fatalf("empty json output = %q, want []", string(data))
+	}
+}
+
 func TestJSONLWriter_WriteRecordSyncs(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "out.jsonl")

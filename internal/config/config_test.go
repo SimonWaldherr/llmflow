@@ -117,6 +117,19 @@ func TestValidateXLSXOutputType(t *testing.T) {
 	}
 }
 
+func TestValidateXLSXInputAndJSONOutputTypes(t *testing.T) {
+	t.Setenv("K", "secret")
+	c := Config{
+		API:    APIConfig{Model: "m", APIKeyEnv: "K"},
+		Input:  InputConfig{Type: "xlsx"},
+		Output: OutputConfig{Type: "json"},
+		Prompt: PromptConfig{InputTemplate: "x"},
+	}
+	if err := c.Validate(); err != nil {
+		t.Fatalf("unexpected error for xlsx/json types: %v", err)
+	}
+}
+
 func TestApplyDefaults(t *testing.T) {
 	c := Config{}
 	c.ApplyDefaults()

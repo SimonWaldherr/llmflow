@@ -437,12 +437,12 @@ func (c Config) Validate() error {
 		problems = append(problems, errors.New("prompt.input_template is required"))
 	}
 
-	supportedInputs := map[string]bool{"csv": true, "json": true, "jsonl": true, "xml": true, "sqlite": true, "mssql": true}
+	supportedInputs := map[string]bool{"csv": true, "xlsx": true, "json": true, "jsonl": true, "xml": true, "sqlite": true, "mssql": true}
 	if !supportedInputs[strings.ToLower(c.Input.Type)] {
 		problems = append(problems, fmt.Errorf("unsupported input.type: %s", c.Input.Type))
 	}
 
-	supportedOutputs := map[string]bool{"csv": true, "xlsx": true, "jsonl": true, "xml": true, "sqlite": true, "mssql": true}
+	supportedOutputs := map[string]bool{"csv": true, "xlsx": true, "json": true, "jsonl": true, "xml": true, "sqlite": true, "mssql": true}
 	if !supportedOutputs[strings.ToLower(c.Output.Type)] {
 		problems = append(problems, fmt.Errorf("unsupported output.type: %s", c.Output.Type))
 	}

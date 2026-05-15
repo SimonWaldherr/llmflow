@@ -30,6 +30,8 @@ type JSONReader struct {
 	started bool
 	ended   bool
 	jsonl   *bufio.Scanner
+	root    []Record
+	rootIdx int
 }
 
 func NewJSONReader(cfg config.InputConfig) (*JSONReader, error) {
@@ -38,7 +40,7 @@ func NewJSONReader(cfg config.InputConfig) (*JSONReader, error) {
 		return nil, fmt.Errorf("open json input: %w", err)
 	}
 	r := &JSONReader{f: f, cfg: cfg}
-	if cfg.Type == "jsonl" || cfg.JSON.JSONL {
+	if strings.EqualFold(cfg.Type, "jsonl") || cfg.JSON.JSONL {
 		r.mode = jsonModeJSONL
 		s := bufio.NewScanner(f)
 		s.Buffer(make([]byte, 0, 64*1024), 1024*1024)
@@ -53,6 +55,9 @@ func (r *JSONReader) Next(ctx context.Context) (Record, error) {
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
+	}
+	if strings.TrimSpace(r.cfg.JSON.RootPath) != "" {
+		return r.nextRootPathRecord(ctx)
 	}
 	if r.mode == jsonModeJSONL {
 		for r.jsonl.Scan() {
@@ -119,6 +124,101 @@ func (r *JSONReader) Next(ctx context.Context) (Record, error) {
 	}
 	r.ended = true
 	return nil, io.EOF
+}
+
+func (r *JSONReader) nextRootPathRecord(ctx context.Context) (Record, error) {
+	if r.root == nil {
+		var doc any
+		dec := json.NewDecoder(r.f)
+		if err := dec.Decode(&doc); err != nil {
+			if errors.Is(err, io.EOF) {
+				r.ended = true
+				return nil, io.EOF
+			}
+			return nil, fmt.Errorf("decode json input: %w", err)
+		}
+		selected, err := selectJSONPath(doc, r.cfg.JSON.RootPath)
+		if err != nil {
+			return nil, err
+		}
+		records, err := recordsFromJSONValue(selected)
+		if err != nil {
+			return nil, err
+		}
+		r.root = records
+	}
+	if r.rootIdx >= len(r.root) {
+		r.ended = true
+		return nil, io.EOF
+	}
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+	}
+	rec := r.root[r.rootIdx]
+	r.rootIdx++
+	return rec, nil
+}
+
+func selectJSONPath(doc any, rootPath string) (any, error) {
+	cur := doc
+	path := strings.TrimSpace(rootPath)
+	path = strings.TrimPrefix(path, "$.")
+	path = strings.TrimPrefix(path, ".")
+	path = strings.Trim(path, "/")
+	if path == "" || path == "$" {
+		return cur, nil
+	}
+	for _, part := range strings.FieldsFunc(path, func(r rune) bool { return r == '.' || r == '/' }) {
+		if part == "" {
+			continue
+		}
+		obj, ok := cur.(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("json root_path %q cannot descend into non-object at %q", rootPath, part)
+		}
+		next, ok := obj[part]
+		if !ok {
+			return nil, fmt.Errorf("json root_path %q not found at %q", rootPath, part)
+		}
+		cur = next
+	}
+	return cur, nil
+}
+
+func recordsFromJSONValue(v any) ([]Record, error) {
+	switch x := v.(type) {
+	case []any:
+		out := make([]Record, 0, len(x))
+		for i, item := range x {
+			rec, ok := coerceJSONRecord(item)
+			if !ok {
+				return nil, fmt.Errorf("json root_path array element %d is not an object", i)
+			}
+			out = append(out, rec)
+		}
+		return out, nil
+	default:
+		rec, ok := coerceJSONRecord(v)
+		if !ok {
+			return nil, fmt.Errorf("json root_path value is not an object or array of objects")
+		}
+		return []Record{rec}, nil
+	}
+}
+
+func coerceJSONRecord(v any) (Record, bool) {
+	switch x := v.(type) {
+	case map[string]any:
+		rec := make(Record, len(x))
+		for k, v := range x {
+			rec[k] = v
+		}
+		return rec, true
+	default:
+		return nil, false
+	}
 }
 
 func (r *JSONReader) nextArrayValue(ctx context.Context) (Record, error) {

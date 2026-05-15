@@ -27,7 +27,7 @@ Der Fokus liegt auf Wiederholbarkeit, Nachvollziehbarkeit und klarer Konfigurati
 
 ### Eingabe
 
-- CSV, JSON, JSONL, XML
+- CSV, XLSX, JSON, JSONL, XML
 - SQLite und MSSQL
 - Datei-Upload über Weboberfläche
 - Dateivorschau vor dem Run
@@ -47,7 +47,7 @@ Der Fokus liegt auf Wiederholbarkeit, Nachvollziehbarkeit und klarer Konfigurati
 
 ### Ausgabe
 
-- CSV, JSONL, SQLite, MSSQL
+- CSV, XLSX, JSON, JSONL, XML, SQLite, MSSQL
 - Kompletter Input, nur Schlüsselspalte oder gar kein Input im Output
 - Auswahl konkreter Output-Felder
 - Dateivorschau im Output-Bereich der Weboberfläche
