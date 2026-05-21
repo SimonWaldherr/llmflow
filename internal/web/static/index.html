@@ -663,6 +663,20 @@ textarea {
   flex-wrap: wrap;
 }
 
+.export-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: nowrap;
+}
+
+.export-controls select {
+  width: auto;
+  min-width: 150px;
+  padding: 4px 8px;
+  font-size: 12px;
+}
+
 .preview-box,
 .log-box {
   border: 1px solid var(--border);
@@ -1339,6 +1353,21 @@ textarea {
       <div class="hint">Write the result you need in plain language, for example: "For every row, decide whether shipping must be done by forwarding agent and explain why."</div>
       <div id="suggest-status" class="suggest-status"></div>
     </div>
+    <div class="quick-grid" style="margin-top:12px">
+      <div class="form-group">
+        <label>Job Title</label>
+        <input id="q-name" type="text" placeholder="e.g. freight classification">
+      </div>
+      <div class="form-group">
+        <label>Result Format</label>
+        <select id="q-response-format" onchange="onResponseFormatChange()">
+          <option value="">JSON object (single response field)</option>
+          <option value="json">JSON (recommended)</option>
+          <option value="xml">XML output (backend conversion)</option>
+          <option value="csv">CSV output (backend conversion)</option>
+        </select>
+      </div>
+    </div>
   </div>
 
   <div id="quick-card-provider" class="section-card">
@@ -1450,10 +1479,6 @@ textarea {
         <input id="q-workers" type="number" value="2" min="1" max="32">
         <div class="hint" id="q-workers-hint">Workers process rows in parallel. Use 1-2 for small tests; the server limit is applied automatically.</div>
       </div>
-      <div class="form-group">
-        <label>Job Name (optional)</label>
-        <input id="q-name" type="text" placeholder="my run">
-      </div>
     </div>
 
     <div class="structured-output-card">
@@ -1462,16 +1487,6 @@ textarea {
         <span style="font-size:12px;color:var(--text-muted)">Use this for deterministic columns and strict output contracts.</span>
       </div>
       <div class="quick-grid">
-        <div class="form-group quick-full">
-          <label>Response Format</label>
-          <select id="q-response-format" onchange="onResponseFormatChange()">
-            <option value="">JSON object (single response field)</option>
-            <option value="json">JSON (recommended)</option>
-            <option value="xml">XML output (backend conversion)</option>
-            <option value="csv">CSV output (backend conversion)</option>
-          </select>
-        </div>
-
         <div class="form-group quick-full" id="response-schema-group" style="display:none">
           <label>Schema (optional, one field per line)</label>
           <textarea id="q-response-schema" class="schema-editor" rows="4" placeholder="needs_freight: true|false&#10;shipping_type: DHL|UPS|Forwarder&#10;reason: short sentence"></textarea>
@@ -1704,7 +1719,7 @@ textarea {
     </div>
   </details>
 
-  <div class="btn-row">
+  <div class="btn-row ui-expert-only">
     <button class="btn btn-secondary" onclick="generateYAML()">Generate YAML</button>
     <button class="btn btn-secondary" onclick="validateQuick()">Validate</button>
     <button class="btn btn-primary" onclick="runQuick(false)">Run</button>
@@ -2656,13 +2671,22 @@ function renderFileTable(containerId, files, dir) {
 function renderOutputDownloadLinks(file) {
   const name = file.name || '';
   const base = `/api/files/download/output/${encodeURIComponent(name)}`;
-  const formats = ['jsonl', 'json', 'csv', 'tsv', 'xlsx', 'xml'];
   if (!name.toLowerCase().endsWith('.jsonl')) {
     return `<a class="btn btn-sm btn-secondary" href="${base}" download="${escHtml(name)}">Download</a>`;
   }
-  return formats.map(fmt =>
-    `<a class="btn btn-sm btn-secondary" href="${base}?format=${fmt}" download>${fmt.toUpperCase()}</a>`
-  ).join('');
+  const options = [
+    ['jsonl', 'JSONL'],
+    ['json', 'JSON'],
+    ['xlsx', 'Excel XLSX'],
+    ['xml', 'XML'],
+    ['tsv', 'TSV'],
+    ['csv-us', 'CSV US (comma)'],
+    ['csv-de', 'CSV DE (semicolon)'],
+  ].map(([value, label]) => `<option value="${value}">${label}</option>`).join('');
+  return `<span class="export-controls">
+    <select class="js-export-format" aria-label="Export format for ${escHtml(name)}">${options}</select>
+    <button class="btn btn-sm btn-secondary js-export-file" type="button" data-url="${base}">Export</button>
+  </span>`;
 }
 
 /**
@@ -4254,6 +4278,14 @@ document.addEventListener('click', e => {
   const inputBtn = e.target.closest('.js-use-file-input');
   if (inputBtn) {
     useFileAsInput(inputBtn.dataset.path || '', inputBtn.dataset.name || '');
+    return;
+  }
+  const exportBtn = e.target.closest('.js-export-file');
+  if (exportBtn) {
+    const controls = exportBtn.closest('.export-controls');
+    const select = controls ? controls.querySelector('.js-export-format') : null;
+    const format = select ? select.value : 'jsonl';
+    window.location.href = (exportBtn.dataset.url || '') + '?format=' + encodeURIComponent(format);
     return;
   }
   const deleteBtn = e.target.closest('.js-delete-file');

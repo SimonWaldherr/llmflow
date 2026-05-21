@@ -937,7 +937,7 @@ func (s *Server) handleDeleteFile(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleDownloadFile serves a file from data/input or data/output for download.
-// Output JSONL files can be converted on demand with ?format=jsonl|json|csv|tsv|xml|xlsx.
+// Output JSONL files can be converted on demand with ?format=jsonl|json|csv|csv-us|csv-de|tsv|xml|xlsx.
 func (s *Server) handleDownloadFile(w http.ResponseWriter, r *http.Request) {
 	dir := r.PathValue("dir")
 	name := r.PathValue("name")
@@ -960,7 +960,7 @@ func (s *Server) handleDownloadFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	format := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("format")))
+	format := normalizeDownloadFormat(r.URL.Query().Get("format"))
 	if format != "" {
 		if dir != "output" || strings.ToLower(filepath.Ext(name)) != ".jsonl" {
 			http.Error(w, "format conversion is only supported for output JSONL files", http.StatusBadRequest)
@@ -1033,10 +1033,23 @@ func renderConvertedDownload(ctx context.Context, baseName, format string, recor
 			return "", "", nil, fmt.Errorf("marshal json export: %w", err)
 		}
 		return baseName + ".json", "application/json", payload, nil
-	case "csv", "tsv", "xml", "xlsx":
+	case "csv", "csv-de", "tsv", "xml", "xlsx":
 		return renderStructuredDownload(ctx, baseName, format, records)
 	default:
 		return "", "", nil, fmt.Errorf("unsupported export format %q", format)
+	}
+}
+
+func normalizeDownloadFormat(raw string) string {
+	format := strings.ToLower(strings.TrimSpace(raw))
+	format = strings.ReplaceAll(format, "_", "-")
+	switch format {
+	case "csv-us", "csv-american", "csv-comma", "us-csv", "american-csv":
+		return "csv"
+	case "csv-de", "csv-deutsch", "csv-german", "csv-semicolon", "de-csv", "german-csv":
+		return "csv-de"
+	default:
+		return format
 	}
 }
 
@@ -1063,6 +1076,9 @@ func renderStructuredDownload(ctx context.Context, baseName, format string, reco
 		cfg.CSV.Delimiter = "\t"
 	} else if format == "csv" {
 		cfg.CSV.Delimiter = ","
+	} else if format == "csv-de" {
+		cfg.Type = "csv"
+		cfg.CSV.Delimiter = ";"
 	}
 
 	writer, err := output.New(cfg)
@@ -1091,6 +1107,8 @@ func downloadExtension(format string) string {
 		return ".json"
 	case "csv":
 		return ".csv"
+	case "csv-de":
+		return ".csv"
 	case "tsv":
 		return ".tsv"
 	case "xml":
@@ -1107,6 +1125,8 @@ func downloadContentType(format string) string {
 	case "json":
 		return "application/json"
 	case "csv":
+		return "text/csv; charset=utf-8"
+	case "csv-de":
 		return "text/csv; charset=utf-8"
 	case "tsv":
 		return "text/tab-separated-values; charset=utf-8"
@@ -1214,7 +1234,7 @@ func (s *Server) handleOpenAPI(w http.ResponseWriter, _ *http.Request) {
 				},
 			},
 			"/api/files":                       map[string]any{"get": map[string]any{"summary": "List input and output files", "responses": map[string]any{"200": map[string]any{"description": "Files"}}}},
-			"/api/files/download/{dir}/{name}": map[string]any{"get": map[string]any{"summary": "Download a file; output JSONL supports ?format=jsonl|json|csv|tsv|xml|xlsx", "responses": map[string]any{"200": map[string]any{"description": "File download"}}}},
+			"/api/files/download/{dir}/{name}": map[string]any{"get": map[string]any{"summary": "Download a file; output JSONL supports ?format=jsonl|json|csv|csv-us|csv-de|tsv|xml|xlsx", "responses": map[string]any{"200": map[string]any{"description": "File download"}}}},
 			"/api/models":                      map[string]any{"post": map[string]any{"summary": "Fetch available models", "responses": map[string]any{"200": map[string]any{"description": "Models"}}}},
 			"/api/detect":                      map[string]any{"get": map[string]any{"summary": "Detect local providers", "responses": map[string]any{"200": map[string]any{"description": "Providers"}}}},
 			"/api/suggest":                     map[string]any{"post": map[string]any{"summary": "Generate quick setup suggestions", "responses": map[string]any{"200": map[string]any{"description": "Suggestion"}}}},

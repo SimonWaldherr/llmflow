@@ -536,7 +536,7 @@ func TestFilesAPI(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(inputDir, "sample.csv"), []byte("a,b\n1,2\n"), 0o640); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(outputDir, "result.jsonl"), []byte("{\"ok\":true}\n"), 0o640); err != nil {
+	if err := os.WriteFile(filepath.Join(outputDir, "result.jsonl"), []byte("{\"ok\":true,\"name\":\"Alice\"}\n"), 0o640); err != nil {
 		t.Fatal(err)
 	}
 
@@ -595,11 +595,45 @@ func TestFilesAPI(t *testing.T) {
 	if len(rows) != 2 {
 		t.Fatalf("csv rows = %d, want %d", len(rows), 2)
 	}
-	if got, want := rows[0], []string{"ok"}; len(got) != len(want) || got[0] != want[0] {
+	if got, want := rows[0], []string{"name", "ok"}; len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
 		t.Fatalf("csv header = %#v, want %#v", got, want)
 	}
-	if got, want := rows[1], []string{"true"}; len(got) != len(want) || got[0] != want[0] {
+	if got, want := rows[1], []string{"Alice", "true"}; len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
 		t.Fatalf("csv row = %#v, want %#v", got, want)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/files/download/output/result.jsonl?format=csv-us", nil)
+	req.SetPathValue("dir", "output")
+	req.SetPathValue("name", "result.jsonl")
+	rec = httptest.NewRecorder()
+	srv.handleDownloadFile(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("csv-us export status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	rows, err = csv.NewReader(strings.NewReader(rec.Body.String())).ReadAll()
+	if err != nil {
+		t.Fatalf("parse csv-us export: %v", err)
+	}
+	if got, want := rows[1], []string{"Alice", "true"}; len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("csv-us row = %#v, want %#v", got, want)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/files/download/output/result.jsonl?format=csv-de", nil)
+	req.SetPathValue("dir", "output")
+	req.SetPathValue("name", "result.jsonl")
+	rec = httptest.NewRecorder()
+	srv.handleDownloadFile(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("csv-de export status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	deReader := csv.NewReader(strings.NewReader(rec.Body.String()))
+	deReader.Comma = ';'
+	rows, err = deReader.ReadAll()
+	if err != nil {
+		t.Fatalf("parse csv-de export: %v", err)
+	}
+	if got, want := rows[1], []string{"Alice", "true"}; len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("csv-de row = %#v, want %#v", got, want)
 	}
 
 	req = httptest.NewRequest(http.MethodGet, "/api/files/download/output/result.jsonl?format=tsv", nil)
