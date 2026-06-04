@@ -13,15 +13,28 @@ import (
 
 type Config struct {
 	Servers  ServerConfig  `yaml:"servers"`
+	Admin    AdminConfig   `yaml:"admin"`
 	Health   HealthConfig  `yaml:"health"`
 	Defaults DefaultConfig `yaml:"defaults"`
 	Backends []BackendSpec `yaml:"backends"`
 	Routes   []RouteSpec   `yaml:"routes"`
+	Policies []PolicySpec  `yaml:"policies"`
 }
 
 type ServerConfig struct {
 	OpenAIAddr string `yaml:"openai_addr"`
 	OllamaAddr string `yaml:"ollama_addr"`
+}
+
+type AdminConfig struct {
+	Addr           string          `yaml:"addr"`
+	EnableGUI      bool            `yaml:"enable_gui"`
+	ReadOnly       bool            `yaml:"read_only"`
+	Token          string          `yaml:"token"`
+	TokenEnv       string          `yaml:"token_env"`
+	MaxSnapshots   int             `yaml:"max_snapshots"`
+	MaxDecisionLog int             `yaml:"max_decision_log"`
+	FeatureFlags   map[string]bool `yaml:"feature_flags"`
 }
 
 type HealthConfig struct {
@@ -81,11 +94,26 @@ type LLMClassifierSpec struct {
 	Routes  map[string][]string `yaml:"routes"`
 }
 
+type PolicySpec struct {
+	Name    string            `yaml:"name"`
+	Type    string            `yaml:"type"`
+	Enabled bool              `yaml:"enabled"`
+	Config  map[string]string `yaml:"config"`
+}
+
 func LoadConfig(path string) (Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return Config{}, fmt.Errorf("read config: %w", err)
 	}
+	cfg, err := LoadConfigBytes(data)
+	if err != nil {
+		return Config{}, err
+	}
+	return cfg, nil
+}
+
+func LoadConfigBytes(data []byte) (Config, error) {
 	var cfg Config
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return Config{}, fmt.Errorf("parse yaml: %w", err)
@@ -97,6 +125,10 @@ func LoadConfig(path string) (Config, error) {
 	return cfg, nil
 }
 
+func (c Config) ToYAML() ([]byte, error) {
+	return yaml.Marshal(c)
+}
+
 func (c *Config) applyDefaults() {
 	if c.Servers.OpenAIAddr == "" {
 		c.Servers.OpenAIAddr = ":1234"
@@ -104,6 +136,25 @@ func (c *Config) applyDefaults() {
 	if c.Servers.OllamaAddr == "" {
 		c.Servers.OllamaAddr = ":11434"
 	}
+	if c.Admin.Addr == "" {
+		c.Admin.Addr = ":18080"
+	}
+	if !c.Admin.EnableGUI {
+		c.Admin.EnableGUI = true
+	}
+	if c.Admin.MaxSnapshots <= 0 {
+		c.Admin.MaxSnapshots = 20
+	}
+	if c.Admin.MaxDecisionLog <= 0 {
+		c.Admin.MaxDecisionLog = 200
+	}
+	if c.Admin.FeatureFlags == nil {
+		c.Admin.FeatureFlags = map[string]bool{}
+	}
+	if c.Admin.Token == "" && c.Admin.TokenEnv != "" {
+		c.Admin.Token = strings.TrimSpace(os.Getenv(c.Admin.TokenEnv))
+	}
+
 	if c.Health.Interval <= 0 {
 		c.Health.Interval = 15 * time.Second
 	}
@@ -112,6 +163,11 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Defaults.Strategy == "" {
 		c.Defaults.Strategy = StrategyWeightedRoundRobin
+	}
+	for i := range c.Policies {
+		if !c.Policies[i].Enabled {
+			c.Policies[i].Enabled = true
+		}
 	}
 	for i := range c.Backends {
 		if c.Backends[i].Weight <= 0 {
@@ -192,6 +248,20 @@ func (c Config) Validate() error {
 	}
 	if err := validateStrategy(c.Defaults.Strategy); err != nil {
 		return err
+	}
+	if c.Admin.MaxDecisionLog < 10 {
+		return errors.New("admin.max_decision_log must be >= 10")
+	}
+	if c.Admin.MaxSnapshots < 2 {
+		return errors.New("admin.max_snapshots must be >= 2")
+	}
+	for i, p := range c.Policies {
+		if strings.TrimSpace(p.Name) == "" {
+			return fmt.Errorf("policies[%d].name is required", i)
+		}
+		if strings.TrimSpace(p.Type) == "" {
+			return fmt.Errorf("policies[%d].type is required", i)
+		}
 	}
 	return nil
 }

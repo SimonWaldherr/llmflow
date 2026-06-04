@@ -83,6 +83,7 @@ func (b *Balancer) selectLeastConnections(candidates []*Backend, used map[string
 			continue
 		}
 		score := float64(c.ActiveConnections()+1) / float64(max(1, c.Spec.Weight))
+		// Lower numeric priority wins ties (priority=1 is preferred over priority=10).
 		if score < bestScore || (score == bestScore && selected != nil && c.Spec.Priority < selected.Spec.Priority) {
 			selected = c
 			bestScore = score

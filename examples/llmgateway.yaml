@@ -2,6 +2,17 @@ servers:
   openai_addr: ":1234"
   ollama_addr: ":11434"
 
+admin:
+  addr: ":18080"
+  enable_gui: true
+  read_only: false
+  token_env: LLMGATEWAY_ADMIN_TOKEN
+  max_snapshots: 30
+  max_decision_log: 500
+  feature_flags:
+    llm_router_v2: true
+    semantic_routing_preview: false
+
 health:
   interval: 10s
   timeout: 3s
@@ -72,3 +83,10 @@ routes:
         coding: [local-ollama]
         reasoning: [local-llama-cpp]
         default: [openai-mini]
+
+policies:
+  - name: require-tenant-header
+    type: header_required
+    enabled: false
+    config:
+      header: X-Tenant-ID

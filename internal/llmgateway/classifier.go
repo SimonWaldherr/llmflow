@@ -131,7 +131,11 @@ func (c *Classifier) queryLabel(ctx context.Context, backend *Backend, prompt st
 func normalizeLabel(s string) string {
 	s = strings.TrimSpace(strings.ToLower(s))
 	s = strings.Trim(s, "\"'`")
-	s = strings.Fields(s)[0]
+	fields := strings.Fields(s)
+	if len(fields) == 0 {
+		return ""
+	}
+	s = fields[0]
 	return strings.TrimSuffix(s, ".")
 }
 

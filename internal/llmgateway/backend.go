@@ -109,20 +109,11 @@ func (m *BackendManager) HealthSnapshot() map[string]map[string]any {
 	return result
 }
 
-func (m *BackendManager) StartHealthChecks(ctx context.Context, hc HealthConfig, client *http.Client, onCheck func(*Backend)) {
-	ticker := time.NewTicker(hc.Interval)
-	defer ticker.Stop()
-	for {
-		for _, b := range m.All() {
-			m.checkBackend(ctx, b, hc, client)
-			if onCheck != nil {
-				onCheck(b)
-			}
-		}
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
+func (m *BackendManager) CheckAll(ctx context.Context, hc HealthConfig, client *http.Client, onCheck func(*Backend)) {
+	for _, b := range m.All() {
+		m.checkBackend(ctx, b, hc, client)
+		if onCheck != nil {
+			onCheck(b)
 		}
 	}
 }
@@ -137,7 +128,7 @@ func (m *BackendManager) checkBackend(ctx context.Context, b *Backend, hc Health
 
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	b.lastChecked = time.Now()
+	b.lastChecked = time.Now().UTC()
 	b.lastDuration = d
 	if errText != "" || status >= 500 {
 		b.healthy = false

@@ -22,6 +22,7 @@ func main() {
 		showVer   bool
 		openAIAdr string
 		ollamaAdr string
+		adminAdr  string
 	)
 
 	fs := flag.NewFlagSet("llmgateway", flag.ContinueOnError)
@@ -31,6 +32,7 @@ func main() {
 	fs.BoolVar(&showVer, "version", false, "print version and exit")
 	fs.StringVar(&openAIAdr, "openai-addr", "", "override OpenAI listen address")
 	fs.StringVar(&ollamaAdr, "ollama-addr", "", "override Ollama listen address")
+	fs.StringVar(&adminAdr, "admin-addr", "", "override admin/control-plane listen address")
 
 	if err := fs.Parse(os.Args[1:]); err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -52,6 +54,9 @@ func main() {
 	}
 	if ollamaAdr != "" {
 		cfg.Servers.OllamaAddr = ollamaAdr
+	}
+	if adminAdr != "" {
+		cfg.Admin.Addr = adminAdr
 	}
 
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: parseLogLevel(logLevel)}))

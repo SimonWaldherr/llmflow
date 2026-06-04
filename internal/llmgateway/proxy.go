@@ -11,7 +11,6 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
-	"time"
 )
 
 type requestInfo struct {
@@ -88,27 +87,31 @@ func extractPrompt(payload map[string]any) string {
 	return strings.TrimSpace(strings.Join(parts, "\n"))
 }
 
-func proxyWithFailover(ctx context.Context, client *http.Client, req *http.Request, body []byte, candidates []*Backend) (*http.Response, *Backend, error) {
+func proxyWithFailover(ctx context.Context, client *http.Client, req *http.Request, body []byte, candidates []*Backend) (*http.Response, *Backend, []string, int, error) {
 	if len(candidates) == 0 {
-		return nil, nil, errors.New("no backend candidates")
+		return nil, nil, nil, 0, errors.New("no backend candidates")
 	}
 	var lastErr error
+	attempts := make([]string, 0, len(candidates))
+	failures := 0
 	for _, backend := range candidates {
 		if !backend.IsHealthy() {
 			continue
 		}
+		attempts = append(attempts, backend.Spec.Name)
 		resp, err := proxyOnce(ctx, client, req, body, backend)
 		if err == nil {
 			backend.MarkSuccess()
-			return resp, backend, nil
+			return resp, backend, attempts, failures, nil
 		}
 		backend.MarkFailure(err)
 		lastErr = err
+		failures++
 	}
 	if lastErr == nil {
 		lastErr = errors.New("all candidates unavailable")
 	}
-	return nil, nil, lastErr
+	return nil, nil, attempts, failures, lastErr
 }
 
 func proxyOnce(ctx context.Context, client *http.Client, req *http.Request, body []byte, backend *Backend) (*http.Response, error) {
@@ -130,7 +133,6 @@ func proxyOnce(ctx context.Context, client *http.Client, req *http.Request, body
 	proxyReq.ContentLength = int64(len(proxyBody))
 	proxyReq.Header.Set("Content-Length", strconv.Itoa(len(proxyBody)))
 
-	start := time.Now()
 	resp, err := client.Do(proxyReq)
 	if err != nil {
 		return nil, err
@@ -139,7 +141,6 @@ func proxyOnce(ctx context.Context, client *http.Client, req *http.Request, body
 		resp.Body.Close()
 		return nil, fmt.Errorf("status %d", resp.StatusCode)
 	}
-	_ = start
 	return resp, nil
 }
 
