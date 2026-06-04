@@ -53,6 +53,24 @@ llmflow validate --config examples/config.yaml
 llmflow run     --config examples/config.yaml
 ```
 
+## llmgateway
+
+The repository also contains `llmgateway`, a standalone OpenAI- and Ollama-compatible
+gateway/router/load-balancer for local and remote LLM backends.
+
+```bash
+go run ./cmd/llmgateway --config examples/llmgateway.yaml
+```
+
+Default listener addresses:
+
+- OpenAI-compatible API: `:1234`
+- Ollama-compatible API: `:11434`
+
+It supports weighted round robin + least-connections balancing, health checks,
+keyword/token/rule routing, optional LLM-based classification, and automatic
+failover/fallback chains.
+
 ### CLI command overview
 
 - `llmflow validate --config <file>`: parse and validate configuration only.
