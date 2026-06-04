@@ -126,12 +126,18 @@ func (m *Metrics) Prometheus() string {
 	fmt.Fprintf(&b, "# TYPE llmgateway_latency_avg_ms gauge\n")
 	fmt.Fprintf(&b, "llmgateway_latency_avg_ms %d\n", avgLatencyMs)
 
+	fmt.Fprintf(&b, "# HELP llmgateway_backend_requests_total Total requests per backend\n")
+	fmt.Fprintf(&b, "# TYPE llmgateway_backend_requests_total counter\n")
 	for _, key := range sortedKeys(m.backendRequests) {
 		fmt.Fprintf(&b, "llmgateway_backend_requests_total{backend=%q} %d\n", key, m.backendRequests[key])
 	}
+	fmt.Fprintf(&b, "# HELP llmgateway_backend_errors_total Total backend errors\n")
+	fmt.Fprintf(&b, "# TYPE llmgateway_backend_errors_total counter\n")
 	for _, key := range sortedKeys(m.backendErrors) {
 		fmt.Fprintf(&b, "llmgateway_backend_errors_total{backend=%q} %d\n", key, m.backendErrors[key])
 	}
+	fmt.Fprintf(&b, "# HELP llmgateway_route_hits_total Route hit count\n")
+	fmt.Fprintf(&b, "# TYPE llmgateway_route_hits_total counter\n")
 	for _, key := range sortedKeys(m.routeHits) {
 		fmt.Fprintf(&b, "llmgateway_route_hits_total{route=%q} %d\n", key, m.routeHits[key])
 	}

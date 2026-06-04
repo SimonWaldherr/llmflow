@@ -416,8 +416,8 @@ func (g *Gateway) applyConfigHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	if cfg.Servers.OpenAIAddr != g.openai.Addr || cfg.Servers.OllamaAddr != g.ollama.Addr || cfg.Admin.Addr != g.admin.Addr {
-		http.Error(w, "listen addresses cannot be hot-reloaded; restart required", http.StatusBadRequest)
+	if err := g.validateListenerAddresses(cfg); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	if req.Source == "" {
@@ -622,6 +622,13 @@ func (g *Gateway) ensureRequestID(r *http.Request) string {
 	}
 	next := g.reqID.Add(1)
 	return fmt.Sprintf("req-%d", next)
+}
+
+func (g *Gateway) validateListenerAddresses(cfg Config) error {
+	if cfg.Servers.OpenAIAddr != g.openai.Addr || cfg.Servers.OllamaAddr != g.ollama.Addr || cfg.Admin.Addr != g.admin.Addr {
+		return fmt.Errorf("listen addresses cannot be hot-reloaded; restart required")
+	}
+	return nil
 }
 
 func writeJSON(w http.ResponseWriter, payload any) {
