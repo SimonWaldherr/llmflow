@@ -167,8 +167,15 @@ func (rm *RuntimeManager) AddDecision(ev DecisionEvent) {
 func (rm *RuntimeManager) Decisions(limit int) []DecisionEvent {
 	rm.mu.RLock()
 	defer rm.mu.RUnlock()
+	max := len(rm.decisions)
+	if state := rm.state; state != nil && state.cfg.Admin.MaxDecisionLog > 0 && state.cfg.Admin.MaxDecisionLog < max {
+		max = state.cfg.Admin.MaxDecisionLog
+	}
 	if limit <= 0 || limit > len(rm.decisions) {
 		limit = len(rm.decisions)
+	}
+	if limit > max {
+		limit = max
 	}
 	start := len(rm.decisions) - limit
 	out := make([]DecisionEvent, limit)

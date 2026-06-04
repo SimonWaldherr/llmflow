@@ -139,9 +139,6 @@ func (c *Config) applyDefaults() {
 	if c.Admin.Addr == "" {
 		c.Admin.Addr = ":18080"
 	}
-	if !c.Admin.EnableGUI {
-		c.Admin.EnableGUI = true
-	}
 	if c.Admin.MaxSnapshots <= 0 {
 		c.Admin.MaxSnapshots = 20
 	}
@@ -163,11 +160,6 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Defaults.Strategy == "" {
 		c.Defaults.Strategy = StrategyWeightedRoundRobin
-	}
-	for i := range c.Policies {
-		if !c.Policies[i].Enabled {
-			c.Policies[i].Enabled = true
-		}
 	}
 	for i := range c.Backends {
 		if c.Backends[i].Weight <= 0 {
