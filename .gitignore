@@ -1,4 +1,9 @@
 bin/
+llmflow
+llmgateway
+*.exe
+*.test
+*.out
 data/input/
 data/output/
 data/jobs

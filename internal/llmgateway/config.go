@@ -67,6 +67,16 @@ type BackendSpec struct {
 	Disabled      bool              `yaml:"disabled"`
 }
 
+const (
+	BackendTypeOpenAI    = "openai"
+	BackendTypeAzure     = "azure"
+	BackendTypeGemini    = "gemini"
+	BackendTypeOllama    = "ollama"
+	BackendTypeLMStudio  = "lmstudio"
+	BackendTypeAnthropic = "anthropic"
+	BackendTypeGeneric   = "generic"
+)
+
 type RouteSpec struct {
 	Name       string             `yaml:"name"`
 	Priority   int                `yaml:"priority"`
@@ -169,11 +179,7 @@ func (c *Config) applyDefaults() {
 			c.Backends[i].Timeout = 90 * time.Second
 		}
 		if c.Backends[i].HealthPath == "" {
-			if strings.EqualFold(c.Backends[i].Type, "ollama") {
-				c.Backends[i].HealthPath = "/api/tags"
-			} else {
-				c.Backends[i].HealthPath = "/v1/models"
-			}
+			c.Backends[i].HealthPath = defaultHealthPathForType(c.Backends[i].Type)
 		}
 	}
 	for i := range c.Routes {
@@ -276,4 +282,17 @@ func validateStrategy(name string) error {
 		return fmt.Errorf("unsupported strategy %q", name)
 	}
 	return nil
+}
+
+func defaultHealthPathForType(backendType string) string {
+	switch strings.ToLower(strings.TrimSpace(backendType)) {
+	case BackendTypeOllama:
+		return "/api/tags"
+	case BackendTypeGemini:
+		return "/models"
+	case BackendTypeAnthropic, BackendTypeOpenAI, BackendTypeAzure, BackendTypeLMStudio, BackendTypeGeneric:
+		return "/v1/models"
+	default:
+		return "/health"
+	}
 }

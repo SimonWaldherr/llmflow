@@ -62,28 +62,61 @@ func (c *Classifier) Classify(ctx context.Context, route RouteSpec, in RouteInpu
 }
 
 func (c *Classifier) queryLabel(ctx context.Context, backend *Backend, prompt string) (string, error) {
+	backendType := strings.ToLower(strings.TrimSpace(backend.Spec.Type))
+	if backendType == "" {
+		backendType = BackendTypeOpenAI
+	}
+	model := firstNonEmpty(backend.Spec.Models...)
+
 	payload := map[string]any{
-		"model": firstNonEmpty(backend.Spec.Models...),
+		"model": model,
 		"messages": []map[string]string{
 			{"role": "system", "content": "You are a routing classifier."},
 			{"role": "user", "content": prompt},
 		},
 		"max_tokens": 16,
 	}
-	if strings.EqualFold(backend.Spec.Type, "ollama") {
+	target := joinTargetURL(backend.URL, "/v1/chat/completions")
+	switch backendType {
+	case BackendTypeOllama:
 		payload = map[string]any{
-			"model":  firstNonEmpty(backend.Spec.Models...),
+			"model":  model,
 			"prompt": prompt,
 			"stream": false,
 		}
+		target = joinTargetURL(backend.URL, "/api/generate")
+	case BackendTypeAnthropic:
+		payload = map[string]any{
+			"model":      model,
+			"max_tokens": 16,
+			"messages": []map[string]string{
+				{"role": "user", "content": prompt},
+			},
+		}
+		target = joinTargetURL(backend.URL, "/v1/messages")
+	case BackendTypeGemini:
+		payload = map[string]any{
+			"contents": []map[string]any{
+				{
+					"role": "user",
+					"parts": []map[string]string{
+						{"text": prompt},
+					},
+				},
+			},
+			"generationConfig": map[string]any{
+				"maxOutputTokens": 16,
+				"temperature":     0,
+			},
+		}
+		if strings.TrimSpace(model) == "" {
+			return "", fmt.Errorf("classifier backend %q requires a model", backend.Spec.Name)
+		}
+		target = joinTargetURL(backend.URL, "/models/"+model+":generateContent")
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return "", err
-	}
-	target := joinTargetURL(backend.URL, "/v1/chat/completions")
-	if strings.EqualFold(backend.Spec.Type, "ollama") {
-		target = joinTargetURL(backend.URL, "/api/generate")
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, target, bytes.NewReader(body))
 	if err != nil {
@@ -103,7 +136,8 @@ func (c *Classifier) queryLabel(ctx context.Context, backend *Backend, prompt st
 	if resp.StatusCode >= 300 {
 		return "", fmt.Errorf("classifier status %d", resp.StatusCode)
 	}
-	if strings.EqualFold(backend.Spec.Type, "ollama") {
+	switch backendType {
+	case BackendTypeOllama:
 		var out struct {
 			Response string `json:"response"`
 		}
@@ -111,7 +145,41 @@ func (c *Classifier) queryLabel(ctx context.Context, backend *Backend, prompt st
 			return "", err
 		}
 		return normalizeLabel(out.Response), nil
+	case BackendTypeAnthropic:
+		var out struct {
+			Content []struct {
+				Type string `json:"type"`
+				Text string `json:"text"`
+			} `json:"content"`
+		}
+		if err := json.Unmarshal(raw, &out); err != nil {
+			return "", err
+		}
+		for _, item := range out.Content {
+			if strings.EqualFold(item.Type, "text") && strings.TrimSpace(item.Text) != "" {
+				return normalizeLabel(item.Text), nil
+			}
+		}
+		return "", fmt.Errorf("classifier returned no text content")
+	case BackendTypeGemini:
+		var out struct {
+			Candidates []struct {
+				Content struct {
+					Parts []struct {
+						Text string `json:"text"`
+					} `json:"parts"`
+				} `json:"content"`
+			} `json:"candidates"`
+		}
+		if err := json.Unmarshal(raw, &out); err != nil {
+			return "", err
+		}
+		if len(out.Candidates) == 0 || len(out.Candidates[0].Content.Parts) == 0 {
+			return "", fmt.Errorf("classifier returned no candidates")
+		}
+		return normalizeLabel(out.Candidates[0].Content.Parts[0].Text), nil
 	}
+
 	var out struct {
 		Choices []struct {
 			Message struct {
