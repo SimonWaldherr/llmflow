@@ -1,0 +1,92 @@
+servers:
+  openai_addr: ":1234"
+  ollama_addr: ":11434"
+
+admin:
+  addr: ":18080"
+  enable_gui: true
+  read_only: false
+  token_env: LLMGATEWAY_ADMIN_TOKEN
+  max_snapshots: 30
+  max_decision_log: 500
+  feature_flags:
+    llm_router_v2: true
+    semantic_routing_preview: false
+
+health:
+  interval: 10s
+  timeout: 3s
+
+defaults:
+  strategy: weighted_round_robin
+  backends: [openai-mini, local-ollama]
+  fallback: [local-llama-cpp]
+
+backends:
+  - name: openai-mini
+    type: openai
+    url: https://api.openai.com/v1
+    weight: 3
+    priority: 10
+    context_length: 128000
+    models: [gpt-5.4-mini]
+    headers:
+      Authorization: ******
+    tags: [cloud, cheap]
+    capabilities: [chat, tools]
+    cost_per_1m: 0.35
+
+  - name: local-ollama
+    type: ollama
+    url: http://127.0.0.1:11435
+    weight: 2
+    priority: 20
+    context_length: 16384
+    health_path: /api/tags
+    models: [qwen3:14b, deepseek-r1:8b]
+    tags: [local, coding]
+    capabilities: [chat, code, long-context]
+
+  - name: local-llama-cpp
+    type: openai
+    url: http://127.0.0.1:8080/v1
+    weight: 1
+    priority: 30
+    context_length: 32768
+    models: [llama3.1:70b]
+    tags: [local, fallback]
+    capabilities: [chat, reasoning]
+
+routes:
+  - name: coding-route
+    priority: 100
+    strategy: least_connections
+    keywords: [code, golang, sql, debug, bugfix, refactor]
+    backends: [local-ollama]
+    fallback: [openai-mini, local-llama-cpp]
+
+  - name: long-context-route
+    priority: 90
+    min_tokens: 3000
+    strategy: weighted_round_robin
+    backends: [local-llama-cpp, local-ollama]
+    fallback: [openai-mini]
+
+  - name: classifier-route
+    priority: 80
+    paths: ["v1/chat/*", "api/chat"]
+    backends: [openai-mini]
+    classifier:
+      backend: local-ollama
+      prompt: "Ordne den Prompt in eine Klasse ein: coding, reasoning, default. Gib nur das Label zurück. Prompt: {{prompt}}"
+      routes:
+        coding: [local-ollama]
+        reasoning: [local-llama-cpp]
+        default: [openai-mini]
+
+policies:
+  - name: require-tenant-header
+    type: header_required
+    enabled: false
+    config:
+      header: X-Tenant-ID
