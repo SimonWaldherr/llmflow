@@ -59,7 +59,7 @@ backends:
     type: anthropic
     url: https://api.anthropic.com
     disabled: true
-    models: [claude-sonnet-4-5]
+    models: [claude-3-5-sonnet-latest]
     headers:
       x-api-key: YOUR_ANTHROPIC_API_KEY
       anthropic-version: "2023-06-01"
