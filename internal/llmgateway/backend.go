@@ -159,6 +159,9 @@ func probeBackend(ctx context.Context, client *http.Client, b *Backend) (status 
 	if err != nil {
 		return 0, err.Error()
 	}
+	for k, v := range b.Spec.Headers {
+		req.Header.Set(k, v)
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return 0, err.Error()

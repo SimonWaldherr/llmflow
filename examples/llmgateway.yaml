@@ -47,6 +47,31 @@ backends:
     tags: [local, coding]
     capabilities: [chat, code, long-context]
 
+  - name: azure-openai
+    type: azure
+    url: https://YOUR-RESOURCE.openai.azure.com
+    disabled: true
+    models: [YOUR-DEPLOYMENT]
+    headers:
+      api-key: YOUR_AZURE_API_KEY
+
+  - name: anthropic-claude
+    type: anthropic
+    url: https://api.anthropic.com
+    disabled: true
+    models: [claude-sonnet-4-5]
+    headers:
+      x-api-key: YOUR_ANTHROPIC_API_KEY
+      anthropic-version: "2023-06-01"
+
+  - name: gemini-flash
+    type: gemini
+    url: https://generativelanguage.googleapis.com/v1beta
+    disabled: true
+    models: [gemini-2.0-flash]
+    headers:
+      x-goog-api-key: YOUR_GEMINI_API_KEY
+
   - name: local-llama-cpp
     type: openai
     url: http://127.0.0.1:8080/v1

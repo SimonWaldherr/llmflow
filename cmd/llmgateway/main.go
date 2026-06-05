@@ -10,7 +10,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/SimonWaldherr/llmflow/internal/llmgateway"
+	"github.com/SimonWaldherr/llmflow/llmgateway"
 )
 
 var version = "dev"

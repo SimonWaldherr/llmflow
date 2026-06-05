@@ -62,6 +62,12 @@ gateway/router/load-balancer for local and remote LLM backends.
 go run ./cmd/llmgateway --config examples/llmgateway.yaml
 ```
 
+It is also available as an embeddable package:
+
+```go
+import "github.com/SimonWaldherr/llmflow/llmgateway"
+```
+
 Default listener addresses:
 
 - OpenAI-compatible API: `:1234`
@@ -71,6 +77,9 @@ Default listener addresses:
 It supports weighted round robin + least-connections balancing, health checks,
 keyword/token/rule routing, optional LLM-based classification, and automatic
 failover/fallback chains.
+
+Supported backend types include `openai`, `azure`, `anthropic`, `gemini`, `ollama`,
+`lmstudio`, and `generic`.
 
 Control-plane capabilities:
 
