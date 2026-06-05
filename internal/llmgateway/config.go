@@ -278,21 +278,21 @@ func validateStrategy(name string) error {
 	if s == "" {
 		return nil
 	}
-
-	func defaultHealthPathForType(backendType string) string {
-		switch strings.ToLower(strings.TrimSpace(backendType)) {
-		case BackendTypeOllama:
-			return "/api/tags"
-		case BackendTypeGemini:
-			return "/models"
-		case BackendTypeAnthropic, BackendTypeOpenAI, BackendTypeAzure, BackendTypeLMStudio, BackendTypeGeneric:
-			return "/v1/models"
-		default:
-			return "/health"
-		}
-	}
 	if !slices.Contains([]string{StrategyWeightedRoundRobin, StrategyLeastConnections}, s) {
 		return fmt.Errorf("unsupported strategy %q", name)
 	}
 	return nil
+}
+
+func defaultHealthPathForType(backendType string) string {
+	switch strings.ToLower(strings.TrimSpace(backendType)) {
+	case BackendTypeOllama:
+		return "/api/tags"
+	case BackendTypeGemini:
+		return "/models"
+	case BackendTypeAnthropic, BackendTypeOpenAI, BackendTypeAzure, BackendTypeLMStudio, BackendTypeGeneric:
+		return "/v1/models"
+	default:
+		return "/health"
+	}
 }
